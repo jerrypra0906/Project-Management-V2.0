@@ -1,0 +1,84 @@
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,No,Ticket No,Create Date,Initiative Name,Description,Business Impact,Priority,Business Owner / Requestor,Department,IT PIC,Status,Milestone,Start Date,End Date,Remark,Project Doc Link
+,1,,,Coupa,"To transform KPN Corp’s procurement operations into a fully digital, automated, and compliant process. By deploying Coupa as the central e-procurement platform, the project will eliminate manual paperwork, standardize approval workflows, and provide real-time visibility across the entire purchase-to-pay cycle.","•	Efficiency & Automation: Automate procurement workflows to reduce processing time and manual errors.   
+•	Supplier Management: Standardize vendor onboarding, evaluation, and performance tracking.
+•	User Adoption: Ensure system usability with proper training and change management.
+•	Integration: Seamlessly connect Coupa with ERP, HR, and finance systems for accurate data flow.",P0,Edward Philip,Procurement,Firdi,ON TRACK,Pre-Grooming,,,,\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Project Coupa
+,2,,,LogSheet Automation,Automate / digitalize manual logsheet transaction to digital Using android and web apps,,P0,Dominikus,Operation,Firdi,ON TRACK,Development,,Nov-25,"25/09/2025
+New features to update seamlessly starting from .10 on wards, to ensure users on the site using the latest version.
+And will be communicate into WAG whenever we have new version
+All issues has been classified and identified, for the P0 issues will be fixed and roll out to production by 29 Sept 2025 in version .11, for the non P0 will be delivered in the upcoming Phase
+
+
+Phase 1,2 and 3 has Live
+Phase 4 is in progress development eta completed by 1st Oct 25
+Phase 5 start 5 Oct, completed by 16 Oct
+Phase 6 start 16 Oct, completed by 28 Oct
+Phase 7  start 28 Oct, completed by 8 Nov",\\172.30.1.94\downstream\IT\Initiatives\2025\Project\LogSheet Automation
+,3,,,Traffic Control System (Vehicle Card Form),"To monitor the vehicle traffic in plant, using android and web apps",,,Dominikus,Operation,Firdi,ON TRACK,Tech Assessment,,,"Site visit has completed
+Blue Print has completed
+Development is about to start",\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Traffic Control System (Vehicle Card Form)
+,4,,,Maintenance System,,,P0,Dominikus,Operation,Kiki,ON TRACK,Pre-Grooming,,,"25/09/2025
+Blueprint creation will start on W1 Oct 2025
+Blueprint review will conduct on W2 Oct 2025",\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Maintenance System
+,6,,,Asset Management Sistem,"Digitalize asset management processes
+Enhance document security & access control
+Enable timely maintenance & compliance tracking
+Improve asset lifecycle visibility","Minimize manual input and streamline workflows.
+Enable tracking of asset location and status
+Automate maintenance and audit processes
+Deliver dashboards and reports for decision-making
+",P0,Jimmy,HC,Kiki,NOT STARTED,Live,,,"Has Live in corporated
+Resource Constraint HC&GA, will be resume once the new hire join",\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Asset Management Sistem
+,7,,,Shipment Sheet,To digitalized shipmeent sheet from google sheet into system,,P0,"Kelvin, Eddy",Logistic,Kiki,ON TRACK,Testing,1-Jun-25,,"Development is completed
+UAT is in progress (already 2 weeks, waiting feedback from Kelvin William)",\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Shipment Sheet
+,8,,,AP Verification,,,P0,Accounting,Finance,Hendra Go,NOT STARTED,,,,"Upstream has Live for 
+Phase 1(That already use reverse SAP)
+Phase 2(For the rest will be live November)
+",\\172.30.1.94\downstream\IT\Initiatives\2025\Project\AP Verification
+,9,,,Internet Banking,"As a solution, this customized SAP program development connects internet banking functionality with the SAP system so it can be directly integrated in real time with the bank’s application.
+The solution is cloud-based, creating a digital channel between the SAP system and the bank.
+This solution simplifies communication and integrates with modules such as Advanced Payment Management and Bank Communication Management (BCM) for processes such as batching payments through bulk transactions.","Cost Efficiency
+Checks/Giro incur bank charges of around IDR 25,000 per sheet according to the Finance team. When accumulated, this represents a significant expense.
+
+Time Efficiency
+With the integration mechanism from SAP to Internet Banking, the payment input process is much faster, since during sync the payment transaction is automatically posted in SAP and simultaneously the Maker transaction is automatically created in the Internet Banking application.
+
+100% Real-Time Data
+The Bank Ledger in SAP is fully real-time and aligned with the Bank Statement.",P0,Benyamin,Finance,Hendra Go,ON TRACK,Testing,,,"25/09/2025
+Format numbering need to be discuss and finalized by Finance team. Finance team need to create CR for ZLoan. -> not a blocker to increase the CAP
+
+Untuk payment grouping from 1 group, to another group within 1 BPK already avail in Internet banking (not in ZPINO).
+
+
+Production Testing is in Progress n=in EUP for amount <= IDR 20jt
+
+Jerry to set Bi-Weekly meeting to track the progress
+
+Finance Team will share the production testing result today in WA group,
+
+Ben will share the incrementall roll out approach",\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Internet Banking
+,10,,,Budget Production Cost,,,P0,Benyamin,PPIC,,NOT STARTED,,,,,\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Budget Production Cost
+,11,,,RPA for Billing Creation,To automate Invoice and Faktur Pajak creation when the goods is ready to be deliver and send it through email to the customers,"will shorten cash cycles, improve compliance, cut costs, and boost customer satisfaction",P0,Benyamin,Accounting,Ali ,ON TRACK,Pre-Grooming,,,"25/09/2025
+Flow has been finalized, need to finalized the requirement between 29 Sept - 3 Oct
+
+Requirement has been shared to IT
+Jerry to set a meeting in order to discuss the flow changes (Pak Ali, bu Ira, Ben, bu Surya,bu Lina, bu Chenny)",\\172.30.1.94\downstream\IT\Initiatives\2025\Project\RPA for Billing Creation
+,12,,23/09/2025,Logistic SAP,"The Logistics SAP Project aims to design and implement a centralized Logistics database in SAP, integrating data flows between the Trading, Logistics Operation, and Logistics Admin Support teams. The system will enable seamless data consolidation, automated extraction, and real-time reporting, significantly reducing manual work.","Improved Visibility – Provides real-time visibility of logistics details across all contracts, ensuring stakeholders can monitor progress, delivery status, and exceptions instantly.
+
+Operational Efficiency – Eliminates manual consolidation efforts across Trading, Operations, and Admin teams, saving significant man-hours and reducing human error.
+
+Better Decision-Making – Enables accurate and timely data analysis, helping management optimize contract execution, shipment planning, and vendor performance.
+
+Financial Control – Maintains strong oversight on gain/loss quantities, product quality variations, and contract payments, minimizing revenue leakage and strengthening vendor claim management.
+
+Compliance & Governance – Role-based access and audit-ready reports ensure secure, reliable, and compliant handling of contract and logistics data.",P0,Johan,BD,,NOT STARTED,,,,,\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Logistic SAP
+,13,,,MT940 integration SAP,,,P1,Benyamin,Finance,,NOT STARTED,,,,,
+,14,,24/09/2025,Shipping Company,,,P0,Tiksen,Finance,,NOT STARTED,,,,,\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Shipping Company
+,15,,25/09/2025,Ticket & Hotel Invoice Payment Reporting,,,,Jimmy,HC,,NOT STARTED,,,,,\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Ticket & Hotel Invoice Payment Reporting
+,,,25/09/2025,Mass Release Parking Claim DWS,,,,Jimmy,HC,,NOT STARTED,,,,,\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Mass Release Parking Claim DWS
+,,,25/09/2025, Auto Numbering Administrative Letter DWS,,,,Jimmy,HC,,NOT STARTED,,,,,\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Auto Numbering Administrative Letter DWS
+,,,25/09/2025,Medical Claim,"Phase 1 -> Medical Reimbursement.
+Phase 2 ->  Business Travel Reimbursement
+Phase 3 -> others","in order to identify, monitor and track e2e Claim reimbursement",,Jimmy,HC,Gibran dan Roles,ON TRACK,Tech Assessment,,,Currenly in progress mapping master department between SAP vs DarwinBox.,\\172.30.1.94\downstream\IT\Initiatives\2025\Project\Medical Claim

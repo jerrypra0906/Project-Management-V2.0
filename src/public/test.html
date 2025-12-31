@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Test Page</title>
+  </head>
+  <body>
+    <h1>Test Page</h1>
+    <div id="app">Loading...</div>
+    <script>
+      const app = document.getElementById('app');
+      console.log('Test script loaded');
+      
+      async function test() {
+        try {
+          console.log('Fetching data...');
+          const response = await fetch('/api/initiatives?_ts=' + Date.now(), { cache: 'no-store' });
+          console.log('Response status:', response.status);
+          const data = await response.json();
+          console.log('Data received:', data.length, 'items');
+          console.log('First item:', data[0]);
+          
+          app.innerHTML = `
+            <div style="padding: 20px; background: #e0f0ff; border: 2px solid #007acc;">
+              <h2>Test Results</h2>
+              <p>Data count: ${data.length}</p>
+              <p>First item: ${data[0] ? data[0].name : 'No data'}</p>
+              <p>Status: ${response.status}</p>
+            </div>
+          `;
+        } catch (error) {
+          console.error('Test error:', error);
+          app.innerHTML = `<div style="color: red;">Error: ${error.message}</div>`;
+        }
+      }
+      
+      test();
+    </script>
+  </body>
+</html>

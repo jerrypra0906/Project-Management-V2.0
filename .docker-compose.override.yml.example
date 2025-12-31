@@ -1,0 +1,15 @@
+# Example override file for local development
+# Copy this to .docker-compose.override.yml and customize as needed
+version: '3.8'
+
+services:
+  backend:
+    environment:
+      - NODE_ENV=development
+    volumes:
+      # Mount source code for hot reload (requires nodemon in dev)
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+      - ./docs:/app/docs
+      - /app/node_modules
+

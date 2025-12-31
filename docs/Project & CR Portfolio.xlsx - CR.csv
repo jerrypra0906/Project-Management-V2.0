@@ -1,0 +1,182 @@
+,No,Ticket No,Create Date,Initiative Name,Description,Business Impact,Priority,Business Owner / Requestor,Department,IT PIC,Status,Milestone,Start Date,End Date,Remark,Project Doc Link,CR Section 1,,CR Section 2,,CR Section 3,,Development,,SIT,,UAT,,Live,
+,,,,,,,,,,,,,,,,,Start Date,End Date,Start Date,End Date,Start Date,End Date,Start Date,End Date,Start Date,End Date,Start Date,End Date,Start Date,End Date
+,1,,,Penambahan tombol Attachment pada ZPEB,Mempermudah tim tax untuk mengumpulkan dokumen yang diperlukan terkait dengan proses dokumen BC 3.0,,,Febri / Syamsul,BC,Dida,LIVE,Live,,,,,,,,,,,,,,,,,,
+,2,,,Laporan kontrol dokumen BC 4.0 – pemasukan parsial,Mempermudah dalam control tim KB di site untuk mematuhi peraturan Bea Cukai dalam pemasukan BC 4.0 selama 30 hari Kalender,,,Febri / Syamsul,BC,Dida,LIVE,Live,,,,,,,,,,,,,,,,,,
+,3,,,"Development Aset 
+(BC Asset
+- enhancement IT Inventory
+- enhancement ZBC_REKAP_NEW & ZFA_KB_ASSET
+- create printout transfer asset BC (manual))",Menampilkan jumlah pemasukan dan pengeluaran asset pada IT Inventory ,,P0,Benyamin,BC,Dida,ON TRACK,Development,,31-Oct-25,"18/9/2025  -> Development is in progress
+29 – 08 - 2025, Informasi dari IT sedang dilakukan enhancement pada SO",,,,,,,,,,,,,,,
+,4,#ERP0135604,,Perpindahan validasi Approve Proposed & Email POP untuk team BC,"1. Melakukan validasi terhadap Approve Proposed (Ibu Iren)  setelah dilakukan Approve 1 (Ibu Sisca)
+2. Dibuatkan jump email ke unit untuk dibuatkan dokumen BC, agar tidak ada kendala dimana dilakukan pembayaran dulu baru dibuat dokumen BC",,P0,Febri / Syamsul,BC,Hendra Go,NOT STARTED,,,31-Oct-25,"18/9/2025 : IT will review the CR
+Dokumen CR sudah di submit per tanggal 12 Sept 2025",,,,,,,,,,,,,,,
+,5,,,Penambahan kolom Ammount di ZPEB dan Perbaikan Currency  BC 3.0,"1. Penyesuaian nilai barang dari penjualan BC 3.0 akan menggunakan harga barang dari amount billing
+2. Adanya nilai FOB yang sesuai dengan dokumen BC 3.0",,P1,Febri / Syamsul,BC,Dida,NOT STARTED,Tech Assessment,,30-Nov-25,"18/9/2025 : Development not started
+05 Sept 2025, sudah diberikan contoh dokumen BC 3.0",,,,,,,,,,,,,,,
+,6,,,Host to Host BC 3.0,Mempermudah tim KB di site untuk memproses dokumen BC 3.0 dan meminimalisir human error dalam proses dokumen BC,,P1,Febri / Syamsul,BC,,NOT STARTED,Tech Assessment,,31-Dec-25,"25/09/2025
+Proposed to change target date to 30 Nov 2025
+
+Sudah dilakukan mapping, ada update lagi dr CEISA 4.0, lakukan mapping ulang",,,,,,,,,,,,,,,
+,7,,,Penambahan Fitur di IT Inventory dalam pembacaan laporan tanpa membaca SKEP,"a. Pada Inventory terdapat kasus dimana dokumen BC mempunyai beda SKEP namun dengan PO yang sama, pada saat ditarik di IT Inventory, dengan memilih salah satu SKEP maka yang muncul jumlah pada dokumen BC awal, padahal penerimaan sudah selesai.
+b. Pihak BC menginformasikan ke unit bahwa dokumen BC yang dimaksud tidak ada di Inventory, setelah dicek oleh unit, dokumen BC menggunakan SKEP yang baru, sedangkan BC melakukan filter SKEP yang lama ",,P2,Febri / Syamsul,BC,,NOT STARTED,,,,,,,,,,,,,,,,,,,
+,8,,20/05/2025,Perubahan layout PO Procurement Downstream,,,,Edward,Procurement,Dida,ON TRACK,Testing,21/05/2025,,,,,,,,,,,,,,,,,
+,10,,05/06/2025,"Coretax format PJAP (xlsx)
+- enhancement ZVOUT_EXPORT untuk menambahkan opsi export coretaxt PJAP dengan format .xlsx",,,,,Tax,Dida,ON TRACK,Development,,,"18/09/2025 -> Dev Complete ETA
+On develop ABAP (Pandu)
+19/09/2025 : In progress Development
+15/08/2025: On progress ABAP
+16/07/2025: Done sign BPO on section 3",,,,,,,,,,,,,,,
+,12,,,"DO Blocking (Selain CBD)
+",,,,Benyamin,Accounting,Dida,ON TRACK,Development,,,"18/09/2025 -> Dev complete ETA
+On Progress Mas Pandu",,,,,,,,,,,,,,,
+,14,,17/06/2025,Mirroring GR truck ZWB_POST (DWS) to GR (UPS) for inbound B2B transaction,,,,Iwan,BC,Dida,ON TRACK,Testing,,,"18/09/25 -> UAT is in progress
+Terjadwal UAT 11.09.2025",,,,,,,,,,,,,,,
+,15,,,Enhance ZSD_SALESFLOW_RPT Adding FP DP vs FP Realization,,,,Ose,Upstream,Dida,NOT STARTED,,,,"18/09/25 -> CR Section 3 in progress
+Konfirmasi user terkait konsep detail data (double click)",,,,,,,,,,,,,,,
+,16,,,Enhancement DO Blocking (Tambahan pembacaan line item ZPINO),,,,Benyamin,Accounting,Dida,LIVE,Live,,,"18/09/25 -> Live
+
+",,,,,,,,,,,,,,,
+,17,,,"ZMM_TRD_GR1 ditambahkan Radio Button ""Bulking"" mengambil dari inputan ZMM_PKS_BULK",,,,Iwan,BC,Dida,ON TRACK,Testing,,,18/09/25 ->UAT Done. Menunggu form UAT approve,,,,,,,,,,,,,,,
+,18,,,ZMM_TRD_GR1 menambahkan formula Sumproduct untuk setiap mutu Kebun dan mutu Pabrik,,,,Iwan,BC,Dida,ON TRACK,Testing,,,18/09/25 ->UAT Done. Menunggu form UAT approve,,,,,,,,,,,,,,,
+,19,,,Printout contract ZSLIP (All commodity),,,,Nurul,BC,Dida,CANCELLED,,,,Close (blm ada CR),,,,,,,,,,,,,,,
+,20,,07/08/2025,Informasi OA di print out ZNEGO DP & Payoff sumber data dari ZMM_TRD_PO1 dan ZFR_COST (term LOCO & FOB),,,,Iwan,BC,Dida,LIVE,Live,07/08/2025,,"18/09/25 -> not yet reflected in Production, IT need to check
+Schedule UAT 11/09/2025",,,,,,,,,,,,,,,
+,21,,,"Enhancement ZDO_TRX
+Phase 2:
+- SO dengan incoterm LCO otomatis PGI dengan 1 billing
+- SO dengan incoterm FRC, output dari WB net DWS untuk upload Qty terima di SAP Upstream",,,,Novi,Upstream,Dida,ON TRACK,,,,"18/09/25 -> pak Iwan need to reconfirm first
+CR done 100%.
+
+Waiting Develop (Mas Ridwan)",,,,,,,,,,,,,,,
+,22,,,"Menambahkan fitur Upload Document di ZAPPROVAL
+
+ZAPPROVAL tambah field baru nomor fakktur pajak
+
+need new CR from user",,,,Iwan,BC,Dida,CANCELLED,,,,Waiting CR baru dari User,,,,,,,,,,,,,,,
+,23,,,"enhancement ZMM_MASTER_CLAIM (menambahkan parameter mutu : MNI, DNS, DOBI, STONR)",,,,Iwan,BC,Dida,ON TRACK,Development,,,"On Progress Develop ABAP (Tegar) karena membuat
+ 4 t-code baru dan 8 table baru",,,,,,,,,,,,,,,
+,24,,,membuat t-code baru untuk update referensi PO B2B,,,,Iwan,BC,Dida,LIVE,Live,,,"18/09/25 -> Live
+UAT Done. Menunggu form UAT approve",,,,,,,,,,,,,,,
+,25,,07/08/2025,"CR Tgl Jatuh Tempo Payment di T-code ZNEGO, PO1,ME23N & TRD_LOG",,,,Iwan,BC,Dida,ON TRACK,Development,07/08/2025,,On progress ABAP (Pandu),,,,,,,,,,,,,,,
+,26,,18/08/2025,Tambahan Kolom 'Netto' pada ZMM_TRD_REALCLAIM,,,,Nurul,BC,Dida,ON TRACK,Development,19/08/2025,,On progress ABAP (Pandu),,,,,,,,,,,,,,,
+,27,,,"-Add field Estate/Pom di ZSLIP
+-Add alamat di Print DO ZSLIP",,,,Dianti,BC,Dida,ON TRACK,Pre-Grooming,,,"
+18/09/25 -> pak Iwan will FU to get sign off CR section 3
+-FSD 100%
+-Waiting CR section 3
+-FSD review pending ABAP (Waiting List) Mas Ridwan",,,,,,,,,,,,,,,
+,28,,,"Adding Field Sales Contract, PO & No Aju = ZVOUT
+Adding tick Sales Contract & No Aju = ZFI_VOUT",,,P1,OSE,BC,Dida,ON TRACK,Tech Assessment,,,"18/09/25 -> CR fully approved, FSD is about to start
+Revisi beberapa tampilan, Waiting Approval section 3
+
+Approve oleh BPO Ups dan Dws",,,,,,,,,,,,,,,
+,29,,,Enhancement DO blocking for transaction DP after BL (Enable print out DO walaupun DP belum di bayar),,,P1,Nurul,BC,Dida,ON TRACK,Tech Assessment,,,"18/09/25 -> FSD is in progress
+CR already upload lexagle",,,,,,,,,,,,,,,
+,30,,,Perbubahan reference key 3 (FP) menjadi Coretax No jika no FP sudah diupdate,,,,Ose,BC,Dida,NOT STARTED,,,,On Progress CR section 2,,,,,,,,,,,,,,,
+,31,ERP0135182,8 Sept 2025,Enhancement Passing Data to ZVOUT_EXPORT (Coretax),,,P1,Lissyana,TAX,Dida,LIVE,Live,,23 Sept 2025,"23/09/2025 : Transport to production
+22/09/2025 : send form UAT full signed to IT
+19/09/2025 : UAT
+16/09/2025 : Submit CR sign in section 3 BPO DWS & UPS
+10/09/2025 : IT Sent recommendation section 2 , on Progress approval BPO UPS DWS",,,,,,,,,,,,19/09/2025,22/09/2025,23/09/2025,23/09/2025
+,32,ERP0111583,11 Nov 2024,Jurnal Auto Nett Off & Jurbal Outstanding DP-AP,,,,Benyamin,GL,Hendra Go,ON TRACK,,,12 Jun 2025,"15/08/2025: Sign BPO
+05/08/2025: Finalisasi jurnal DP AP Net off dengan Upstream
+12/06/2025: UAT report done di 12 Jun 2025 (masih ada bugs dan sudah diajukan CR Bugs Fixing)",,,,,,,,,,,,,,,
+,33,ERP0118239,6 Feb 2025,Enhance ZBC untuk proses mutasi/transfer aset,,,P2,Iwan,BC,Dida,NOT STARTED,,,,"18/09/25 -> Waiting for SO Asset
+
+22/08/2025 : On progress development sisi sales order dan billing
+06/08/2025: On progress development
+15/07/2025 : On process review BPO in section 3",,,,,,,,,,,,,,,
+,34,ERP0118536,11 Feb 2025,Sales Report (Tax),,,,Benyamin,Tax,Hendra Go,ON TRACK,,,19 Jun 2025,"12/08/2025 : masih ada issue untuk convert UOM, billing qty & price (BL)
+31/07/2025: masih ada bugs pada report dan sudah diraise tiket
+23/07/2025: Transport to production
+30/06/2025: Done UAT",,,,,,,,,,,,,,,
+,35,ERP010546,3 Oct 2024,Report Paid Undelivered & Unpaid Delivered,,,P0,Benyamin,Accounting,Dida,ON TRACK,Testing,,,"18/09/2025: UAT is in progress, there is diffent perspective in regards of FOB. 
+16/09/2025 :  diskusi dengan IT terkait masih adanya ketidaksesuaian dengan data production. 
+1. Subtotal result akan di-fix penjumlahannya
+2. Val type akan diinclude yang ""IN-xxx""
+3. Validasi untuk truck 
+4. CIF tidak muncul nomor STO-nya -> ada kesalahan setting ABAP
+5. FOB : Receive QTY = Receive Factory -> perlu konfirmasi ke Pak Suwandi yang diminta seperti apa ?
+
+08/08/2025: Tim Inventory sudah feedback ke IT terkait permasalahan di report tersebut, ada ketidaksesuaian dengan angka di production, akan dilakukan diskusi Tim Inventory dengan IT. 
+Ada request minta data untuk negative scenario & sudah naik production",,,,,,,,,,,,,,,
+,36,"ERP0108994;
+ERP0121338",9 Oct 2024,Enhancement Tcode Aging AR AP (Report BW),,,P0,Benyamin,Accounting,Hendra Go,ON TRACK,Testing,,13 Jun 2025,"18/09/2025 : UAT is in progress, there is bugs in the report, some of data is not yet presented in the report. Bug Fix target 24 Sept 25, UAT will resume 25 Sept 25
+
+
+01/09/2025 : on progress penambahan kondisi untuk melakukan trigger terhadap no transaksi dokumen yang sama antara field Invoice Reference & Accounting Document agar dapat ter-netoff.
+19/08/2025 : UAT poin revisi dan ada poin revisi tambahan untuk grouping by perhitungan nett off dirubah dari berdasarkan invoice reference menjadi assignment.
+29/07/2025: UAT tahap 2, masih ada yang kurang tepat pada report, akan didiskusikan kembali pada 19 Aug 2025
+14/07/2025: Feedback by user
+13/06/2025: UAT
+",,,,,,,,,,,,,,,
+,37,ERP0108944,9 Oct 2024,Pembuatan Report PO Movement (Report BW),,,,Benyamin,Accounting,Dida,ON TRACK,,,,"29/05/2025 :  On progress setelah report paid undelivered & unpaid delivered
+09/10/2024: submit CR",,,,,,,,,,,,,,,
+,38,ERP0119534,21 Feb 2025,Enhancement pencatatan VAT In Transit & Auto LIV,,,P0,Benyamin,Tax,Hendra Go,ON TRACK,Development,,,"18/09/2025 :New requirement so Auto LIV can be partial factur. for this CR, Gibran will set up a meeting, to agree continue the UAT for this CR (single factur), while new CR will be required for partial factur
+
+13/08/2025 : Auto LIV done, reclass on progress development
+12/08/2025 : Meeting konfirmasi rekonsiliasi Report VAT In & Reclass VAT In Transit to  VAT In atas pembelian PO Trade (Non FFB).
+05/08/2025: Finalisasi jurnal DP AP Net off dengan Upstream
+On progress mekanisme pada auto jurbal outstanding DP-AP dan VAT in Transit",,,,,,,,,,,,21/09/2025,22/09/2025,,
+,39,ERP0122718,9 Apr 2025,DO Blocking enhancement (AR Outstanding),,,P1,Benyamin,Commercial,Dida,ON TRACK,,,,"18/09/2025 : Will discuss further the requirement.
+17/09/2025 : Baseline date diinput dari ZDO_TRX dan data baseline date tersebut akan passing ke table controlling DO blocking.
+11/08/2025: Confirm Approval unblock, Update Customer Tolerance untuk cust baru, Blocking hanya untuk DO tersebut
+28/07/2025: Update: Payment Terms D* also included for Payoff, and Customer Table updated for all RV doc that passed Due Date will be Blocked
+17/07/2025: Done send doc sign by BPO on section 3",,,,,,,,,,,,,,,
+,40,ERP0128002,9 Jun 2025,Perubahan Jurnal Forward ZFW,,,P0,,GL,Hendra Go,NOT STARTED,,,,"25/09/2025 CR need to be replaced, the revision is waiting confirmation from bu Ira
+
+18/09/2025 : Ben will set meeting on 19th Sep 2025, to discuss requirement
+13/06/2025 : update requirement pada CR
+09/06/2025: perlu set meeting requirement ",,,,,,,,,,,,,,,
+,41,ERP0094136,16 Jun 2025,Fixing Bugs ZMB5S - Nett off GRIR vs AP (CR Enhance MB5S [#ERP0094136]),,,,,GL,Hendra Go,ON TRACK,,,,"23/09/2025 : IT updated solution and UAT Form is on review
+17/09/2025 :  saat dilakukan UAT masih ada yang akan diperbaiki yaitu untuk pengambilan angka Inv Amount Group ambil type 86 dan perbaiki rumus field Outstanding IR.
+08/08/2025: Amount pada report masih salah",,,,,,,,,,,,,,,
+,42,ERP0128221,17 Jun 2025,"Penambahan 1 digit pada no faktur pajak terkait perubahan pada Coretax, penyesuaian perubahan rate (11% atau 12%), penambahan fitur export data ke Coretax.",,,P0,,Tax,Hendra Go,ON TRACK,Development,,,"19/09/2025 : Penambahan 1 digit has Live, Waiting development for penambahan dpp nilai lain.
+
+18/08/2025: BPO sign section 3
+Sudah ditambahkan 1 digit dan detail template PJAP sesuai request Tim Tax",,,,,,,,,,,,,,,
+,44,ERP0130614,14 Jul 2025,"Enhancement DP-AP Net Off Report:  
+1. Menambahkan parameter GL account (recon) pada selection
+2. Menambahkan fumgsi auto clearing sesuai reverse date yang ditentukan diawal
+3. Menambahkan kolom informasi document clearing
+4. Menampilkan accounting doc sesuai dengan tanggal yg diinput dr selection",,,,Benyamin,Accounting,Hendra Go,ON TRACK,,,,"22/08/2025 : update dari UPS untuk GL recon selection dan radio button
+19/08/2025 : submit CR yg sudah di sign oleh BPO UPS & DWS di section 3
+05/08/2025: Finalisasi jurnal DP AP Net off dengan Upstream
+12/06/2025: UAT report done di 12 Jun 2025 (masih ada bugs dan sudah diajukan CR Bugs Fixing)
+",,,,,,,,,,,,,,,
+,46,ERP0132632,29 Jul 2025,CR Inet Banking,"1. Menambahkan info ‘Departemen’ pada MIRO untuk validasi & ZPINO untuk menampilkan pada display.
+2. Menambahkan parameter ‘Departemen’ pada ZFI_PR
+OPOSAL.
+3. Untuk matrix approval, jika dibawah 1M approval ke CFO (Bu Susy), jika di atas atau sama dengan 1M ke Dy. CEO/CEO (Bu Bertha).
+4. Penambahan kolom pada email paypro untuk informasi: Departemen, komoditas dari text PINO untuk Trade, sedangkan untuk Non trade diisi Non Trade/Service, Info PINO yang di merge dan subtotal, Interco/3rdparty, nomor rekening vendor.Contoh format Tabel sudah diemail.
+5. Apabila pembayaran yang diajukan terkait dengan Dept. Procurement maka menambahkan fitur untuk approval dimapping ke Purchasing Head (Pak Edward).
+6. Penambahan CC yang ditujukan pada email untuk approval 1,2 dan 3
+",,,Benyamin,Finance,Hendra Go,ON TRACK,Development,,,"21/08/2025 : Untuk poin enhancement CC email Paypro sudah ditransport di server Production, untuk poin lainnya on progress development.
+20/08/2025 : UAT with Tim AP & Finance, ada beberapa poin tambahan yaitu otomatis pemilihan department saat Tim AP membuat PINO, tambahan informasi pada box notifikasi saat validasi error memilih 2 Dept berbeda saat Miro, menampilkan kolom Department di ZFI_Proposal
+19/08/2025 : UAT dan ada poin request tambahan dari UAT.
+14/08/2025: BPO Sign section 3
+",,,,,,,,,,,,,,,
+,47,ERP0134014,22 Aug 2025,Enhancement ZFI_PO_AG,,,,Benyamin,AP,Hendra Go,ON TRACK,,,,,,,,,,,,,,,,,,,
+,48,ERP0134015,22 Aug 2025,Enhancement Print Out FP for Selling Land & Building (ZVOUT)  ,,,,,Tax,Hendra Go,ON TRACK,,,,"10/09/2025 : Transport to production
+08/09/2025 : Submit UAT Signed
+03/09/2025 : UAT
+01/09/2025 : Submit section 3 signed by BPO UPS & DWS
+25/08/2025 : Suggestion dari IT di Section 2",,,,,,,,,,,,,,,
+,49,ERP0131429,17 Jul 2025,Enhancement blocking DO agar satu ZPINO uang masuk dapat terdiri dari beberapa SO (uang muka & pelunasan),,,,Benyamin,AR,Hendra Go,ON TRACK,,,,"09/09/2025 : Transport to production
+20/08/2025 : UAT",,,,,,,,,,,,,,,
+,50,ERP0128457,19 Jun 2025,CR blocking create DO apabila harga di market price lebih dari 20% dari SO - saat create DO check to price limit,,,,Benyamin,Commercial,Yogi,ON TRACK,,,,"16/09/2025 : done submit Section 3 signed BPO 
+15/08/2025: IT FSD",,,,,,,,,,,,,,,
+,51,ERP0135184,8 Sep 2025,Enhancement ZFI_TRX,,,,Benyamin,GL,Hendra Go,,,,,18/09/2025 : UPS & LMI confirmed the CR,,,,,,,,,,,,,,,
+,52,ERP0136041,18 Sep 2025,RPA for Billing Creation,,,,Benyamin,AR,Ali Akbar,,,,,,,,,,,,,,,,,,,,
+,53,ERP0136043,18 Sep 2025,Enhancement Add Display Option Cost Center Name in ZFA_Report,,,,Benyamin,GL,Hendra Go,,,,,,,,,,,,,,,,,,,,
+,54,ERP0136044,18 Sep 2025,Email atas perubahan harga & qty di ZNEGO & ZSLIP,,,,benyamin,Trader,Yogi,,,,,19/09/2025 : section 2 fulfilled by IT,,,,,,,,,,,,,,,
+,55,ERP0136045,18 Sep 2025,Enhancement convert STO OA from Tcode ZPIB,,,,benyamin,EXIM,Yogi,,,,,22/09/2026 : submit form signed by BPO in section 3,,,,,,,,,,,,,,,
+,56,ERP0136052,18 Sep 2025,Change release PR PT PPEI,,,,benyamin,Commercial,Yogi,,,,,,,,,,,,,,,,,,,,
+,57,,,Host to Host BC 2.3,Integrasi antara SAP - CEISA 4.0,,,Syamsul/Febri,BC,,,,,,,,,,,,,,,,,,,,,
+,58,,,Host to Host BC 2.5,Integrasi antara SAP - CEISA 4.0,,,Syamsul/Febri,BC,,,,,,,,,,,,,,,,,,,,,
+,59,,,Host to Host BC 4.1,Integrasi antara SAP - CEISA 4.0,,,Syamsul/Febri,BC,,,,,,,,,,,,,,,,,,,,,
+,60,,,Host to Host BC 2.7 Out,Integrasi antara SAP - CEISA 4.0,,,Syamsul/Febri,BC,,,,,,,,,,,,,,,,,,,,,
+,61,,,BC 2.6.1 & BC 2.6.2,Integrasi antara SAP - CEISA 4.0,,,Syamsul/Febri,BC,,,,,,,,,,,,,,,,,,,,,
+,62,,,Laporan Tambahan - Laporan Audit,Laporan yang dapat menampilkan dari dan BC yang di integrasikan dengan dokumen tax dengan out tagihan billing dan laporan penjualan lokal atau ekspor,,,Syamsul/Febri,BC,,,,,,,,,,,,,,,,,,,,,
+,63,,,Laporan Tambahan - Laporan Kasus,Laporan yang dapat menampilkan data mulai dari ZPEB hingga tagihan Billing SPPBK dan BK Levy,,,Syamsul/Febri,BC,,,,,,,,,,,,,,,,,,,,,

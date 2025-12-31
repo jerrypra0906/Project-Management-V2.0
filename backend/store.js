@@ -1,0 +1,614 @@
+import 'dotenv/config';
+import pkg from 'pg';
+const { Pool } = pkg;
+
+const databaseUrl =
+  process.env.DATABASE_URL ||
+  'postgres://postgres:postgres123@localhost:5434/project_management_v2';
+
+const pool = new Pool({ connectionString: databaseUrl });
+let initialized = false;
+
+async function initializeSchema() {
+  if (initialized) return;
+  initialized = true;
+  const client = await pool.connect();
+  try {
+    const ddl = `
+      CREATE TABLE IF NOT EXISTS "departments" (
+        "id" TEXT PRIMARY KEY,
+        "name" TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS "users" (
+        "id" TEXT PRIMARY KEY,
+        "name" TEXT NOT NULL,
+        "email" TEXT,
+        "role" TEXT,
+        "departmentId" TEXT,
+        "active" BOOLEAN DEFAULT TRUE,
+        "passwordHash" TEXT,
+        "isAdmin" BOOLEAN DEFAULT FALSE,
+        "emailActivated" BOOLEAN DEFAULT FALSE,
+        "activationToken" TEXT,
+        "activationTokenExpiry" TEXT
+      );
+      -- Ensure missing user columns/constraints exist (or are relaxed) for compatibility
+      ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_key";
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "departmentId" TEXT;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "active" BOOLEAN DEFAULT TRUE;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "passwordHash" TEXT;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "isAdmin" BOOLEAN DEFAULT FALSE;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "emailActivated" BOOLEAN DEFAULT FALSE;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "activationToken" TEXT;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "activationTokenExpiry" TEXT;
+      CREATE TABLE IF NOT EXISTS "initiatives" (
+        "id" TEXT PRIMARY KEY,
+        "type" TEXT NOT NULL,
+        "name" TEXT NOT NULL,
+        "ticket" TEXT,
+        "description" TEXT,
+        "businessImpact" TEXT,
+        "priority" TEXT,
+        "businessOwnerId" TEXT,
+        "businessUserIds" TEXT,
+        "departmentId" TEXT,
+        "itPicId" TEXT,
+        "itPicIds" TEXT,
+        "itPmId" TEXT,
+        "itManagerIds" TEXT,
+        "status" TEXT,
+        "milestone" TEXT,
+        "startDate" TEXT,
+        "endDate" TEXT,
+        "remark" TEXT,
+        "documentationLink" TEXT,
+        "createdAt" TEXT,
+        "updatedAt" TEXT
+      );
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "ticket" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "businessImpact" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "priority" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "businessOwnerId" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "businessUserIds" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "departmentId" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itPicId" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itPicIds" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itPmId" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itManagerIds" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "status" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "milestone" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "startDate" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "endDate" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "remark" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "documentationLink" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "updatedAt" TEXT;
+      CREATE TABLE IF NOT EXISTS "changeRequests" (
+        "initiativeId" TEXT PRIMARY KEY,
+        "crSubmissionStart" TEXT,
+        "crSubmissionEnd" TEXT,
+        "developmentStart" TEXT,
+        "developmentEnd" TEXT,
+        "sitStart" TEXT,
+        "sitEnd" TEXT,
+        "uatStart" TEXT,
+        "uatEnd" TEXT,
+        "liveDate" TEXT,
+        "crSection1Start" TEXT,
+        "crSection1End" TEXT,
+        "crSection2Start" TEXT,
+        "crSection2End" TEXT,
+        "crSection3Start" TEXT,
+        "crSection3End" TEXT,
+        "liveStart" TEXT,
+        "liveEnd" TEXT
+      );
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "crSubmissionStart" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "crSubmissionEnd" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "developmentStart" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "developmentEnd" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "sitStart" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "sitEnd" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "uatStart" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "uatEnd" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "liveDate" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "crSection1Start" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "crSection1End" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "crSection2Start" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "crSection2End" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "crSection3Start" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "crSection3End" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "liveStart" TEXT;
+      ALTER TABLE "changeRequests" ADD COLUMN IF NOT EXISTS "liveEnd" TEXT;
+      CREATE TABLE IF NOT EXISTS "tags" (
+        "id" TEXT PRIMARY KEY,
+        "name" TEXT NOT NULL
+      );
+      ALTER TABLE "tags" ADD COLUMN IF NOT EXISTS "name" TEXT;
+      CREATE TABLE IF NOT EXISTS "initiativeTags" (
+        "id" TEXT PRIMARY KEY,
+        "initiativeId" TEXT NOT NULL,
+        "tagId" TEXT NOT NULL
+      );
+      ALTER TABLE "initiativeTags" ADD COLUMN IF NOT EXISTS "initiativeId" TEXT;
+      ALTER TABLE "initiativeTags" ADD COLUMN IF NOT EXISTS "tagId" TEXT;
+      CREATE TABLE IF NOT EXISTS "statusHistory" (
+        "id" TEXT PRIMARY KEY,
+        "initiativeId" TEXT NOT NULL,
+        "status" TEXT NOT NULL,
+        "changedAt" TEXT NOT NULL,
+        "changedBy" TEXT
+      );
+      ALTER TABLE "statusHistory" ADD COLUMN IF NOT EXISTS "initiativeId" TEXT;
+      ALTER TABLE "statusHistory" ADD COLUMN IF NOT EXISTS "status" TEXT;
+      ALTER TABLE "statusHistory" ADD COLUMN IF NOT EXISTS "changedAt" TEXT;
+      ALTER TABLE "statusHistory" ADD COLUMN IF NOT EXISTS "changedBy" TEXT;
+      CREATE TABLE IF NOT EXISTS "milestoneHistory" (
+        "id" TEXT PRIMARY KEY,
+        "initiativeId" TEXT NOT NULL,
+        "milestone" TEXT NOT NULL,
+        "changedAt" TEXT NOT NULL,
+        "changedBy" TEXT
+      );
+      ALTER TABLE "milestoneHistory" ADD COLUMN IF NOT EXISTS "initiativeId" TEXT;
+      ALTER TABLE "milestoneHistory" ADD COLUMN IF NOT EXISTS "milestone" TEXT;
+      ALTER TABLE "milestoneHistory" ADD COLUMN IF NOT EXISTS "changedAt" TEXT;
+      ALTER TABLE "milestoneHistory" ADD COLUMN IF NOT EXISTS "changedBy" TEXT;
+      CREATE TABLE IF NOT EXISTS "changeHistory" (
+        "id" TEXT PRIMARY KEY,
+        "initiativeId" TEXT NOT NULL,
+        "timestamp" TEXT NOT NULL,
+        "changedBy" TEXT
+      );
+      ALTER TABLE "changeHistory" ADD COLUMN IF NOT EXISTS "initiativeId" TEXT;
+      ALTER TABLE "changeHistory" ADD COLUMN IF NOT EXISTS "timestamp" TEXT;
+      ALTER TABLE "changeHistory" ADD COLUMN IF NOT EXISTS "changedBy" TEXT;
+      CREATE TABLE IF NOT EXISTS "changeHistoryItem" (
+        "id" TEXT PRIMARY KEY,
+        "changeHistoryId" TEXT NOT NULL,
+        "field" TEXT NOT NULL,
+        "oldValue" TEXT,
+        "newValue" TEXT,
+        "changedAt" TEXT NOT NULL
+      );
+      ALTER TABLE "changeHistoryItem" ADD COLUMN IF NOT EXISTS "changeHistoryId" TEXT;
+      ALTER TABLE "changeHistoryItem" ADD COLUMN IF NOT EXISTS "field" TEXT;
+      ALTER TABLE "changeHistoryItem" ADD COLUMN IF NOT EXISTS "oldValue" TEXT;
+      ALTER TABLE "changeHistoryItem" ADD COLUMN IF NOT EXISTS "newValue" TEXT;
+      ALTER TABLE "changeHistoryItem" ADD COLUMN IF NOT EXISTS "changedAt" TEXT;
+      CREATE TABLE IF NOT EXISTS "comments" (
+        "id" TEXT PRIMARY KEY,
+        "initiativeId" TEXT NOT NULL,
+        "authorId" TEXT NOT NULL,
+        "body" TEXT NOT NULL,
+        "createdAt" TEXT NOT NULL,
+        "updatedAt" TEXT
+      );
+      ALTER TABLE "comments" ADD COLUMN IF NOT EXISTS "initiativeId" TEXT;
+      ALTER TABLE "comments" ADD COLUMN IF NOT EXISTS "authorId" TEXT;
+      ALTER TABLE "comments" ADD COLUMN IF NOT EXISTS "body" TEXT;
+      ALTER TABLE "comments" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      ALTER TABLE "comments" ADD COLUMN IF NOT EXISTS "updatedAt" TEXT;
+      CREATE TABLE IF NOT EXISTS "tasks" (
+        "id" TEXT PRIMARY KEY,
+        "initiativeId" TEXT NOT NULL,
+        "name" TEXT NOT NULL,
+        "description" TEXT,
+        "startDate" TEXT,
+        "endDate" TEXT,
+        "assigneeId" TEXT,
+        "status" TEXT,
+        "milestone" TEXT,
+        "createdAt" TEXT NOT NULL,
+        "updatedAt" TEXT
+      );
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "initiativeId" TEXT;
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "name" TEXT;
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "description" TEXT;
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "startDate" TEXT;
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "endDate" TEXT;
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "assigneeId" TEXT;
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "status" TEXT;
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "milestone" TEXT;
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "updatedAt" TEXT;
+      CREATE TABLE IF NOT EXISTS "documents" (
+        "id" TEXT PRIMARY KEY,
+        "initiativeId" TEXT NOT NULL,
+        "fileName" TEXT NOT NULL,
+        "filePath" TEXT NOT NULL,
+        "sizeBytes" INTEGER NOT NULL,
+        "uploadedBy" TEXT NOT NULL,
+        "uploadedAt" TEXT NOT NULL
+      );
+      ALTER TABLE "documents" ADD COLUMN IF NOT EXISTS "initiativeId" TEXT;
+      ALTER TABLE "documents" ADD COLUMN IF NOT EXISTS "fileName" TEXT;
+      ALTER TABLE "documents" ADD COLUMN IF NOT EXISTS "filePath" TEXT;
+      ALTER TABLE "documents" ADD COLUMN IF NOT EXISTS "sizeBytes" INTEGER;
+      ALTER TABLE "documents" ADD COLUMN IF NOT EXISTS "uploadedBy" TEXT;
+      ALTER TABLE "documents" ADD COLUMN IF NOT EXISTS "uploadedAt" TEXT;
+      CREATE TABLE IF NOT EXISTS "notifications" (
+        "id" TEXT PRIMARY KEY,
+        "userId" TEXT NOT NULL,
+        "type" TEXT NOT NULL,
+        "title" TEXT NOT NULL,
+        "message" TEXT NOT NULL,
+        "initiativeId" TEXT,
+        "commentId" TEXT,
+        "read" BOOLEAN DEFAULT FALSE,
+        "createdAt" TEXT NOT NULL
+      );
+      ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "userId" TEXT;
+      ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "type" TEXT;
+      ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "title" TEXT;
+      ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "message" TEXT;
+      ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "initiativeId" TEXT;
+      ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "commentId" TEXT;
+      ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "read" BOOLEAN DEFAULT FALSE;
+      ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+    `;
+    await client.query(ddl);
+  } finally {
+    client.release();
+  }
+}
+
+async function read() {
+  await initializeSchema();
+  const client = await pool.connect();
+  try {
+    const data = {};
+    const tables = [
+      'departments',
+      'users',
+      'initiatives',
+      'changeRequests',
+      'tags',
+      'initiativeTags',
+      'statusHistory',
+      'milestoneHistory',
+      'comments',
+      'tasks',
+      'documents',
+      'notifications',
+    ];
+    for (const table of tables) {
+      const res = await client.query(`SELECT * FROM "${table}"`);
+      // Transform PostgreSQL column names to camelCase for users table
+      // Note: PostgreSQL preserves case for quoted identifiers, so "isAdmin" returns as isAdmin
+      if (table === 'users') {
+        data[table] = res.rows.map(row => ({
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          role: row.role,
+          departmentId: row.departmentId || row.departmentid,
+          active: row.active,
+          passwordHash: row.passwordHash || row.passwordhash,
+          isAdmin: !!(row.isAdmin !== undefined ? row.isAdmin : row.isadmin), // Handle both cases
+          emailActivated: row.emailActivated !== undefined ? row.emailActivated : (row.emailactivated !== undefined ? row.emailactivated : false),
+          activationToken: row.activationToken || row.activationtoken || null,
+          activationTokenExpiry: row.activationTokenExpiry || row.activationtokenexpiry || null,
+          createdAt: row.createdAt || row.createdat || null
+        }));
+      } else if (table === 'initiatives') {
+        // Transform initiatives and parse comma-separated arrays
+        data[table] = res.rows.map(row => ({
+          id: row.id,
+          type: row.type,
+          name: row.name,
+          ticket: row.ticket || null,
+          description: row.description || null,
+          businessImpact: row.businessImpact || row.businessimpact || null,
+          priority: row.priority || null,
+          businessOwnerId: row.businessOwnerId || row.businessownerid || null,
+          businessUserIds: row.businessUserIds || row.businessuserids ? (row.businessUserIds || row.businessuserids).split(',').filter(Boolean) : [],
+          departmentId: row.departmentId || row.departmentid || null,
+          itPicId: row.itPicId || row.itpicid || null, // Keep for backward compatibility
+          itPicIds: row.itPicIds || row.itpicids ? (row.itPicIds || row.itpicids).split(',').filter(Boolean) : (row.itPicId || row.itpicid ? [row.itPicId || row.itpicid] : []),
+          itPmId: row.itPmId || row.itpmid || null,
+          itManagerIds: row.itManagerIds || row.itmanagerids ? (row.itManagerIds || row.itmanagerids).split(',').filter(Boolean) : [],
+          status: row.status || null,
+          milestone: row.milestone || null,
+          startDate: row.startDate || row.startdate || null,
+          endDate: row.endDate || row.enddate || null,
+          remark: row.remark || null,
+          documentationLink: row.documentationLink || row.documentationlink || null,
+          createdAt: row.createdAt || row.createdat || null,
+          updatedAt: row.updatedAt || row.updatedat || null
+        }));
+      } else if (table === 'notifications') {
+        // Transform notifications
+        data[table] = res.rows.map(row => ({
+          id: row.id,
+          userId: row.userId || row.userid,
+          type: row.type,
+          title: row.title,
+          message: row.message,
+          initiativeId: row.initiativeId || row.initiativeid || null,
+          commentId: row.commentId || row.commentid || null,
+          read: row.read !== undefined ? !!row.read : false,
+          createdAt: row.createdAt || row.createdat
+        }));
+      } else {
+        data[table] = res.rows;
+      }
+    }
+
+    const historyRes = await client.query('SELECT * FROM "changeHistory"');
+    const itemsRes = await client.query('SELECT * FROM "changeHistoryItem"');
+
+    const itemsByChangeId = itemsRes.rows.reduce((acc, row) => {
+      if (!acc[row.changehistoryid]) acc[row.changehistoryid] = [];
+      acc[row.changehistoryid].push({
+        field: row.field,
+        oldValue: row.oldvalue,
+        newValue: row.newvalue,
+        changedAt: row.changedat,
+      });
+      return acc;
+    }, {});
+
+    data.changeHistory = historyRes.rows.map((h) => ({
+      id: h.id,
+      initiativeId: h.initiativeid,
+      timestamp: h.timestamp,
+      changedBy: h.changedby,
+      changes: itemsByChangeId[h.id] || [],
+    }));
+
+    return data;
+  } finally {
+    client.release();
+  }
+}
+
+async function write(data) {
+  await initializeSchema();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    await client.query('DELETE FROM "departments"');
+    await client.query('DELETE FROM "users"');
+    await client.query('DELETE FROM "initiatives"');
+    await client.query('DELETE FROM "changeRequests"');
+    await client.query('DELETE FROM "tags"');
+    await client.query('DELETE FROM "initiativeTags"');
+    await client.query('DELETE FROM "statusHistory"');
+    await client.query('DELETE FROM "milestoneHistory"');
+    await client.query('DELETE FROM "changeHistoryItem"');
+    await client.query('DELETE FROM "changeHistory"');
+    await client.query('DELETE FROM "comments"');
+    await client.query('DELETE FROM "tasks"');
+    await client.query('DELETE FROM "documents"');
+    await client.query('DELETE FROM "notifications"');
+
+    const insertDept = 'INSERT INTO "departments"("id", "name") VALUES ($1, $2)';
+    for (const d of data.departments || []) {
+      await client.query(insertDept, [d.id, d.name]);
+    }
+
+    const insertUser =
+      'INSERT INTO "users"("id", "name", "email", "role", "departmentId", "active", "passwordHash", "isAdmin", "emailActivated", "activationToken", "activationTokenExpiry") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)';
+    for (const u of data.users || []) {
+      await client.query(insertUser, [
+        u.id,
+        u.name,
+        u.email,
+        u.role,
+        u.departmentId,
+        !!u.active,
+        u.passwordHash || null,
+        !!u.isAdmin,
+        u.emailActivated !== undefined ? !!u.emailActivated : false,
+        u.activationToken || null,
+        u.activationTokenExpiry || null,
+      ]);
+    }
+
+    const insertInit = `INSERT INTO "initiatives"(
+      "id", "type", "name", "ticket", "description", "businessImpact", "priority",
+      "businessOwnerId", "businessUserIds", "departmentId", "itPicId", "itPicIds", "itPmId", "itManagerIds",
+      "status", "milestone", "startDate", "endDate", "remark", "documentationLink", "createdAt", "updatedAt"
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,
+      $8,$9,$10,$11,$12,$13,$14,
+      $15,$16,$17,$18,$19,$20,$21,$22
+    )`;
+    for (const i of data.initiatives || []) {
+      // Convert arrays to comma-separated strings for storage
+      const businessUserIds = Array.isArray(i.businessUserIds) ? i.businessUserIds.join(',') : (i.businessUserIds || null);
+      const itPicIds = Array.isArray(i.itPicIds) ? i.itPicIds.join(',') : (i.itPicIds || null);
+      const itManagerIds = Array.isArray(i.itManagerIds) ? i.itManagerIds.join(',') : (i.itManagerIds || null);
+      
+      await client.query(insertInit, [
+        i.id,
+        i.type,
+        i.name,
+        i.ticket || null,
+        i.description || null,
+        i.businessImpact || null,
+        i.priority || null,
+        i.businessOwnerId || null,
+        businessUserIds,
+        i.departmentId || null,
+        i.itPicId || null, // Keep for backward compatibility
+        itPicIds,
+        i.itPmId || null,
+        itManagerIds,
+        i.status || null,
+        i.milestone || null,
+        i.startDate || null,
+        i.endDate || null,
+        i.remark || null,
+        i.documentationLink || null,
+        i.createdAt || null,
+        i.updatedAt || null,
+      ]);
+    }
+
+    const insertCR = `INSERT INTO "changeRequests"(
+      "initiativeId", "crSubmissionStart", "crSubmissionEnd", "developmentStart",
+      "developmentEnd", "sitStart", "sitEnd", "uatStart", "uatEnd", "liveDate",
+      "crSection1Start", "crSection1End", "crSection2Start", "crSection2End",
+      "crSection3Start", "crSection3End", "liveStart", "liveEnd"
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+      $11,$12,$13,$14,$15,$16,$17,$18
+    )`;
+    for (const cr of data.changeRequests || []) {
+      await client.query(insertCR, [
+        cr.initiativeId,
+        cr.crSubmissionStart || null,
+        cr.crSubmissionEnd || null,
+        cr.developmentStart || null,
+        cr.developmentEnd || null,
+        cr.sitStart || null,
+        cr.sitEnd || null,
+        cr.uatStart || null,
+        cr.uatEnd || null,
+        cr.liveDate || null,
+        cr.crSection1Start || null,
+        cr.crSection1End || null,
+        cr.crSection2Start || null,
+        cr.crSection2End || null,
+        cr.crSection3Start || null,
+        cr.crSection3End || null,
+        cr.liveStart || null,
+        cr.liveEnd || null,
+      ]);
+    }
+
+    const insertTag = 'INSERT INTO "tags"("id", "name") VALUES ($1, $2)';
+    for (const t of data.tags || []) {
+      await client.query(insertTag, [t.id, t.name]);
+    }
+
+    const insertInitTag =
+      'INSERT INTO "initiativeTags"("id", "initiativeId", "tagId") VALUES ($1,$2,$3)';
+    for (const it of data.initiativeTags || []) {
+      await client.query(insertInitTag, [it.id, it.initiativeId, it.tagId]);
+    }
+
+    const insertStatus =
+      'INSERT INTO "statusHistory"("id", "initiativeId", "status", "changedAt", "changedBy") VALUES ($1,$2,$3,$4,$5)';
+    for (const s of data.statusHistory || []) {
+      await client.query(insertStatus, [
+        s.id,
+        s.initiativeId,
+        s.status,
+        s.changedAt,
+        s.changedBy || null,
+      ]);
+    }
+
+    const insertMilestone =
+      'INSERT INTO "milestoneHistory"("id", "initiativeId", "milestone", "changedAt", "changedBy") VALUES ($1,$2,$3,$4,$5)';
+    for (const m of data.milestoneHistory || []) {
+      await client.query(insertMilestone, [
+        m.id,
+        m.initiativeId,
+        m.milestone,
+        m.changedAt,
+        m.changedBy || null,
+      ]);
+    }
+
+    const insertChangeHistory =
+      'INSERT INTO "changeHistory"("id", "initiativeId", "timestamp", "changedBy") VALUES ($1,$2,$3,$4)';
+    const insertChangeItem =
+      'INSERT INTO "changeHistoryItem"("id", "changeHistoryId", "field", "oldValue", "newValue", "changedAt") VALUES ($1,$2,$3,$4,$5,$6)';
+    for (const ch of data.changeHistory || []) {
+      // Skip entries with null or missing initiativeId
+      if (!ch.id || !ch.initiativeId) {
+        continue;
+      }
+      await client.query(insertChangeHistory, [
+        ch.id,
+        ch.initiativeId,
+        ch.timestamp,
+        ch.changedBy || null,
+      ]);
+      for (const item of ch.changes || []) {
+        const itemId = item.id || `${ch.id}:${item.field}:${item.changedAt}`;
+        await client.query(insertChangeItem, [
+          itemId,
+          ch.id,
+          item.field,
+          item.oldValue || null,
+          item.newValue || null,
+          item.changedAt,
+        ]);
+      }
+    }
+
+    const insertComment = 'INSERT INTO "comments"("id", "initiativeId", "authorId", "body", "createdAt", "updatedAt") VALUES ($1,$2,$3,$4,$5,$6)';
+    for (const c of data.comments || []) {
+      await client.query(insertComment, [
+        c.id,
+        c.initiativeId,
+        c.authorId,
+        c.body,
+        c.createdAt,
+        c.updatedAt || null,
+      ]);
+    }
+
+    const insertTask = 'INSERT INTO "tasks"("id", "initiativeId", "name", "description", "startDate", "endDate", "assigneeId", "status", "milestone", "createdAt", "updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)';
+    for (const t of data.tasks || []) {
+      await client.query(insertTask, [
+        t.id,
+        t.initiativeId,
+        t.name,
+        t.description || null,
+        t.startDate || null,
+        t.endDate || null,
+        t.assigneeId || null,
+        t.status || null,
+        t.milestone || null,
+        t.createdAt,
+        t.updatedAt || null,
+      ]);
+    }
+
+    const insertDocument = 'INSERT INTO "documents"("id", "initiativeId", "fileName", "filePath", "sizeBytes", "uploadedBy", "uploadedAt") VALUES ($1,$2,$3,$4,$5,$6,$7)';
+    for (const d of data.documents || []) {
+      await client.query(insertDocument, [
+        d.id,
+        d.initiativeId,
+        d.fileName,
+        d.filePath,
+        d.sizeBytes,
+        d.uploadedBy,
+        d.uploadedAt,
+      ]);
+    }
+
+    const insertNotification =
+      'INSERT INTO "notifications"("id", "userId", "type", "title", "message", "initiativeId", "commentId", "read", "createdAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)';
+    for (const n of data.notifications || []) {
+      await client.query(insertNotification, [
+        n.id,
+        n.userId,
+        n.type,
+        n.title,
+        n.message,
+        n.initiativeId || null,
+        n.commentId || null,
+        !!n.read,
+        n.createdAt,
+      ]);
+    }
+
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export default { read, write, pool, databaseUrl };
+

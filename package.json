@@ -1,0 +1,39 @@
+{
+  "name": "logistic-excellence-pm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon --watch backend --ext js,json --exec node backend/server.js",
+    "start": "node backend/server.js",
+    "db:import-json": "node backend/import_json_to_db.js",
+    "db:seed-admin": "node backend/seed_admin.js",
+    "db:check-admin": "node backend/check_admin.js",
+    "migrate": "node backend/migrate.js",
+    "import:xlsx": "node backend/import_excel.js \"docs/Project & CR Portfolio.xlsx\"",
+    "sync:sheet": "node backend/sync_google_sheets.js",
+    "sync:cr": "node backend/sync_google_sheets_cr.js",
+    "test": "node tests/test-suite.js",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:restart": "docker-compose restart",
+    "docker:ps": "docker-compose ps"
+  },
+  "dependencies": {
+    "bcryptjs": "2.4.3",
+    "cors": "2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.22.1",
+    "jsonwebtoken": "9.0.2",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.0",
+    "nodemailer": "^6.9.8",
+    "pg": "8.13.0",
+    "xlsx": "0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "3.1.4"
+  }
+}
