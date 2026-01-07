@@ -125,6 +125,7 @@ router.get('/:id', async (req, res) => {
   
   // Add change history
   const history = (data.changeHistory || []).filter(h => h.initiativeId === i.id);
+  console.log(`[ChangeHistory] initiative ${i.id} history count: ${history.length}`);
   result.changeHistory = history;
   
   res.json(result);
@@ -213,6 +214,7 @@ router.put('/:id', async (req, res) => {
   
   // Track changes and update fields
   for (const k of allowed) {
+    // Check if field exists in request body (including null values)
     if (k in req.body) {
       let newValue = req.body[k];
       
@@ -226,11 +228,55 @@ router.put('/:id', async (req, res) => {
         newValue = req.body.itPicId;
       }
       
-      if (initiative[k] !== newValue) {
+      // Normalize values for comparison (handle null, undefined, empty string)
+      // For array fields (comma-separated strings), normalize by sorting and trimming
+      const isArrayField = k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds';
+      
+      let oldVal, newVal;
+      if (isArrayField) {
+        // For array fields, parse, sort, and compare as sorted arrays
+        const parseArray = (val) => {
+          if (val == null || val === '') return [];
+          if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(v => v).sort();
+          return String(val).split(',').map(v => v.trim()).filter(v => v).sort();
+        };
+        const oldArray = parseArray(initiative[k]);
+        const newArray = parseArray(newValue);
+        oldVal = oldArray.join(',');
+        newVal = newArray.join(',');
+        
+        // Debug logging for array fields
+        console.log(`[Change Tracking] Field: ${k}`);
+        console.log(`  Old value (raw): ${JSON.stringify(initiative[k])}`);
+        console.log(`  New value (raw): ${JSON.stringify(newValue)}`);
+        console.log(`  Old array: ${JSON.stringify(oldArray)}`);
+        console.log(`  New array: ${JSON.stringify(newArray)}`);
+        console.log(`  Old normalized: "${oldVal}"`);
+        console.log(`  New normalized: "${newVal}"`);
+        console.log(`  Changed: ${oldVal !== newVal}`);
+      } else {
+        // For regular fields, convert to strings and trim
+        oldVal = initiative[k] == null ? '' : String(initiative[k]).trim();
+        newVal = newValue == null ? '' : String(newValue).trim();
+
+        // Special handling for status: treat case-only differences as no change
+        if (k === 'status') {
+          const oldCmp = oldVal.toLowerCase();
+          const newCmp = newVal.toLowerCase();
+          if (oldCmp === newCmp) {
+            // Normalize stored value but don't create a change-log entry
+            initiative[k] = newValue;
+            continue;
+          }
+        }
+      }
+      
+      if (oldVal !== newVal) {
+        console.log(`[Change Tracking] Detected change for ${k}: "${oldVal}" -> "${newVal}"`);
         changes.push({
           field: k,
-          oldValue: initiative[k],
-          newValue: newValue,
+          oldValue: initiative[k] || null,
+          newValue: newValue || null,
           changedAt: updatedAt,
           changedBy: req.body.changedBy || 'Unknown'
         });
@@ -268,6 +314,7 @@ router.put('/:id', async (req, res) => {
   // Store changes
   if (changes.length > 0) {
     if (!data.changeHistory) data.changeHistory = [];
+    console.log(`[Change Tracking] Saving ${changes.length} change(s) for initiative ${req.params.id}`);
     data.changeHistory.push({
       id: uuid(),
       initiativeId: req.params.id,

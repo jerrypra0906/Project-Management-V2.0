@@ -18,6 +18,12 @@ router.get('/', async (req, res) => {
     
     // Return user data without password hash
     const { passwordHash, activationToken, activationTokenExpiry, ...userData } = user;
+    // Convert teamMemberIds string to array
+    if (userData.teamMemberIds && typeof userData.teamMemberIds === 'string') {
+      userData.teamMemberIds = userData.teamMemberIds.split(',').filter(Boolean);
+    } else if (!userData.teamMemberIds) {
+      userData.teamMemberIds = [];
+    }
     res.json(userData);
   } catch (error) {
     console.error('Get profile error:', error);
@@ -63,6 +69,106 @@ router.put('/', async (req, res) => {
     res.json(updatedUser);
   } catch (error) {
     console.error('Update profile error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Add team member (for managers only)
+router.post('/team-members', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { teamMemberId } = req.body;
+    
+    if (!teamMemberId) {
+      return res.status(400).json({ error: 'Team member ID is required' });
+    }
+    
+    const data = await store.read();
+    const manager = data.users.find(u => u.id === userId);
+    
+    if (!manager) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check if user is a manager
+    if (manager.type !== 'Manager') {
+      return res.status(403).json({ error: 'Only managers can manage team members' });
+    }
+    
+    // Check if team member exists
+    const teamMember = data.users.find(u => u.id === teamMemberId);
+    if (!teamMember) {
+      return res.status(404).json({ error: 'Team member not found' });
+    }
+    
+    // Prevent adding yourself
+    if (teamMemberId === userId) {
+      return res.status(400).json({ error: 'Cannot add yourself as a team member' });
+    }
+    
+    // Get current team members
+    const currentTeamMembers = manager.teamMemberIds 
+      ? (typeof manager.teamMemberIds === 'string' ? manager.teamMemberIds.split(',').filter(Boolean) : manager.teamMemberIds)
+      : [];
+    
+    // Check if already in team
+    if (currentTeamMembers.includes(teamMemberId)) {
+      return res.status(409).json({ error: 'User is already in your team' });
+    }
+    
+    // Add team member
+    currentTeamMembers.push(teamMemberId);
+    manager.teamMemberIds = currentTeamMembers.join(',');
+    
+    await store.write(data);
+    
+    res.json({ 
+      ok: true, 
+      message: 'Team member added successfully',
+      teamMemberIds: currentTeamMembers
+    });
+  } catch (error) {
+    console.error('Add team member error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Remove team member (for managers only)
+router.delete('/team-members/:teamMemberId', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { teamMemberId } = req.params;
+    
+    const data = await store.read();
+    const manager = data.users.find(u => u.id === userId);
+    
+    if (!manager) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check if user is a manager
+    if (manager.type !== 'Manager') {
+      return res.status(403).json({ error: 'Only managers can manage team members' });
+    }
+    
+    // Get current team members
+    const currentTeamMembers = manager.teamMemberIds 
+      ? (typeof manager.teamMemberIds === 'string' ? manager.teamMemberIds.split(',').filter(Boolean) : manager.teamMemberIds)
+      : [];
+    
+    // Remove team member
+    const updatedTeamMembers = currentTeamMembers.filter(id => id !== teamMemberId);
+    manager.teamMemberIds = updatedTeamMembers.length > 0 ? updatedTeamMembers.join(',') : null;
+    
+    await store.write(data);
+    
+    res.json({ 
+      ok: true, 
+      message: 'Team member removed successfully',
+      teamMemberIds: updatedTeamMembers
+    });
+  } catch (error) {
+    console.error('Remove team member error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

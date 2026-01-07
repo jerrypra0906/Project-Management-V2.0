@@ -20,6 +20,7 @@ router.get('/users', async (req, res) => {
       name: u.name,
       email: u.email,
       role: u.role,
+      type: u.type || null,
       departmentId: u.departmentId,
       active: u.active,
       isAdmin: !!u.isAdmin,
@@ -46,6 +47,7 @@ router.get('/users/:id', async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      type: user.type || null,
       departmentId: user.departmentId,
       active: user.active,
       isAdmin: !!user.isAdmin,
@@ -61,7 +63,7 @@ router.get('/users/:id', async (req, res) => {
 // Update user
 router.put('/users/:id', async (req, res) => {
   try {
-    const { name, email, role, departmentId, active, isAdmin, emailActivated } = req.body || {};
+    const { name, email, role, type, departmentId, active, isAdmin, emailActivated } = req.body || {};
     const data = await store.read();
     const user = data.users.find(u => u.id === req.params.id);
     
@@ -72,6 +74,7 @@ router.put('/users/:id', async (req, res) => {
     if (name !== undefined) user.name = name;
     if (email !== undefined) user.email = email;
     if (role !== undefined) user.role = role;
+    if (type !== undefined) user.type = type;
     if (departmentId !== undefined) user.departmentId = departmentId;
     if (active !== undefined) user.active = active;
     if (isAdmin !== undefined) user.isAdmin = isAdmin ? 1 : 0;
@@ -85,10 +88,45 @@ router.put('/users/:id', async (req, res) => {
   }
 });
 
+// Set/reset user password (admin only)
+router.put('/users/:id/password', async (req, res) => {
+  try {
+    const { password } = req.body || {};
+    if (!password) {
+      return res.status(400).json({ error: 'Password is required' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    const data = await store.read();
+    const user = data.users.find(u => u.id === req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    user.passwordHash = passwordHash;
+    
+    // Auto-activate user if they didn't have a password (new account setup)
+    if (!user.emailActivated) {
+      user.emailActivated = true;
+    }
+
+    await store.write(data);
+    return res.json({ ok: true, message: 'Password updated successfully' });
+  } catch (e) {
+    console.error('Set password error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 // Create user
 router.post('/users', async (req, res) => {
   try {
-    const { name, email, role, departmentId, active, isAdmin, password } = req.body || {};
+    const { name, email, role, type, departmentId, active, isAdmin, password } = req.body || {};
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email are required' });
     }
@@ -106,7 +144,8 @@ router.post('/users', async (req, res) => {
       id,
       name,
       email,
-      role: role || 'User',
+      role: role || null,
+      type: type || null,
       departmentId: departmentId || null,
       active: active !== undefined ? active : true,
       passwordHash,

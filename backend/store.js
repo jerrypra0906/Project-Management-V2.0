@@ -24,13 +24,17 @@ async function initializeSchema() {
         "name" TEXT NOT NULL,
         "email" TEXT,
         "role" TEXT,
+        "type" TEXT,
         "departmentId" TEXT,
         "active" BOOLEAN DEFAULT TRUE,
         "passwordHash" TEXT,
         "isAdmin" BOOLEAN DEFAULT FALSE,
         "emailActivated" BOOLEAN DEFAULT FALSE,
         "activationToken" TEXT,
-        "activationTokenExpiry" TEXT
+        "activationTokenExpiry" TEXT,
+        "resetToken" TEXT,
+        "resetTokenExpiry" TEXT,
+        "teamMemberIds" TEXT
       );
       -- Ensure missing user columns/constraints exist (or are relaxed) for compatibility
       ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_key";
@@ -41,6 +45,10 @@ async function initializeSchema() {
       ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "emailActivated" BOOLEAN DEFAULT FALSE;
       ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "activationToken" TEXT;
       ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "activationTokenExpiry" TEXT;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "resetToken" TEXT;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "resetTokenExpiry" TEXT;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "type" TEXT;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "teamMemberIds" TEXT;
       CREATE TABLE IF NOT EXISTS "initiatives" (
         "id" TEXT PRIMARY KEY,
         "type" TEXT NOT NULL,
@@ -289,6 +297,10 @@ async function read() {
           emailActivated: row.emailActivated !== undefined ? row.emailActivated : (row.emailactivated !== undefined ? row.emailactivated : false),
           activationToken: row.activationToken || row.activationtoken || null,
           activationTokenExpiry: row.activationTokenExpiry || row.activationtokenexpiry || null,
+          resetToken: row.resetToken || row.resettoken || null,
+          resetTokenExpiry: row.resetTokenExpiry || row.resettokenexpiry || null,
+          type: row.type || null,
+          teamMemberIds: row.teamMemberIds || row.teammemberids ? (row.teamMemberIds || row.teammemberids).split(',').filter(Boolean) : [],
           createdAt: row.createdAt || row.createdat || null
         }));
       } else if (table === 'initiatives') {
@@ -338,24 +350,30 @@ async function read() {
     const historyRes = await client.query('SELECT * FROM "changeHistory"');
     const itemsRes = await client.query('SELECT * FROM "changeHistoryItem"');
 
+    // Normalize column names from Postgres (quoted camelCase columns are returned with exact case)
     const itemsByChangeId = itemsRes.rows.reduce((acc, row) => {
-      if (!acc[row.changehistoryid]) acc[row.changehistoryid] = [];
-      acc[row.changehistoryid].push({
+      const changeHistoryId = row.changeHistoryId || row.changehistoryid;
+      if (!changeHistoryId) return acc;
+      if (!acc[changeHistoryId]) acc[changeHistoryId] = [];
+      acc[changeHistoryId].push({
         field: row.field,
-        oldValue: row.oldvalue,
-        newValue: row.newvalue,
-        changedAt: row.changedat,
+        oldValue: row.oldValue ?? row.oldvalue,
+        newValue: row.newValue ?? row.newvalue,
+        changedAt: row.changedAt ?? row.changedat,
       });
       return acc;
     }, {});
 
-    data.changeHistory = historyRes.rows.map((h) => ({
-      id: h.id,
-      initiativeId: h.initiativeid,
-      timestamp: h.timestamp,
-      changedBy: h.changedby,
-      changes: itemsByChangeId[h.id] || [],
-    }));
+    data.changeHistory = historyRes.rows
+      .map((h) => ({
+        id: h.id,
+        initiativeId: h.initiativeId ?? h.initiativeid,
+        timestamp: h.timestamp,
+        changedBy: h.changedBy ?? h.changedby,
+        changes: itemsByChangeId[h.id] || [],
+      }))
+      // Filter out entries without initiativeId to avoid breaking lookups
+      .filter((h) => !!h.initiativeId);
 
     return data;
   } finally {
@@ -390,13 +408,16 @@ async function write(data) {
     }
 
     const insertUser =
-      'INSERT INTO "users"("id", "name", "email", "role", "departmentId", "active", "passwordHash", "isAdmin", "emailActivated", "activationToken", "activationTokenExpiry") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)';
+      'INSERT INTO "users"("id", "name", "email", "role", "type", "departmentId", "active", "passwordHash", "isAdmin", "emailActivated", "activationToken", "activationTokenExpiry", "resetToken", "resetTokenExpiry", "teamMemberIds") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)';
     for (const u of data.users || []) {
+      // Convert teamMemberIds array to comma-separated string
+      const teamMemberIds = Array.isArray(u.teamMemberIds) ? u.teamMemberIds.join(',') : (u.teamMemberIds || null);
       await client.query(insertUser, [
         u.id,
         u.name,
         u.email,
         u.role,
+        u.type || null,
         u.departmentId,
         !!u.active,
         u.passwordHash || null,
@@ -404,6 +425,9 @@ async function write(data) {
         u.emailActivated !== undefined ? !!u.emailActivated : false,
         u.activationToken || null,
         u.activationTokenExpiry || null,
+        u.resetToken || null,
+        u.resetTokenExpiry || null,
+        teamMemberIds,
       ]);
     }
 

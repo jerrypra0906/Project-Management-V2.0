@@ -5,7 +5,7 @@ import { getAllMilestoneDurations } from '../daily-snapshots.js';
 const router = express.Router();
 
 router.get('/', async (req, res) => {
-  const { departmentId, itPmId } = req.query;
+  const { departmentId, itPmId, teamMemberId } = req.query;
   const data = await store.read();
   const total = data.initiatives.length;
   const crs = data.initiatives.filter(i => i.type === 'CR').length;
@@ -19,6 +19,29 @@ router.get('/', async (req, res) => {
   }
   if (itPmId) {
     projectInitiatives = projectInitiatives.filter(i => i.itPmId === itPmId);
+  }
+  if (teamMemberId) {
+    // Filter initiatives where the team member is involved in any role:
+    // - IT PIC (itPicId or in itPicIds)
+    // - IT PM (itPmId)
+    // - Business Owner (businessOwnerId)
+    // - Business User (in businessUserIds)
+    projectInitiatives = projectInitiatives.filter(i => {
+      // Check IT PIC
+      if (i.itPicId === teamMemberId) return true;
+      if (i.itPicIds && i.itPicIds.split(',').map(id => id.trim()).includes(teamMemberId)) return true;
+      
+      // Check IT PM
+      if (i.itPmId === teamMemberId) return true;
+      
+      // Check Business Owner
+      if (i.businessOwnerId === teamMemberId) return true;
+      
+      // Check Business Users
+      if (i.businessUserIds && i.businessUserIds.split(',').map(id => id.trim()).includes(teamMemberId)) return true;
+      
+      return false;
+    });
   }
   
   // Count projects after filtering

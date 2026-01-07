@@ -9,6 +9,7 @@
     "db:import-json": "node backend/import_json_to_db.js",
     "db:seed-admin": "node backend/seed_admin.js",
     "db:check-admin": "node backend/check_admin.js",
+    "db:migrate-roles": "node backend/migrate_user_roles.js",
     "migrate": "node backend/migrate.js",
     "import:xlsx": "node backend/import_excel.js \"docs/Project & CR Portfolio.xlsx\"",
     "sync:sheet": "node backend/sync_google_sheets.js",

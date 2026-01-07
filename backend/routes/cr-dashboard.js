@@ -7,13 +7,14 @@ const router = express.Router();
 /**
  * Calculate weekly trend data for CRs
  * @param {string} type - Filter by type ('Project' or 'CR')
+ * @param {Array} filteredCRs - Filtered CRs to use for calculation
  * @returns {Array} Array of weekly trend data
  */
-async function calculateWeeklyTrend(type = 'CR') {
+async function calculateWeeklyTrend(type = 'CR', filteredCRs = null) {
   const data = await store.read();
   
-  // Use current live data instead of snapshots for accurate counts
-  const allCRs = data.initiatives.filter(i => i.type === type);
+  // Use filtered CRs if provided, otherwise use all CRs
+  const allCRs = filteredCRs || data.initiatives.filter(i => i.type === type);
   
   if (allCRs.length === 0) {
     return [];
@@ -42,50 +43,55 @@ async function calculateWeeklyTrend(type = 'CR') {
     }
   });
   
-  // Calculate metrics for each week
-  const weeklyData = Array.from(weeks).sort().map(weekKey => {
+  // Sort weeks chronologically
+  const sortedWeeks = Array.from(weeks).sort();
+  
+  // Calculate metrics for each week (cumulative)
+  const weeklyData = sortedWeeks.map((weekKey, index) => {
     const weekStartStr = weekKey;
     const weekEndStr = getWeekEnd(weekKey);
     
-    // 1. TOTAL: Count all CRs (using current live data)
-    const totalCRs = allCRs.length;
-    
-    // 2. LIVE: Count CRs with status = LIVE AND endDate in this week
-    const liveCRs = allCRs.filter(cr => {
-      if (cr.status !== 'LIVE') return false;
-      
-      // Exclude CRs with empty/blank/null endDate
-      if (!cr.endDate || cr.endDate === '' || cr.endDate === null) return false;
-      
-      const endDateStr = cr.endDate.slice(0, 10);
-      return endDateStr >= weekStartStr && endDateStr <= weekEndStr;
-    }).length;
-    
-    // 3. NEW: Count CRs with Create Date in this week
-    const createdCRs = allCRs.filter(cr => {
+    // 1. NEW: Count CRs created in this specific week
+    const newCRs = allCRs.filter(cr => {
       if (!cr.createdAt || cr.createdAt === '' || cr.createdAt === null) return false;
-      
       const createdDateStr = cr.createdAt.slice(0, 10);
       return createdDateStr >= weekStartStr && createdDateStr <= weekEndStr;
     }).length;
     
-    // 4. PENDING: Count CRs with status !== LIVE AND status !== CANCELLED
-    const notLiveCRs = allCRs.filter(cr => 
-      cr.status !== 'LIVE' && cr.status !== 'CANCELLED'
-    ).length;
+    // 2. LIVE: Count CRs that went LIVE in this specific week (based on endDate)
+    const liveCRs = allCRs.filter(cr => {
+      if (!cr.status || cr.status.toUpperCase() !== 'LIVE') return false;
+      if (!cr.endDate || cr.endDate === '' || cr.endDate === null) return false;
+      const endDateStr = cr.endDate.slice(0, 10);
+      return endDateStr >= weekStartStr && endDateStr <= weekEndStr;
+    }).length;
+    
+    // 3. TOTAL: Count all CRs that existed by the end of this week (cumulative)
+    // This means CRs created on or before the end of this week
+    const totalCRs = allCRs.filter(cr => {
+      if (!cr.createdAt || cr.createdAt === '' || cr.createdAt === null) return false;
+      const createdDateStr = cr.createdAt.slice(0, 10);
+      return createdDateStr <= weekEndStr;
+    }).length;
+    
+    // Format week label (Monday - Friday) with year
+    const mondayDate = new Date(weekKey);
+    const fridayDate = new Date(weekEndStr);
+    
+    const weekLabel = `${mondayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${fridayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     
     return {
       weekStart: weekKey,
       weekEnd: weekEndStr,
-      totalCRs,
+      weekLabel,
+      newCRs,
       liveCRs,
-      createdCRs,
-      notLiveCRs
+      totalCRs
     };
   });
   
-  // Return only the last 10 weeks
-  return weeklyData.slice(-10);
+  // Return only the last 12 weeks (about 3 months)
+  return weeklyData.slice(-12);
 }
 
 /**
@@ -103,15 +109,15 @@ function getWeekKey(date) {
 }
 
 /**
- * Get week end date (Sunday) for a given week key
+ * Get week end date (Friday) for a given week key
  * @param {string} weekKey - Monday date in YYYY-MM-DD format
- * @returns {string} Sunday date of the week
+ * @returns {string} Friday date of the week
  */
 function getWeekEnd(weekKey) {
   const monday = new Date(weekKey);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  return sunday.toISOString().slice(0, 10);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4); // Friday is 4 days after Monday
+  return friday.toISOString().slice(0, 10);
 }
 
 router.get('/', async (req, res) => {
@@ -175,8 +181,8 @@ router.get('/', async (req, res) => {
   const filteredCRIds = new Set(crInitiatives.map(c => c.id));
   const milestoneDurations = allMilestoneDurations.filter(m => filteredCRIds.has(m.id));
   
-  // Calculate weekly trend data for CRs
-  const weeklyTrendData = await calculateWeeklyTrend('CR');
+  // Calculate weekly trend data for CRs (using filtered CRs)
+  const weeklyTrendData = await calculateWeeklyTrend('CR', crInitiatives);
   
   // Calculate week boundaries (Monday to Sunday)
   const today = new Date();

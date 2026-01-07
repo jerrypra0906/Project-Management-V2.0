@@ -687,6 +687,74 @@ async function renderList() {
     { key: 'actions', class: 'col-actions', label: 'Actions', sortable: false }
   ];
   
+  // Helper to format activity log field labels
+  const formatActivityFieldLabel = (field) => {
+    if (!field) return '';
+    // Friendly names for some known fields
+    const mapping = {
+      businessOwnerId: 'Business Owner / Requestor',
+      businessUserIds: 'Business Users',
+      departmentId: 'Department',
+      itPicId: 'IT PIC',
+      itPicIds: 'IT PIC',
+      itPmId: 'IT PM',
+      itManagerIds: 'IT Manager',
+      startDate: 'Start Date',
+      endDate: 'End Date',
+      documentationLink: 'Project Doc Link'
+    };
+    if (mapping[field]) return mapping[field];
+    return field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1').trim();
+  };
+
+  // Helper to format activity log values (IDs -> names, etc.)
+  const formatActivityValue = (field, raw) => {
+    if (raw === null || raw === undefined || raw === '') return '(empty)';
+
+    // For user single-value fields
+    if (field === 'businessOwnerId' || field === 'itPicId' || field === 'itPmId' || field === 'changedBy') {
+      const name = nameById(LOOKUPS.users, raw);
+      return name || raw;
+    }
+
+    // For department
+    if (field === 'departmentId') {
+      const depName = nameById(LOOKUPS.departments, raw);
+      return depName || raw;
+    }
+
+    // For multi-user fields stored as comma-separated IDs or JSON-like strings
+    if (field === 'businessUserIds' || field === 'itPicIds' || field === 'itManagerIds') {
+      let ids = [];
+      if (Array.isArray(raw)) {
+        ids = raw;
+      } else {
+        const str = String(raw).trim();
+        // Try strict JSON parse first (handles '["id"]' cases)
+        if (str.startsWith('[') && str.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(str);
+            if (Array.isArray(parsed)) {
+              ids = parsed;
+            }
+          } catch {
+            // fall through to regex/split parsing
+          }
+        }
+        // Fallback: strip brackets/quotes and split on commas
+        if (ids.length === 0) {
+          const cleaned = str.replace(/[\[\]"]/g, '');
+          ids = cleaned.split(',').map(v => v.trim()).filter(Boolean);
+        }
+      }
+      const names = ids.map(id => nameById(LOOKUPS.users, id)).filter(Boolean);
+      return names.length > 0 ? names.join(', ') : (ids.length > 0 ? ids.join(', ') : String(raw));
+    }
+
+    // Default: plain string
+    return String(raw);
+  };
+
   app.innerHTML = `
     <div class="milestone-graph">
       <h3>Milestone Distribution</h3>
@@ -1185,28 +1253,141 @@ async function renderView(id) {
   } catch (e) {
     console.error('Error fetching comments/tasks:', e);
   }
+
+  // Calculate % Completion based on task statuses (fallback to initiative status when no tasks)
+  const statusToPercent = {
+    'Not Started': 0,
+    'On Hold': 0,
+    'On Track': 50,
+    'At Risk': 25,
+    'Delayed': 10,
+    'Live': 100,
+    'Cancelled': 100
+  };
+  const getPercentForStatus = (status) => statusToPercent[status] ?? 0;
+  const completionPercent = (() => {
+    if (Array.isArray(tasks) && tasks.length > 0) {
+      const total = tasks.reduce((sum, t) => sum + getPercentForStatus(t.status || 'Not Started'), 0);
+      return Math.round(total / tasks.length);
+    }
+    return getPercentForStatus(i.status || 'Not Started');
+  })();
   
   // Calculate aging
   const createDate = new Date(i.createdAt || i.startDate);
   const now = new Date();
   const daysSinceCreated = Math.floor((now - createDate) / (1000 * 60 * 60 * 24));
   
+  // Helper to format activity log field labels
+  const formatActivityFieldLabel = (field) => {
+    if (!field) return '';
+    const mapping = {
+      businessOwnerId: 'Business Owner / Requestor',
+      businessUserIds: 'Business Users',
+      departmentId: 'Department',
+      itPicId: 'IT PIC',
+      itPicIds: 'IT PIC',
+      itPmId: 'IT PM',
+      itManagerIds: 'IT Manager',
+      startDate: 'Start Date',
+      endDate: 'End Date',
+      documentationLink: 'Project Doc Link'
+    };
+    if (mapping[field]) return mapping[field];
+    return field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1').trim();
+  };
+
+  // Helper to format activity log values (IDs -> names, etc.)
+  const formatActivityValue = (field, raw) => {
+    if (raw === null || raw === undefined || raw === '') return '(empty)';
+
+    // Single user ID fields
+    if (field === 'businessOwnerId' || field === 'itPicId' || field === 'itPmId' || field === 'changedBy') {
+      const name = nameById(LOOKUPS.users, raw);
+      return name || String(raw);
+    }
+
+    // Department
+    if (field === 'departmentId') {
+      const depName = nameById(LOOKUPS.departments, raw);
+      return depName || String(raw);
+    }
+
+    // Multi-user ID fields
+    if (field === 'businessUserIds' || field === 'itPicIds' || field === 'itManagerIds') {
+      let ids = [];
+      if (Array.isArray(raw)) {
+        ids = raw;
+      } else {
+        const str = String(raw).trim();
+        
+        // Try strict JSON parse first (handles '["id"]' cases)
+        if (str.startsWith('[') && str.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(str);
+            if (Array.isArray(parsed)) {
+              ids = parsed;
+            }
+          } catch {
+            // fall through to regex/split parsing
+          }
+        }
+        
+        // If still no IDs, strip all brackets/quotes/braces and check format
+        if (ids.length === 0) {
+          // Strip curly braces, square brackets, and double quotes
+          const cleaned = str.replace(/[{}[\]"]/g, '').trim();
+          
+          // Check if it's a single UUID (no commas) or comma-separated
+          if (cleaned && !cleaned.includes(',')) {
+            // Single UUID (could be wrapped in quotes/braces originally)
+            ids = [cleaned];
+          } else if (cleaned) {
+            // Comma-separated IDs
+            ids = cleaned.split(',').map(v => v.trim()).filter(Boolean);
+          }
+        }
+      }
+      
+      // Look up names for all IDs, stripping any remaining quotes/braces
+      const names = ids.map(id => {
+        const cleanId = String(id).replace(/[{}[\]"]/g, '').trim();
+        // Try cleaned ID first
+        let name = nameById(LOOKUPS.users, cleanId);
+        // If not found, try original ID (in case cleaning removed something important)
+        if (!name && cleanId !== String(id).trim()) {
+          name = nameById(LOOKUPS.users, String(id).trim());
+        }
+        return name;
+      }).filter(Boolean);
+      
+      if (names.length > 0) return names.join(', ');
+      // Fallback: return cleaned IDs if no names found
+      if (ids.length > 0) {
+        const cleanedIds = ids.map(id => String(id).replace(/[{}[\]"]/g, '').trim()).filter(Boolean);
+        return cleanedIds.join(', ');
+      }
+      return String(raw);
+    }
+
+    return String(raw);
+  };
+
   app.innerHTML = `
     <div class="card">
-      <h2>${i.name}</h2>
-      <div class="grid">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 style="margin: 0;">${i.name}</h2>
+        <button id="toggle-edit-btn" class="primary">✏️ Edit</button>
+      </div>
+      <div class="grid" id="view-content">
         <div><div class="muted">Ticket</div><div>${i.ticket || i.id}</div></div>
         <div><div class="muted">Type</div><div>${i.type}</div></div>
         <div><div class="muted">Create Date</div><div>${i.createdAt?.slice(0,10) || ''}</div></div>
         <div><div class="muted">Priority</div><div><span class="priority-badge priority-${i.priority}">${i.priority}</span></div></div>
         <div><div class="muted">Status</div><div><span class="status-badge status-${i.status?.replace(/\s+/g, '-')}">${i.status}</span></div></div>
+        <div><div class="muted">% Completion</div><div><strong>${completionPercent}%</strong></div></div>
         <div><div class="muted">Milestone</div><div>${i.milestone}</div></div>
         <div><div class="muted">Department</div><div>${depName}</div></div>
-        <div><div class="muted">IT PIC</div><div>${itPicNames}</div></div>
-        <div><div class="muted">IT PM</div><div>${itPmName}</div></div>
-        <div><div class="muted">IT Manager</div><div>${itManagerNames}</div></div>
-        <div><div class="muted">Business Owner / Requestor</div><div>${boName}</div></div>
-        <div><div class="muted">Business Users</div><div>${businessUserNames}</div></div>
         <div><div class="muted">Start Date</div><div>${i.startDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">End Date</div><div>${i.endDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">Age Since Created</div><div><strong>${daysSinceCreated} days</strong></div></div>
@@ -1214,6 +1395,18 @@ async function renderView(id) {
         <div style="grid-column: 1 / -1"><div class="muted">Business Impact</div><div style="white-space: pre-wrap; line-height: 1.6;">${i.businessImpact || ''}</div></div>
         <div style="grid-column: 1 / -1"><div class="muted">Remark</div><div style="white-space: pre-wrap; line-height: 1.6;">${i.remark || ''}</div></div>
         <div style="grid-column: 1 / -1"><div class="muted">Project Doc Link</div><div>${i.documentationLink ? `<a href="${i.documentationLink}" target="_blank">${i.documentationLink}</a>` : ''}</div></div>
+      </div>
+      
+      <!-- Project Team Section -->
+      <div style="grid-column: 1 / -1; margin-top: 24px; padding: 20px; background: var(--gray-50); border-radius: 8px;">
+        <h3 style="margin: 0 0 16px 0; color: var(--text);">👥 Project Team</h3>
+        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+          <div><div class="muted">IT PM</div><div style="font-weight: 500;">${itPmName}</div></div>
+          <div><div class="muted">IT PIC</div><div style="font-weight: 500;">${itPicNames}</div></div>
+          <div><div class="muted">IT Manager</div><div style="font-weight: 500;">${itManagerNames}</div></div>
+          <div><div class="muted">Business Owner / Requestor</div><div style="font-weight: 500;">${boName}</div></div>
+          <div><div class="muted">Business Users</div><div style="font-weight: 500;">${businessUserNames}</div></div>
+        </div>
       </div>
       
       <!-- Documents Section -->
@@ -1259,25 +1452,63 @@ async function renderView(id) {
           <div><div class="muted">Live</div><div>${i.cr?.liveDate || ''}</div></div>
         </div>
       ` : ''}
-      ${i.changeHistory && i.changeHistory.length > 0 ? `
-        <h3>Change History</h3>
-        <div class="card" style="margin-top: 16px;">
-          ${i.changeHistory.map(history => `
-            <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #f1f5f9;">
-              <div class="muted" style="font-size: 12px;">${history.timestamp.slice(0,19).replace('T', ' ')} by ${history.changedBy}</div>
-              ${history.changes.map(change => `
-                <div style="margin: 8px 0; padding: 8px; background: #f8fafc; border-radius: 6px;">
-                  <strong>${change.field}:</strong> 
-                  <span style="color: #ef4444;">${change.oldValue || 'empty'}</span> → 
-                  <span style="color: #10b981;">${change.newValue || 'empty'}</span>
+      <!-- Activity Log Section -->
+      <div style="grid-column: 1 / -1; margin-top: 24px;">
+        <h3>📋 Activity Log</h3>
+        <div class="card" style="margin-top: 16px; max-height: 600px; overflow-y: auto;">
+          ${i.changeHistory && i.changeHistory.length > 0 ? `
+            ${i.changeHistory.map((history, idx) => {
+              const changedByName = nameById(LOOKUPS.users, history.changedBy) || history.changedBy || 'System';
+              const timestamp = new Date(history.timestamp);
+              const formattedDate = timestamp.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+              const formattedTime = timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+              return `
+                <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: ${idx < i.changeHistory.length - 1 ? '1px solid #e5e7eb' : 'none'};">
+                  <div style="display: flex; align-items: center; margin-bottom: 12px;">
+                    <div style="width: 8px; height: 8px; background: var(--brand); border-radius: 50%; margin-right: 12px;"></div>
+                    <div style="flex: 1;">
+                      <div style="font-weight: 600; color: var(--text); margin-bottom: 4px;">${changedByName}</div>
+                      <div class="muted" style="font-size: 12px;">${formattedDate} at ${formattedTime}</div>
+                    </div>
+                  </div>
+              ${history.changes && history.changes.length > 0 ? `
+                    <div style="margin-left: 20px; padding-left: 16px; border-left: 2px solid var(--border-light);">
+                      ${history.changes.map(change => {
+                        const fieldLabel = formatActivityFieldLabel(change.field);
+                        const oldFormatted = formatActivityValue(change.field, change.oldValue);
+                        const newFormatted = formatActivityValue(change.field, change.newValue);
+                        return `
+                          <div style="margin: 8px 0; padding: 10px; background: #f8fafc; border-radius: 6px; border-left: 3px solid var(--brand);">
+                            <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">${fieldLabel}</div>
+                            <div style="font-size: 13px; line-height: 1.6;">
+                              <span style="color: #ef4444; text-decoration: line-through; padding: 2px 6px; background: #fee2e2; border-radius: 3px;">${oldFormatted}</span>
+                              <span style="margin: 0 8px; color: var(--muted);">→</span>
+                              <span style="color: #10b981; padding: 2px 6px; background: #d1fae5; border-radius: 3px;">${newFormatted}</span>
+                            </div>
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  ` : `
+                    <div style="margin-left: 20px; padding: 8px; color: var(--muted); font-size: 13px; font-style: italic;">
+                      No specific field changes recorded
+                    </div>
+                  `}
                 </div>
-              `).join('')}
+              `;
+            }).join('')}
+          ` : `
+            <div style="padding: 40px; text-align: center; color: var(--muted);">
+              <div style="font-size: 48px; margin-bottom: 12px;">📝</div>
+              <div style="font-weight: 500; margin-bottom: 4px;">No activity recorded yet</div>
+              <div style="font-size: 13px;">Changes to this initiative will appear here</div>
             </div>
-          `).join('')}
+          `}
         </div>
-      ` : ''}
+      </div>
       <div style="margin-top:12px"><a href="#list"><button>Back</button></a></div>
     </div>
+    
     
     <!-- Comments Section -->
     <div class="card" style="margin-top: 24px;">
@@ -1576,6 +1807,144 @@ async function renderView(id) {
   
   // Setup @mention autocomplete for comment textarea
   setupMentionAutocomplete('new-comment');
+  
+  // Edit mode toggle button - replace view with edit form
+  document.getElementById('toggle-edit-btn').onclick = () => {
+    const itPicIds = i.itPicIds || (i.itPicId ? [i.itPicId] : []);
+    const card = document.querySelector('.card');
+    card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 style="margin: 0;">Edit Initiative</h2>
+        <div>
+          <button id="save-btn" class="primary">💾 Save</button>
+          <button id="cancel-edit-btn" style="margin-left: 8px;">Cancel</button>
+        </div>
+      </div>
+      <form id="edit-form" class="form">
+        ${formRow('Initiative Name', `<input name="name" value="${(i.name || '').replace(/"/g, '&quot;')}" required />`)}
+        ${formRow('Ticket', `<input name="ticket" value="${(i.ticket || '').replace(/"/g, '&quot;')}" readonly style="background: #f0f0f0;" />`)}
+        ${formRow('Type', `<input name="type" value="${i.type}" readonly style="background: #f0f0f0;" />`)}
+        ${formRow('Create Date', `<input type="date" value="${i.createdAt?.slice(0,10) || ''}" readonly style="background: #f0f0f0;" />`)}
+        ${formRow('Priority', `<select name="priority">${['P0','P1','P2'].map(p => `<option value="${p}" ${i.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
+          ${formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => `<option value="${s}" ${i.status && i.status.toLowerCase() === s.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}</select>`)}
+        ${formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
+        ${formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => `<option value="${d.id}" ${d.id === i.departmentId ? 'selected' : ''}>${d.name}</option>`).join('')}</select>`)}
+        ${formRow('Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" required />`)}
+        ${formRow('End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
+        <div class="form-row"><label>Age Since Created</label><div><strong>${daysSinceCreated} days</strong></div></div>
+        ${formRow('Description', `<textarea name="description" class="long-text" required style="min-height: 100px;">${(i.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
+        ${formRow('Business Impact', `<textarea name="businessImpact" class="long-text" required style="min-height: 100px;">${(i.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
+        ${formRow('Remark', `<textarea name="remark" class="long-text" style="min-height: 80px;">${(i.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
+        ${formRow('Project Doc Link', `<input name="documentationLink" type="url" value="${i.documentationLink || ''}" />`)}
+        
+        <!-- Project Team Section -->
+        <div style="margin-top: 24px; padding: 20px; background: var(--gray-50); border-radius: 8px;">
+          <h3 style="margin: 0 0 16px 0; color: var(--text);">👥 Project Team</h3>
+          ${formRow('IT PM', `<select name="itPmId">${[''].concat(LOOKUPS.users.map(u => u.id)).map(uid => `<option value="${uid}" ${i.itPmId === uid ? 'selected' : ''}>${uid ? nameById(LOOKUPS.users, uid) : 'None'}</option>`).join('')}</select>`)}
+          ${formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, itPicIds))}
+          ${formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, i.itManagerIds || []))}
+          ${formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => `<option value="${u.id}" ${u.id === i.businessOwnerId ? 'selected' : ''}>${u.name}</option>`).join('')}</select>`)}
+          ${formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, i.businessUserIds || []))}
+        </div>
+        
+        ${i.type === 'CR' ? `
+          <div style="margin-top: 24px;">
+            <h3>CR Dates</h3>
+            ${formRow('CR Submission Start', `<input type="date" name="cr.crSubmissionStart" value="${i.cr?.crSubmissionStart?.slice(0,10) || ''}" />`)}
+            ${formRow('CR Submission End', `<input type="date" name="cr.crSubmissionEnd" value="${i.cr?.crSubmissionEnd?.slice(0,10) || ''}" />`)}
+            ${formRow('Development Start', `<input type="date" name="cr.developmentStart" value="${i.cr?.developmentStart?.slice(0,10) || ''}" />`)}
+            ${formRow('Development End', `<input type="date" name="cr.developmentEnd" value="${i.cr?.developmentEnd?.slice(0,10) || ''}" />`)}
+            ${formRow('SIT Start', `<input type="date" name="cr.sitStart" value="${i.cr?.sitStart?.slice(0,10) || ''}" />`)}
+            ${formRow('SIT End', `<input type="date" name="cr.sitEnd" value="${i.cr?.sitEnd?.slice(0,10) || ''}" />`)}
+            ${formRow('UAT Start', `<input type="date" name="cr.uatStart" value="${i.cr?.uatStart?.slice(0,10) || ''}" />`)}
+            ${formRow('UAT End', `<input type="date" name="cr.uatEnd" value="${i.cr?.uatEnd?.slice(0,10) || ''}" />`)}
+            ${formRow('Live Date', `<input type="date" name="cr.liveDate" value="${i.cr?.liveDate?.slice(0,10) || ''}" />`)}
+          </div>
+        ` : ''}
+        <div style="margin-top: 20px; display: flex; gap: 12px;">
+          <button type="button" id="cancel-edit-btn-2">Cancel</button>
+          <button type="button" id="save-btn-2" class="primary">💾 Save</button>
+        </div>
+      </form>
+      <div style="margin-top:12px"><a href="#list"><button>Back</button></a></div>
+    `;
+    
+    initializeMultiSelects();
+    
+    // Save button handlers (both buttons)
+    const saveHandler = async () => {
+      const form = document.getElementById('edit-form');
+      const fd = new FormData(form);
+      const obj = Object.fromEntries(fd.entries());
+      
+      // Parse comma-separated arrays
+      const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
+      const itPicIds = obj.itPicIds ? obj.itPicIds.split(',').filter(Boolean) : [];
+      const itManagerIds = obj.itManagerIds ? obj.itManagerIds.split(',').filter(Boolean) : [];
+      
+      // Debug logging
+      console.log('[Frontend] Edit form data:', {
+        'obj.itManagerIds': obj.itManagerIds,
+        'parsed itManagerIds': itManagerIds,
+        'current i.itManagerIds': i.itManagerIds
+      });
+      
+      const payload = {
+        name: obj.name || i.name,
+        description: obj.description,
+        businessImpact: obj.businessImpact,
+        priority: obj.priority,
+        businessOwnerId: obj.businessOwnerId,
+        businessUserIds: businessUserIds.length > 0 ? businessUserIds : null,
+        departmentId: obj.departmentId,
+        itPicIds: itPicIds.length > 0 ? itPicIds : null,
+        itPmId: obj.itPmId || null,
+        itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
+        status: obj.status,
+        milestone: obj.milestone,
+        startDate: obj.startDate,
+        endDate: obj.endDate || null,
+        remark: obj.remark || null,
+        documentationLink: obj.documentationLink || null,
+        changedBy: currentUser?.id || 'Unknown'
+      };
+      
+      if (i.type === 'CR') {
+        payload.cr = {
+          crSubmissionStart: obj['cr.crSubmissionStart'] || null,
+          crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
+          developmentStart: obj['cr.developmentStart'] || null,
+          developmentEnd: obj['cr.developmentEnd'] || null,
+          sitStart: obj['cr.sitStart'] || null,
+          sitEnd: obj['cr.sitEnd'] || null,
+          uatStart: obj['cr.uatStart'] || null,
+          uatEnd: obj['cr.uatEnd'] || null,
+          liveDate: obj['cr.liveDate'] || null
+        };
+      }
+      
+      try {
+        await fetchJSON(`/api/initiatives/${id}`, { 
+          method: 'PUT', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify(payload) 
+        });
+        renderView(id);
+      } catch (e) {
+        alert('Failed to save changes: ' + e.message);
+      }
+    };
+    
+    document.getElementById('save-btn').onclick = saveHandler;
+    document.getElementById('save-btn-2').onclick = saveHandler;
+    
+    // Cancel button handlers (both buttons)
+    const cancelHandler = () => {
+      renderView(id);
+    };
+    document.getElementById('cancel-edit-btn').onclick = cancelHandler;
+    document.getElementById('cancel-edit-btn-2').onclick = cancelHandler;
+  };
   
   // Event handlers for comments
   document.getElementById('add-comment-btn').onclick = async () => {
@@ -2244,7 +2613,7 @@ async function renderEdit(id) {
       endDate: obj.endDate || null,
       remark: obj.remark || null,
       documentationLink: obj.documentationLink || null,
-      changedBy: currentUser?.name || 'Unknown'
+      changedBy: currentUser?.id || 'Unknown'
     };
     if (i.type === 'CR') {
       payload.cr = {
@@ -2713,15 +3082,33 @@ async function renderDashboard() {
   setActive('#dashboard');
   await ensureLookups();
   
+  // Get current user profile to check if they're a Manager
+  let currentUserProfile = null;
+  let isManager = false;
+  let teamMembers = [];
+  try {
+    currentUserProfile = await fetchJSON('/api/profile');
+    isManager = currentUserProfile.type === 'Manager';
+    if (isManager && currentUserProfile.teamMemberIds && currentUserProfile.teamMemberIds.length > 0) {
+      teamMembers = currentUserProfile.teamMemberIds.map(id => 
+        LOOKUPS.users.find(u => u.id === id)
+      ).filter(Boolean);
+    }
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+  }
+  
   // Get filter values from URL or use defaults
   const urlParams = new URLSearchParams(location.search);
   const selectedDepartmentId = urlParams.get('departmentId') || '';
   const selectedItPmId = urlParams.get('itPmId') || '';
+  const selectedTeamMemberId = urlParams.get('teamMemberId') || '';
   
   // Build API query string with filters
   const apiQs = new URLSearchParams();
   if (selectedDepartmentId) apiQs.set('departmentId', selectedDepartmentId);
   if (selectedItPmId) apiQs.set('itPmId', selectedItPmId);
+  if (selectedTeamMemberId) apiQs.set('teamMemberId', selectedTeamMemberId);
   
   const d = await fetchJSON('/api/dashboard?' + apiQs.toString());
   
@@ -2783,12 +3170,18 @@ async function renderDashboard() {
     .map(u => ({ value: u.id, label: u.name || u.email }))
     .sort((a, b) => a.label.localeCompare(b.label));
   
+  // Team member options (only for Managers)
+  const teamMemberOptions = isManager && teamMembers.length > 0
+    ? teamMembers.map(m => ({ value: m.id, label: m.name || m.email }))
+    : [];
+  
   app.innerHTML = `
     <div class="card" style="margin-bottom: 24px; padding: 20px;">
       <div style="display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap;">
         ${createFilterDropdown('filter-department', 'Department', departmentOptions, selectedDepartmentId, 'updateDashboardFilters()')}
         ${createFilterDropdown('filter-itpm', 'IT PM', itPmOptions, selectedItPmId, 'updateDashboardFilters()')}
-        ${(selectedDepartmentId || selectedItPmId) ? `
+        ${isManager && teamMemberOptions.length > 0 ? createFilterDropdown('filter-team-member', 'Team Member', teamMemberOptions, selectedTeamMemberId, 'updateDashboardFilters()') : ''}
+        ${(selectedDepartmentId || selectedItPmId || selectedTeamMemberId) ? `
           <button onclick="clearDashboardFilters()" style="padding: 10px 16px; background: var(--gray-100); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text);">
             Clear Filters
           </button>
@@ -2922,9 +3315,11 @@ async function renderDashboard() {
   window.updateDashboardFilters = () => {
     const departmentId = document.getElementById('filter-department')?.value || '';
     const itPmId = document.getElementById('filter-itpm')?.value || '';
+    const teamMemberId = document.getElementById('filter-team-member')?.value || '';
     const params = new URLSearchParams();
     if (departmentId) params.set('departmentId', departmentId);
     if (itPmId) params.set('itPmId', itPmId);
+    if (teamMemberId) params.set('teamMemberId', teamMemberId);
     location.search = params.toString();
   };
   
@@ -2935,11 +3330,67 @@ async function renderDashboard() {
 
 async function renderUserDashboard() {
   setActive('#user-dashboard');
+  await ensureLookups();
+  
   try {
-    const data = await fetchJSON('/api/user-dashboard');
+    // Get current user profile to check if they're a Manager
+    let currentUserProfile = null;
+    let isManager = false;
+    let teamMembers = [];
+    try {
+      currentUserProfile = await fetchJSON('/api/profile');
+      isManager = currentUserProfile.type === 'Manager';
+      if (isManager && currentUserProfile.teamMemberIds && currentUserProfile.teamMemberIds.length > 0) {
+        teamMembers = currentUserProfile.teamMemberIds.map(id => 
+          LOOKUPS.users.find(u => u.id === id)
+        ).filter(Boolean);
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+    }
+    
+    // Get filter values from URL or use defaults
+    const urlParams = new URLSearchParams(location.search);
+    const selectedTeamMemberId = urlParams.get('teamMemberId') || '';
+    
+    // Build API query string with filters
+    const apiQs = new URLSearchParams();
+    if (selectedTeamMemberId) apiQs.set('teamMemberId', selectedTeamMemberId);
+    
+    const data = await fetchJSON('/api/user-dashboard?' + apiQs.toString());
     const deptName = (id) => nameById(LOOKUPS.departments, id);
     
+    // Helper function to create filter dropdown
+    const createFilterDropdown = (id, label, options, value, onChange) => {
+      return `
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;">${label}</label>
+          <select id="${id}" style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--surface); color: var(--text); cursor: pointer; min-width: 200px;" onchange="${onChange}">
+            <option value="">All ${label}</option>
+            ${options.map(opt => `<option value="${opt.value}" ${opt.value === value ? 'selected' : ''}>${opt.label}</option>`).join('')}
+          </select>
+        </div>
+      `;
+    };
+    
+    // Team member options (only for Managers)
+    const teamMemberOptions = isManager && teamMembers.length > 0
+      ? teamMembers.map(m => ({ value: m.id, label: m.name || m.email }))
+      : [];
+    
     app.innerHTML = `
+      ${isManager && teamMemberOptions.length > 0 ? `
+      <div class="card" style="margin-bottom: 24px; padding: 20px;">
+        <div style="display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap;">
+          ${createFilterDropdown('filter-team-member', 'Team Member', teamMemberOptions, selectedTeamMemberId, 'updateUserDashboardFilters()')}
+          ${selectedTeamMemberId ? `
+            <button onclick="clearUserDashboardFilters()" style="padding: 10px 16px; background: var(--gray-100); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text);">
+              Clear Filter
+            </button>
+          ` : ''}
+        </div>
+      </div>
+      ` : ''}
       <div class="kpis">
         <div class="card">
           <div class="muted">My Projects</div>
@@ -3056,6 +3507,18 @@ async function renderUserDashboard() {
         </div>
       </div>
     `;
+    
+    // Add filter update functions
+    window.updateUserDashboardFilters = () => {
+      const teamMemberId = document.getElementById('filter-team-member')?.value || '';
+      const params = new URLSearchParams();
+      if (teamMemberId) params.set('teamMemberId', teamMemberId);
+      location.search = params.toString();
+    };
+    
+    window.clearUserDashboardFilters = () => {
+      location.search = '';
+    };
   } catch (error) {
     console.error('User dashboard error:', error);
     app.innerHTML = `<div class="error">Error loading dashboard: ${error.message}</div>`;
@@ -3068,6 +3531,24 @@ async function renderProfile() {
     await ensureLookups();
     const user = await fetchJSON('/api/profile');
     
+    // Get team members if user is a manager
+    const teamMemberIds = user.teamMemberIds || [];
+    const teamMembers = teamMemberIds.map(id => LOOKUPS.users.find(u => u.id === id)).filter(Boolean);
+    
+    // Get available users to add (exclude current user and existing team members)
+    // Check if LOOKUPS.users exists and is an array
+    const allUsers = Array.isArray(LOOKUPS.users) ? LOOKUPS.users : [];
+    
+    const availableUsers = allUsers.filter(u => {
+      // Include user if: active (or active is undefined/null), not current user, not already in team
+      const isActive = u.active !== false && u.active !== 0;
+      const isNotSelf = u.id !== user.id;
+      const isNotInTeam = !teamMemberIds.includes(u.id);
+      return isActive && isNotSelf && isNotInTeam;
+    });
+    
+    const isManager = user.type === 'Manager';
+    
     app.innerHTML = `
       <div class="card">
         <h2>My Profile</h2>
@@ -3076,6 +3557,7 @@ async function renderProfile() {
           ${formRow('Email', `<input type="email" name="email" value="${(user.email || '').replace(/"/g, '&quot;')}" required />`)}
           ${formRow('Department', `<select name="departmentId">${LOOKUPS.departments.map(d => `<option value="${d.id}" ${d.id === user.departmentId ? 'selected' : ''}>${d.name}</option>`).join('')}</select>`)}
           ${formRow('Role', `<input type="text" value="${user.role || (user.isAdmin ? 'Admin' : 'User')}" disabled style="background: #f0f0f0;" />`)}
+          ${formRow('Type', `<input type="text" value="${user.type || 'N/A'}" disabled style="background: #f0f0f0;" />`)}
           ${formRow('Status', `<input type="text" value="${user.emailActivated ? 'Activated' : 'Pending Activation'}" disabled style="background: #f0f0f0;" />`)}
           <div>
             <button class="primary" type="submit">Update Profile</button>
@@ -3083,6 +3565,47 @@ async function renderProfile() {
           </div>
         </form>
       </div>
+      
+      ${isManager ? `
+      <div class="card" style="margin-top: 20px;">
+        <h2>My Team Members</h2>
+        <div style="margin-bottom: 16px;">
+          <select id="add-team-member-select" style="margin-right: 8px; padding: 8px; min-width: 200px;">
+            <option value="">Select a user to add...</option>
+            ${availableUsers.map(u => `<option value="${u.id}">${escapeHtml(u.name)} (${escapeHtml(u.email)})</option>`).join('')}
+          </select>
+          <button class="primary" onclick="addTeamMember()">Add Team Member</button>
+        </div>
+        <div id="team-members-list">
+          ${teamMembers.length > 0 ? `
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${teamMembers.map(member => `
+                  <tr>
+                    <td>${escapeHtml(member.name)}</td>
+                    <td>${escapeHtml(member.email || 'N/A')}</td>
+                    <td>${escapeHtml(member.role || 'N/A')}</td>
+                    <td>
+                      <button onclick="removeTeamMember('${member.id}', '${escapeHtml(member.name)}')" style="color: var(--danger);">Remove</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          ` : `
+            <p class="muted">No team members yet. Add team members using the dropdown above.</p>
+          `}
+        </div>
+      </div>
+      ` : ''}
     `;
     
     const form = document.getElementById('profile-form');
@@ -3110,6 +3633,47 @@ async function renderProfile() {
         renderProfile(); // Refresh to show updated data
       } catch (error) {
         alert('Failed to update profile: ' + error.message);
+      }
+    };
+    
+    // Team member management functions (for managers)
+    window.addTeamMember = async () => {
+      const select = document.getElementById('add-team-member-select');
+      const teamMemberId = select.value;
+      
+      if (!teamMemberId) {
+        alert('Please select a user to add');
+        return;
+      }
+      
+      try {
+        await fetchJSON('/api/profile/team-members', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ teamMemberId })
+        });
+        
+        alert('Team member added successfully!');
+        renderProfile(); // Refresh to show updated team
+      } catch (error) {
+        alert('Failed to add team member: ' + error.message);
+      }
+    };
+    
+    window.removeTeamMember = async (teamMemberId, memberName) => {
+      if (!confirm(`Are you sure you want to remove ${memberName} from your team?`)) {
+        return;
+      }
+      
+      try {
+        await fetchJSON(`/api/profile/team-members/${teamMemberId}`, {
+          method: 'DELETE'
+        });
+        
+        alert('Team member removed successfully!');
+        renderProfile(); // Refresh to show updated team
+      } catch (error) {
+        alert('Failed to remove team member: ' + error.message);
       }
     };
   } catch (error) {
@@ -3185,6 +3749,7 @@ async function renderAdminUsers() {
               <th>Name</th>
               <th>Email</th>
               <th>Role</th>
+              <th>Type</th>
               <th>Department</th>
               <th>Active</th>
               <th>Admin</th>
@@ -3197,13 +3762,15 @@ async function renderAdminUsers() {
               <tr>
                 <td>${user.name}</td>
                 <td>${user.email}</td>
-                <td>${user.role || 'User'}</td>
+                <td>${user.role || 'N/A'}</td>
+                <td>${user.type || 'N/A'}</td>
                 <td>${nameById(LOOKUPS.departments, user.departmentId) || 'N/A'}</td>
                 <td>${user.active ? '✓' : '✗'}</td>
                 <td>${user.isAdmin ? '✓' : '✗'}</td>
                 <td>${user.emailActivated ? '✓' : '✗'}</td>
                 <td>
                   <button onclick="editUser('${user.id}')" style="margin-right: 8px;">Edit</button>
+                  <button onclick="resetUserPassword('${user.id}', '${user.email}')" style="margin-right: 8px;" title="Reset Password">🔑</button>
                   ${user.id !== currentUser?.id ? `<button onclick="deleteUser('${user.id}')" style="color: var(--danger);">Delete</button>` : ''}
                 </td>
               </tr>
@@ -3232,7 +3799,20 @@ async function renderAdminUsers() {
             </div>
             <div class="form-row">
               <label>Role</label>
-              <input name="role" />
+              <select name="role">
+                <option value="">None</option>
+                <option value="IT">IT</option>
+                <option value="Business User">Business User</option>
+                <option value="Admin">Admin</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Type</label>
+              <select name="type">
+                <option value="">None</option>
+                <option value="IC (Individual Contributor)">IC (Individual Contributor)</option>
+                <option value="Manager">Manager</option>
+              </select>
             </div>
             <div class="form-row">
               <label>Department</label>
@@ -3280,7 +3860,8 @@ async function renderAdminUsers() {
       form.querySelector('input[name="id"]').value = user.id;
       form.querySelector('input[name="name"]').value = user.name || '';
       form.querySelector('input[name="email"]').value = user.email || '';
-      form.querySelector('input[name="role"]').value = user.role || '';
+      form.querySelector('select[name="role"]').value = user.role || '';
+      form.querySelector('select[name="type"]').value = user.type || '';
       form.querySelector('select[name="departmentId"]').value = user.departmentId || '';
       form.querySelector('input[name="active"]').checked = user.active;
       form.querySelector('input[name="isAdmin"]').checked = user.isAdmin;
@@ -3300,6 +3881,34 @@ async function renderAdminUsers() {
     
     window.closeUserForm = () => {
       document.getElementById('user-form-modal').classList.add('hidden');
+    };
+    
+    window.resetUserPassword = async (userId, userEmail) => {
+      const newPassword = prompt(`Enter new password for ${userEmail}:\n(Minimum 6 characters)`);
+      if (!newPassword) return;
+      
+      if (newPassword.length < 6) {
+        alert('Password must be at least 6 characters');
+        return;
+      }
+      
+      const confirmPassword = prompt('Confirm new password:');
+      if (newPassword !== confirmPassword) {
+        alert('Passwords do not match');
+        return;
+      }
+      
+      try {
+        await fetchJSON(`/api/admin/users/${userId}/password`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: newPassword }),
+        });
+        alert('Password updated successfully!');
+        renderAdminUsers();
+      } catch (e) {
+        alert('Error updating password: ' + e.message);
+      }
     };
     
     document.getElementById('user-form').onsubmit = async (e) => {
@@ -3323,11 +3932,26 @@ async function renderAdminUsers() {
       } else {
         // Update
         try {
+          const password = data.password;
+          // Remove password from regular update data
+          delete data.password;
+          
+          // Update user info
           await fetchJSON(`/api/admin/users/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
           });
+          
+          // If password is provided, update it separately
+          if (password && password.trim()) {
+            await fetchJSON(`/api/admin/users/${id}/password`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password }),
+            });
+          }
+          
           closeUserForm();
           renderAdminUsers();
         } catch (e) {
@@ -3568,6 +4192,39 @@ async function renderCRDashboard() {
           ${(!d.byDepartment || d.byDepartment.length === 0) ? '<p class="muted">No department data available</p>' : ''}
         </div>
       </div>
+      ${d.weeklyTrendData && d.weeklyTrendData.length > 0 ? `
+      <div class="card" style="margin-top: 24px; grid-column: 1 / -1;">
+        <h3>📈 CR Weekly Trend</h3>
+        <div style="margin-top: 16px; overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 2px solid var(--border);">
+                <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">Week (Mon-Fri)</th>
+                <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text);">New CRs</th>
+                <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text);">CRs Went Live</th>
+                <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text);">Total CRs</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${d.weeklyTrendData.map((week, index) => {
+                const isLatest = index === d.weeklyTrendData.length - 1;
+                return `
+                  <tr style="border-bottom: 1px solid var(--border); ${isLatest ? 'background: #f0f9ff; font-weight: 600;' : ''}">
+                    <td style="padding: 12px; color: var(--text);">${week.weekLabel || `${week.weekStart} - ${week.weekEnd}`}</td>
+                    <td style="padding: 12px; text-align: center; color: var(--brand);">${week.newCRs || 0}</td>
+                    <td style="padding: 12px; text-align: center; color: var(--success);">${week.liveCRs || 0}</td>
+                    <td style="padding: 12px; text-align: center; color: var(--text);">${week.totalCRs || 0}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 6px; font-size: 12px; color: var(--muted);">
+          <strong>Note:</strong> Week shows Monday-Friday range. "New CRs" = CRs created that week. "CRs Went Live" = CRs that became LIVE that week. "Total CRs" = Cumulative count of all CRs by end of week.
+        </div>
+      </div>
+      ` : ''}
     </div>
   `;
   
@@ -3750,7 +4407,8 @@ function renderAuth() {
       alert(json.error || 'Request failed');
       return;
     }
-    alert('If the email exists, a reset link has been registered.');
+    const json = await res.json();
+    alert(json.message || 'If an account exists with this email, a password reset link has been sent.');
   };
 }
 
@@ -3965,6 +4623,7 @@ async function router() {
   try {
     if (h.startsWith('#auth')) return renderAuth();
     if (h.startsWith('#activate/')) return renderActivate(h.split('/')[1]);
+    if (h.startsWith('#reset-password/')) return renderResetPassword(h.split('/')[1]);
     if (h.startsWith('#user-dashboard')) return renderUserDashboard();
     if (h.startsWith('#admin-users')) return renderAdminUsers();
     if (h.startsWith('#admin-roles')) return renderAdminRoles();
@@ -4008,6 +4667,71 @@ async function renderActivate(token) {
   } catch (e) {
     app.innerHTML = `<div class="card"><h2>Activation Error</h2><p class="error">${e.message}</p><a href="#auth"><button>Go to Login</button></a></div>`;
   }
+}
+
+// Handle password reset route
+async function renderResetPassword(token) {
+  setActive('#auth');
+  app.innerHTML = `
+    <div class="card auth-card">
+      <h2>Reset Password</h2>
+      <p class="muted">Enter your new password below.</p>
+      <form id="form-reset-password" class="form">
+        <div class="form-row">
+          <label>New Password</label>
+          <input name="password" type="password" required minlength="6" />
+          <small class="muted">Password must be at least 6 characters</small>
+        </div>
+        <div class="form-row">
+          <label>Confirm New Password</label>
+          <input name="confirmPassword" type="password" required minlength="6" />
+        </div>
+        <button type="submit" class="primary">Reset Password</button>
+        <div style="margin-top: 16px;">
+          <a href="#auth" style="color: var(--primary);">Back to Login</a>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.getElementById('form-reset-password').onsubmit = async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const password = fd.get('password');
+    const confirmPassword = fd.get('confirmPassword');
+    
+    if (password !== confirmPassword) {
+      alert('Passwords do not match');
+      return;
+    }
+    
+    if (password.length < 6) {
+      alert('Password must be at least 6 characters');
+      return;
+    }
+    
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        alert(json.error || 'Password reset failed');
+        return;
+      }
+      app.innerHTML = `
+        <div class="card">
+          <h2>Password Reset Successful</h2>
+          <p>${json.message || 'Your password has been reset successfully. You can now log in with your new password.'}</p>
+          <a href="#auth"><button class="primary">Go to Login</button></a>
+        </div>
+      `;
+    } catch (e) {
+      alert('Error resetting password: ' + e.message);
+    }
+  };
 }
 
 // Initialize
