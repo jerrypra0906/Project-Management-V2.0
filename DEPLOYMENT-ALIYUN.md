@@ -2,8 +2,8 @@
 
 This document describes how to deploy **Project-Management-V2.0** to production on AliCloud with:
 
-- **Backend + Postgres DB** on: `172.28.80.51` (Private) / `147.139.176.70:1819` (Public)
-- **Frontend (Nginx + static files)** on: `172.28.80.50` (Private) / `147.139.176.70:1818` (Public)
+- **Backend + Postgres DB** on: `172.28.80.51` (Private) / `8.215.56.98:1819` (Public)
+- **Frontend (Nginx + static files)** on: `172.28.80.50` (Private) / `147.139.176.70:1817` (Public)
 
 Assumptions:
 
@@ -213,7 +213,7 @@ Edit `frontend/nginx.conf` and set the `proxy_pass` targets to the backend IP:
 
 ```nginx
 location /api/ {
-    proxy_pass http://147.139.176.70:1819;
+    proxy_pass http://8.215.56.98:1819;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection 'upgrade';
@@ -225,7 +225,7 @@ location /api/ {
 }
 
 location /docs/ {
-    proxy_pass http://147.139.176.70:1819;
+    proxy_pass http://8.215.56.98:1819;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -312,7 +312,7 @@ docker compose -f docker-compose.frontend.yml up -d frontend
 
 **On backend server (172.28.80.51):**
 - Allow port **3000/tcp** from **172.28.80.50** only (for internal API access).
-- Do **not** expose Postgres (5432/5434) publicly; only allow internal access if needed.
+  - Do **not** expose Postgres (5432/5434) publicly; only allow internal access if needed.
 
 **On frontend server (172.28.80.50):**
 - Allow port **1818/tcp** from end‑user networks (public access).
@@ -330,19 +330,243 @@ sudo ufw allow 1818/tcp
 
 ### 4.3. AliCloud Security Groups
 
+**CRITICAL**: Security Groups control what traffic can reach your instances. This is the most common cause of public IP access issues.
+
 If you use AliCloud security groups / VPC ACLs, configure equivalent rules:
 
 **Frontend Server (172.28.80.50):**
-- Allow inbound **1818/tcp** from `0.0.0.0/0` (or specific IP ranges) for public access
+- Allow inbound **1817/tcp** (or your actual port) from `0.0.0.0/0` for public access
+- If SSH is on port 1818, allow **1818/tcp** from specific IPs only for security
 
 **Backend Server (172.28.80.51):**
 - Allow inbound **3000/tcp** from `172.28.80.50/32` (frontend private IP only)
 - Do **not** expose port 3000 publicly (frontend proxies all requests)
 
+**How to configure Security Group in AliCloud Console:**
+
+1. **Go to**: ECS → Instances → Select your frontend instance
+2. **Click**: Security Groups tab → Click on the security group name
+3. **Go to**: Inbound Rules (入站规则)
+4. **Add Rule**:
+   - **Authorization Policy**: Allow
+   - **Priority**: 1 (highest priority)
+   - **Protocol Type**: TCP
+   - **Port Range**: `1817/1817` (or your actual port)
+   - **Authorization Object**: `0.0.0.0/0` (allows from anywhere, or specify IP ranges)
+   - **Description**: "Frontend HTTP Access"
+
+5. **Click**: Save
+
 **Port Mapping in AliCloud:**
-- Configure NAT Gateway or EIP port forwarding if needed:
-  - `147.139.176.70:1818` → `172.28.80.50:1818` (Frontend)
-  - `147.139.176.70:1819` → `172.28.80.51:3000` (Backend, optional direct access)
+- If using **Elastic IP (EIP)**: Ensure EIP is bound to the instance (check in ECS → Network & Security)
+- If using **NAT Gateway**: Configure DNAT entries if needed:
+   - `147.139.176.70:1817` → `172.28.80.50:1817` (Frontend)
+   - `8.215.56.98:1819` → `172.28.80.51:3000` (Backend, optional direct access)
+
+**Troubleshooting Public IP Access:**
+
+If private IP works but public IP doesn't (even with Security Group configured correctly):
+
+1. **Verify EIP Binding:**
+   - ECS → Instances → Your instance → Network & Security tab
+   - Ensure Elastic IP `147.139.176.70` shows as "Bound" (已绑定) to your frontend instance
+   - **Important**: The EIP must be bound to the instance that has the container running
+   - If not bound, click "Bind Elastic IP" and select `147.139.176.70`
+   - Wait 1-2 minutes after binding for changes to take effect
+
+2. **Check if using NAT Gateway (DNAT):**
+   - If your instance is in a VPC and using NAT Gateway, you may need DNAT entries
+   - NAT Gateway → DNAT Entries → Check if there's a mapping:
+     - External IP: `147.139.176.70`
+     - External Port: `1817`
+     - Internal IP: `172.28.80.50`
+     - Internal Port: `1817`
+   - If missing, create a DNAT entry
+
+3. **Verify Security Group is attached to correct instance:**
+   - ECS → Instances → Your frontend instance (172.28.80.50)
+   - Security Groups tab → Verify the security group with port 1817 rule is listed
+   - If multiple security groups, ensure at least one has the 1817 rule
+
+4. **Check VPC Route Table:**
+   - VPC → Route Tables → Your route table
+   - Ensure there's a default route (`0.0.0.0/0`) pointing to:
+     - Internet Gateway (if using EIP directly), OR
+     - NAT Gateway (if using NAT Gateway)
+   - Without this route, public traffic cannot reach the instance
+
+5. **Test from different locations:**
+   
+   **Important Note**: Testing from the frontend server itself using its own public IP often times out - this is normal behavior. Test from elsewhere.
+   
+   ```bash
+   # From backend server (within VPC):
+   curl -v http://147.139.176.70:1817/health
+   
+   # From your local computer/browser (outside VPC):
+   curl -v http://147.139.176.70:1817/health
+   # Or open in browser: http://147.139.176.70:1817
+   
+   # From frontend server itself (using public IP often fails - this is expected):
+   # Use private IP instead:
+   curl http://172.28.80.50:1817/health
+   ```
+   
+   **Why accessing own public IP from the server fails:**
+   - Traffic tries to go out to internet and back, which may be blocked by routing policies
+   - Use private IP when testing from the same server
+   - Test public IP from a different location (backend server, your computer, etc.)
+
+6. **Check instance network configuration:**
+   ```bash
+   # On frontend server (172.28.80.50):
+   ip addr show
+   # Should show the private IP 172.28.80.50
+   
+   # Check if instance can reach internet (outbound):
+   curl -I http://www.alipay.com
+   # If this fails, the instance may not have internet gateway configured
+   
+   # Verify container is accessible via private IP:
+   curl http://localhost:1817/health
+   # Should return: healthy
+   
+   # Verify container is accessible via private IP from outside container:
+   curl http://172.28.80.50:1817/health
+   # Should return: healthy
+   ```
+
+7. **Check for OS-level firewall (iptables/ufw):**
+   ```bash
+   # On frontend server:
+   # Check UFW status
+   sudo ufw status
+   
+   # Check iptables rules (if UFW not used):
+   sudo iptables -L -n -v | grep 1817
+   
+   # If UFW is active, ensure port 1817 is allowed:
+   sudo ufw allow 1817/tcp
+   sudo ufw reload
+   ```
+   
+8. **Verify Docker port binding:**
+   ```bash
+   # On frontend server:
+   docker ps --format "{{.Names}}: {{.Ports}}" | grep frontend
+   # Should show: 0.0.0.0:1817->80/tcp
+   # If it shows 127.0.0.1:1817->80/tcp, that's the problem - rebuild container
+   # If empty, check container name:
+   docker ps --format "table {{.Names}}\t{{.Ports}}"
+   ```
+
+9. **Most Common Issue: NAT Gateway DNAT Entry Missing**
+   
+   If private IP works but public IP doesn't (from any location), **you likely need a DNAT entry** in NAT Gateway.
+   
+   **How to Check Existing DNAT Entries:**
+   
+   **Method 1: Via AliCloud Console (Easiest)**
+   
+   1. Go to: **NAT Gateway** → Select your NAT Gateway
+   2. Click: **DNAT Entry List** (DNAT条目列表)
+   3. **Look for entries with:**
+      - External IP: `147.139.176.70`
+      - Check both ports: `1817` (frontend) and `1818` (SSH, if needed)
+   
+   4. **Verify the entry:**
+      - External Port: `1817` (or `1818`)
+      - Internal IP: Should be `172.28.80.50` for frontend
+      - Internal Port: Should match External Port (`1817` for frontend, `1818` for SSH)
+      - Status: Should be "Available" (可用)
+   
+   **Method 2: Via AliCloud CLI (If installed)**
+   
+   ```bash
+   # Install AliCloud CLI if not installed:
+   # wget https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
+   # tar xzvf aliyun-cli-linux-latest-amd64.tgz
+   # sudo mv aliyun /usr/local/bin/
+   
+   # Configure credentials (if not already done):
+   # aliyun configure
+   
+   # List all NAT Gateways (to find the ID):
+   aliyun vpc DescribeNatGateways
+   
+   # List DNAT entries (replace NAT_GATEWAY_ID with actual ID):
+   aliyun vpc DescribeForwardTableEntries \
+     --RegionId cn-hangzhou \
+     --ForwardTableId <YOUR_NAT_GATEWAY_ID>
+   
+   # Filter for your IP and ports:
+   aliyun vpc DescribeForwardTableEntries \
+     --RegionId cn-hangzhou \
+     --ForwardTableId <YOUR_NAT_GATEWAY_ID> | \
+     grep -E "147.139.176.70|1817|1818"
+   ```
+   
+   **Method 3: Quick Check Script**
+   
+   Run this on any server with AliCloud CLI access:
+   
+   ```bash
+   # Check DNAT entries for your public IP
+   PUBLIC_IP="147.139.176.70"
+   PORTS="1817 1818"
+   
+   echo "Checking DNAT entries for $PUBLIC_IP..."
+   echo ""
+   
+   for PORT in $PORTS; do
+     echo "Checking port $PORT:"
+     # Use AliCloud CLI to check (requires proper setup)
+     # This is a template - actual command depends on your CLI setup
+     echo "  External IP: $PUBLIC_IP"
+     echo "  External Port: $PORT"
+     echo "  Check in console: NAT Gateway → DNAT Entry List"
+   done
+   ```
+   
+   **What to Look For:**
+   
+   - ✅ **DNAT entry exists for port 1817** → Good! Frontend should work
+   - ❌ **No DNAT entry for port 1817** → **This is the problem!**
+   - ⚠️ **DNAT entry exists for port 1818** → This is for SSH, not frontend
+   - ❌ **DNAT entry points to wrong internal IP** → Fix the Internal IP
+   - ❌ **DNAT entry points to wrong internal port** → Fix the Internal Port
+   
+   **If DNAT Entry is Missing for Port 1817:**
+   
+   1. Go to: **NAT Gateway** → Select your NAT Gateway
+   2. Click: **DNAT Entry List** (DNAT条目列表)
+   3. Click: **Create DNAT Entry** (创建DNAT条目)
+   4. Fill in:
+      - **Entry Type**: Select "Port" (端口)
+      - **Public IP Address**: Select `147.139.176.70`
+      - **Public Port**: `1817`
+      - **Private IP Address**: Select `172.28.80.50` (your frontend instance)
+      - **Private Port**: `1817`
+      - **Protocol**: TCP
+      - **Entry Name**: `frontend-http-1817` (optional)
+   5. Click **OK**
+   6. **Wait 1-2 minutes** for the DNAT entry to take effect
+   
+   **Test After Creating DNAT Entry:**
+   
+   ```bash
+   # From backend server:
+   curl -v --connect-timeout 10 http://147.139.176.70:1817/health
+   # Should return: healthy
+   
+   # From your laptop browser:
+   # http://147.139.176.70:1817
+   ```
+
+7. **Verify the public IP is actually assigned to this instance:**
+   - In AliCloud Console, check:
+     - Elastic IP `147.139.176.70` → Associated Instance → Should show your frontend instance
+     - OR Instance → Network & Security → Public IP/EIP → Should show `147.139.176.70`
 
 ### 4.4. Optional DNS Configuration
 
@@ -472,7 +696,7 @@ git checkout <COMMIT_HASH>
 **Frontend (172.28.80.50):**
 
 - [ ] Repo cloned and on correct commit.
-- [ ] `frontend/nginx.conf` proxies `/api` and `/docs` to `http://147.139.176.70:1819` (or `172.28.80.51:3000` if using private network).
+- [ ] `frontend/nginx.conf` proxies `/api` and `/docs` to `http://8.215.56.98:1819` (or `172.28.80.51:3000` if using private network).
 - [ ] `docker-compose.frontend.yml` exists and configured with port `1818:80`.
 - [ ] `project_management_frontend` container is running.
 - [ ] Firewall allows port `1818/tcp` (and AliCloud security group configured).
@@ -484,7 +708,170 @@ Once all boxes are checked, the application should be fully live in production o
 
 ## 8. Troubleshooting
 
-### 8.1. Frontend not accessible (http://147.139.176.70:1818)
+### 8.0. Port already in use error
+
+If you get `failed to bind host port 0.0.0.0:1818/tcp: address already in use`:
+
+**Step 1: Check what's using port 1818**
+
+```bash
+# Check if another container is using the port
+docker ps -a | grep 1818
+
+# Check all containers that might be using port 1818
+docker ps --format "table {{.Names}}\t{{.Ports}}" | grep 1818
+
+# Check what process is using port 1818 (Linux)
+sudo lsof -i :1818
+# or
+sudo netstat -tulpn | grep 1818
+# or
+sudo ss -tlnp | grep 1818
+
+# If lsof is not available, use:
+sudo fuser 1818/tcp
+```
+
+**Step 2: Stop existing containers and networks**
+
+```bash
+# Stop and remove any existing frontend containers
+docker stop project_management_frontend 2>/dev/null
+docker rm project_management_frontend 2>/dev/null
+
+# Or if using docker-compose (this also cleans up networks)
+cd /opt/Project-Management-V2.0
+docker compose -f docker-compose.frontend.yml down -v
+
+# Check for any other containers that might be using port 1818
+docker ps -a --filter "publish=1818"
+
+# Force remove all stopped containers with that port mapping
+docker ps -aq --filter "publish=1818" | xargs -r docker rm -f
+```
+
+**Step 3: Check for other services or Docker conflicts**
+
+If port 1818 is used by another service (not Docker):
+
+```bash
+# Find the process ID (PID) - method 1
+sudo lsof -i :1818
+
+# Find the process ID (PID) - method 2
+sudo fuser 1818/tcp
+
+# Stop the process (replace PID with actual process ID from above)
+sudo kill -9 <PID>
+
+# If it's a Docker process but not showing in docker ps:
+# Check Docker's internal network mappings
+docker inspect $(docker ps -aq) 2>/dev/null | grep -A 10 '"Ports"' | grep 1818
+```
+
+**If port is still in use after stopping containers:**
+
+```bash
+# Kill the process directly using fuser
+sudo fuser -k 1818/tcp
+
+# Or find and kill using ss
+sudo ss -tlnp | grep 1818
+# Note the PID from the output, then:
+sudo kill -9 <PID>
+
+# Verify port is now free
+sudo lsof -i :1818
+# Should return nothing
+```
+
+**Step 4: Restart frontend container**
+
+```bash
+cd /opt/Project-Management-V2.0
+docker compose -f docker-compose.frontend.yml up -d frontend
+```
+
+**Alternative: Use a different port**
+
+If you need to keep the existing service on port 1818, you can temporarily use a different port:
+
+1. Edit `docker-compose.frontend.yml` and change `1818:80` to `1817:80` (or another available port)
+2. Update AliCloud Security Group to allow the new port
+3. Restart the container
+
+**Important Note**: If port 1818 is already in use (e.g., by SSH), Docker will automatically fail to bind. Check what's using the port first:
+```bash
+sudo netstat -tulpn | grep 1818
+# If it shows sshd or another service, either:
+# - Use a different port for frontend (1817, 1819, etc.)
+# - Or change the conflicting service's port
+```
+
+### 8.1. Frontend not accessible - Complete Diagnostic
+
+If the frontend site can't be reached, run through this complete checklist:
+
+**Run all these commands on the frontend server (172.28.80.50):**
+
+```bash
+echo "=== 1. Container Status ==="
+docker ps -a | grep frontend
+
+echo ""
+echo "=== 2. Container Logs (last 30 lines) ==="
+docker logs project_management_frontend --tail 30 2>&1
+
+echo ""
+echo "=== 3. Port Binding Check ==="
+docker ps --format "table {{.Names}}\t{{.Ports}}" | grep frontend
+
+echo ""
+echo "=== 4. Port Listening on Host ==="
+sudo netstat -tulpn | grep -E "1818|1817" || echo "Port not found in netstat"
+sudo ss -tlnp | grep -E "1818|1817" || echo "Port not found in ss"
+
+echo ""
+echo "=== 5. Test Local Access ==="
+curl -v http://localhost:1818/health 2>&1 | head -20 || echo "CURL FAILED - Container may not be responding"
+# If you changed to a different port, replace 1818 with your new port
+
+echo ""
+echo "=== 6. Frontend Files Check ==="
+ls -la /opt/Project-Management-V2.0/frontend/ | head -10
+
+echo ""
+echo "=== 7. Nginx Configuration Test ==="
+docker exec project_management_frontend nginx -t 2>&1 || echo "Cannot test nginx config - container may not be running"
+
+echo ""
+echo "=== 8. Firewall Status ==="
+sudo ufw status | grep -E "1818|1817" || echo "No UFW rules found for this port"
+
+echo ""
+echo "=== 9. Container Network ==="
+docker inspect project_management_frontend --format '{{json .NetworkSettings.Ports}}' 2>/dev/null | python3 -m json.tool || docker inspect project_management_frontend --format '{{json .NetworkSettings.Ports}}' 2>/dev/null
+
+echo ""
+echo "=== 10. Docker Compose Status ==="
+cd /opt/Project-Management-V2.0
+docker compose -f docker-compose.frontend.yml ps
+```
+
+**What to look for in each step:**
+
+1. **Container Status**: Should show container as "Up" (not "Exited" or "Restarting")
+2. **Container Logs**: Check for nginx errors, file permission issues, or config errors
+3. **Port Binding**: Should show `0.0.0.0:1818->80/tcp` (or your custom port)
+4. **Port Listening**: Should show port is listening on 0.0.0.0:1818
+5. **Local Access**: Should return "healthy" or HTML content
+6. **Frontend Files**: Should see `index.html`, `main.js`, `styles.css`, `nginx.conf`
+7. **Nginx Config**: Should say "syntax is ok" and "test is successful"
+8. **Firewall**: Should show a rule allowing your port
+9. **Container Network**: Should show port mapping
+10. **Compose Status**: Should show service as running
+
+### 8.1. Frontend not accessible - Quick Fixes
 
 If the frontend site can't be reached, check the following:
 
@@ -591,19 +978,126 @@ docker compose -f docker-compose.frontend.yml restart frontend
 
 From **172.28.80.51** (backend server):
 
+**Important**: Replace `1818` with the actual port your frontend container is using (check with `docker ps` on the frontend server). Common ports are `1817` or `1818`.
+
 ```bash
-# Test frontend via private IP
-curl http://172.28.80.50:1818/health
-curl http://172.28.80.50:1818/api/health
+# Test frontend via private IP (replace PORT with actual port, e.g., 1817)
+curl http://172.28.80.50:PORT/health
+curl http://172.28.80.50:PORT/api/health
 
 # Or test via public IP
-curl http://147.139.176.70:1818/health
-curl http://147.139.176.70:1818/api/health
+curl http://147.139.176.70:PORT/health
+curl http://147.139.176.70:PORT/api/health
+
+# Example if using port 1817:
+curl http://172.28.80.50:1817/health
+curl http://147.139.176.70:1817/health
+```
+
+**Troubleshooting curl errors:**
+
+- `curl: (1) Received HTTP/0.9 when not allowed` → You're connecting to the wrong port (likely SSH)
+- `curl: (7) Failed to connect` → Port is not open in firewall/security group, or container is not running
+- `curl: (28) Connection timed out` → Security group is blocking the connection
+- `401 Unauthorized` or `403 Forbidden` → Expected for `/api/*` endpoints without authentication
+
+**To find the correct port:**
+```bash
+# On frontend server (172.28.80.50):
+docker ps --format "{{.Ports}}" | grep frontend | grep -oP '\d+(?=->80)'
 ```
 
 If these fail, it's a network/firewall issue between servers.
 
+**If private IP works but public IP doesn't:**
+
+This indicates the container is working, but public IP access is blocked. Common causes:
+
+1. **AliCloud Security Group** - Port 1817 not allowed from public IPs
+2. **EIP not properly bound** - Elastic IP not associated with the instance
+3. **NAT Gateway configuration** - If using NAT Gateway, port forwarding may be missing
+4. **VPC route table** - Public traffic not routing to the instance
+
+**Fix steps:**
+
+```bash
+# On backend server, test what happens with public IP
+curl -v http://147.139.176.70:1817/health
+# Check the error message:
+# - Connection timeout → Security group blocking
+# - Connection refused → Port not open or EIP not bound
+# - No route to host → Routing issue
+```
+
+**In AliCloud Console:**
+
+1. **Check EIP binding:**
+   - ECS → Instances → Your frontend instance
+   - Network & Security → Check if Elastic IP is "Bound"
+
+2. **Check Security Group:**
+   - Security Groups → Your security group → Inbound Rules
+   - Must have rule: Port `1817/tcp`, Source `0.0.0.0/0`, Action `Allow`
+
+3. **If using NAT Gateway:**
+   - NAT Gateway → SNAT/DNAT entries
+   - Ensure DNAT entry exists: Public IP:1817 → Private IP:1817
+
 ### 8.2. Backend API not reachable from frontend
+
+If the frontend loads but API calls fail (e.g., `ERR_EMPTY_RESPONSE`, `Failed to fetch`):
+
+**Common Symptoms:**
+- Frontend UI loads but login/API calls fail
+- Browser console shows: `net::ERR_EMPTY_RESPONSE` or `Failed to fetch`
+- API endpoints return empty responses or timeouts
+
+**Quick Diagnostic:**
+
+Run this on the frontend server (172.28.80.50):
+
+```bash
+echo "=== Backend API Connectivity Test ==="
+echo ""
+
+echo "1. Test backend health endpoint via public IP:"
+curl -v --connect-timeout 10 http://8.215.56.98:1819/health
+echo ""
+
+echo "2. Test backend health endpoint via private IP:"
+curl -v --connect-timeout 10 http://172.28.80.51:3000/health
+echo ""
+
+echo "3. Test forgot-password endpoint (should return JSON):"
+curl -v --connect-timeout 10 -X POST http://8.215.56.98:1819/api/auth/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com"}'
+echo ""
+
+echo "4. Check if backend container is running (from backend server):"
+echo "   SSH to backend server and run: docker ps | grep backend"
+echo ""
+
+echo "5. Check nginx proxy configuration:"
+cat /opt/Project-Management-V2.0/frontend/nginx.conf | grep -A 5 "location /api/"
+```
+
+**What to look for:**
+
+1. **If private IP (172.28.80.51:3000) works but public IP (8.215.56.98:1819) doesn't:**
+   - Missing NAT Gateway DNAT entry for port 1819
+   - Security Group not allowing port 1819
+   - Backend container not listening on 0.0.0.0:3000
+
+2. **If both fail:**
+   - Backend container not running
+   - Backend not accessible from frontend server
+   - Network/firewall blocking
+
+3. **If curl works but browser doesn't:**
+   - CORS issue (check backend CORS configuration)
+   - Browser blocking mixed content
+   - Nginx proxy configuration issue
 
 If the frontend loads but API calls fail:
 
@@ -629,7 +1123,7 @@ If this fails, the backend might not be accessible from the frontend server.
 # Check nginx.conf has correct backend IP
 cat /opt/Project-Management-V2.0/frontend/nginx.conf | grep proxy_pass
 
-# Should show: proxy_pass http://147.139.176.70:1819;
+# Should show: proxy_pass http://8.215.56.98:1819;
 ```
 
 If incorrect, update and restart:
