@@ -2,8 +2,8 @@
 
 This document describes how to deploy **Project-Management-V2.0** to production on AliCloud with:
 
-- **Backend + Postgres DB** on: `172.28.80.51`
-- **Frontend (Nginx + static files)** on: `172.28.80.50`
+- **Backend + Postgres DB** on: `172.28.80.51` (Private) / `147.139.176.70:1819` (Public)
+- **Frontend (Nginx + static files)** on: `172.28.80.50` (Private) / `147.139.176.70:1818` (Public)
 
 Assumptions:
 
@@ -80,8 +80,8 @@ ADMIN_EMAIL=admin@yourcompany.com
 ADMIN_PASSWORD=StrongAdmin123!
 ADMIN_NAME=Administrator
 
-# Frontend URL (IP or domain of the frontend server)
-FRONTEND_URL=http://172.28.80.50
+# Frontend URL (Public URL users will access)
+FRONTEND_URL=http://147.139.176.70:1818
 
 # -----------------------
 # Email / SMTP
@@ -273,7 +273,8 @@ docker logs project_management_frontend --tail 50
 
 Open in a browser:
 
-- `http://172.28.80.50` → Project & Change Request Management UI
+- **Public URL**: `http://147.139.176.70:1818` → Project & Change Request Management UI
+- **Private URL** (from within same VPC): `http://172.28.80.50:1818`
 
 You should be able to log in using the admin credentials configured on the backend.
 
@@ -293,13 +294,29 @@ docker compose -f docker-compose.frontend.yml up -d frontend
 
 ## 4. Networking, firewall, and DNS
 
-Typical production configuration:
+### 4.1. Server Configuration Summary
 
-- **172.28.80.51 (backend + DB)**:
-  - Allow port **3000/tcp** from **172.28.80.50** only.
-  - Do **not** expose Postgres (5432/5434) publicly; only allow internal access if needed.
-- **172.28.80.50 (frontend)**:
-  - Allow port **80/tcp** (and **443/tcp** if you later add TLS) from end‑user networks.
+**Frontend Server (172.28.80.50):**
+- Private IP: `172.28.80.50`
+- Public IP: `147.139.176.70`
+- Public Port: `1818`
+- Container Port: `80`
+
+**Backend Server (172.28.80.51):**
+- Private IP: `172.28.80.51`
+- Public IP: `147.139.176.70`
+- Public Port: `1819`
+- Container Port: `3000`
+
+### 4.2. Firewall Configuration
+
+**On backend server (172.28.80.51):**
+- Allow port **3000/tcp** from **172.28.80.50** only (for internal API access).
+- Do **not** expose Postgres (5432/5434) publicly; only allow internal access if needed.
+
+**On frontend server (172.28.80.50):**
+- Allow port **1818/tcp** from end‑user networks (public access).
+- Allow port **80/tcp** internally (if needed for health checks).
 
 On Ubuntu with UFW you could do:
 
@@ -308,15 +325,30 @@ On Ubuntu with UFW you could do:
 sudo ufw allow from 172.28.80.50 to any port 3000 proto tcp
 
 # On frontend server
-sudo ufw allow 80/tcp
+sudo ufw allow 1818/tcp
 ```
 
-If you use AliCloud security groups / VPC ACLs, configure equivalent rules there.
+### 4.3. AliCloud Security Groups
 
-Optional DNS:
+If you use AliCloud security groups / VPC ACLs, configure equivalent rules:
 
-- Point `pm.yourcompany.com` → `172.28.80.50`
-- Update `FRONTEND_URL` in backend `.env` to `http://pm.yourcompany.com` (or `https://...` once TLS is enabled).
+**Frontend Server (172.28.80.50):**
+- Allow inbound **1818/tcp** from `0.0.0.0/0` (or specific IP ranges) for public access
+
+**Backend Server (172.28.80.51):**
+- Allow inbound **3000/tcp** from `172.28.80.50/32` (frontend private IP only)
+- Do **not** expose port 3000 publicly (frontend proxies all requests)
+
+**Port Mapping in AliCloud:**
+- Configure NAT Gateway or EIP port forwarding if needed:
+  - `147.139.176.70:1818` → `172.28.80.50:1818` (Frontend)
+  - `147.139.176.70:1819` → `172.28.80.51:3000` (Backend, optional direct access)
+
+### 4.4. Optional DNS Configuration
+
+- Point `pm.yourcompany.com` → `147.139.176.70`
+- Update `FRONTEND_URL` in backend `.env` to `http://pm.yourcompany.com:1818` (or `https://...` once TLS is enabled).
+- Consider using a reverse proxy (nginx/Apache) on the frontend server to map port 80 → 1818 if you want standard HTTP port access.
 
 ---
 
@@ -335,8 +367,14 @@ Optional DNS:
 - Frontend health:
 
   ```bash
-  curl http://172.28.80.50/health
+  # From frontend server (private)
+  curl http://localhost:1818/health
+  
+  # From external (public)
+  curl http://147.139.176.70:1818/health
   ```
+  
+  Should return: `healthy`
 
 - Container logs:
 
@@ -434,10 +472,235 @@ git checkout <COMMIT_HASH>
 **Frontend (172.28.80.50):**
 
 - [ ] Repo cloned and on correct commit.
-- [ ] `frontend/nginx.conf` proxies `/api` and `/docs` to `172.28.80.51:3000`.
-- [ ] `docker-compose.frontend.yml` exists and `project_management_frontend` is running.
-- [ ] Accessing `http://172.28.80.50` in the browser shows the app and allows login.
+- [ ] `frontend/nginx.conf` proxies `/api` and `/docs` to `http://147.139.176.70:1819` (or `172.28.80.51:3000` if using private network).
+- [ ] `docker-compose.frontend.yml` exists and configured with port `1818:80`.
+- [ ] `project_management_frontend` container is running.
+- [ ] Firewall allows port `1818/tcp` (and AliCloud security group configured).
+- [ ] Accessing `http://147.139.176.70:1818` in the browser shows the app and allows login.
 
 Once all boxes are checked, the application should be fully live in production on AliCloud. 
 
+---
 
+## 8. Troubleshooting
+
+### 8.1. Frontend not accessible (http://147.139.176.70:1818)
+
+If the frontend site can't be reached, check the following:
+
+#### Step 1: Verify container is running
+
+On **172.28.80.50**:
+
+```bash
+cd /opt/Project-Management-V2.0
+docker ps
+```
+
+You should see `project_management_frontend` in the list. If not:
+
+```bash
+docker compose -f docker-compose.frontend.yml up -d frontend
+```
+
+#### Step 2: Check container logs
+
+```bash
+docker logs project_management_frontend --tail 50
+```
+
+Look for errors like:
+- Nginx configuration errors
+- Port binding issues
+- File permission errors
+
+#### Step 3: Verify port 80 is listening
+
+```bash
+# Check if container is listening on port 1818
+docker ps --format "table {{.Names}}\t{{.Ports}}" | grep frontend
+
+# Should show: 0.0.0.0:1818->80/tcp
+
+# Test locally from the server
+curl http://localhost:1818/health
+# Should return: healthy
+```
+
+#### Step 4: Check firewall rules
+
+```bash
+# Ubuntu/Debian with UFW
+sudo ufw status | grep 1818
+
+# If port 1818 is not open, add it:
+sudo ufw allow 1818/tcp
+sudo ufw reload
+```
+
+#### Step 5: Check AliCloud Security Group
+
+In AliCloud console:
+1. Go to **ECS** → **Instances**
+2. Find instance `172.28.80.50`
+3. Click **Security Groups**
+4. Check if port **1818/tcp** is allowed for inbound traffic
+5. If not, add a rule:
+   - **Type**: Custom TCP
+   - **Port Range**: 1818/1818
+   - **Authorization Object**: 0.0.0.0/0 (or specific IP ranges)
+   - **Action**: Allow
+   
+**Note**: If you're using the same public IP for both frontend and backend, ensure both ports are configured:
+- Port **1818** for frontend
+- Port **1819** for backend (if direct backend access is needed)
+
+#### Step 6: Verify nginx configuration
+
+```bash
+# Test nginx configuration inside container
+docker exec project_management_frontend nginx -t
+
+# Should show: "syntax is ok" and "test is successful"
+```
+
+If configuration is invalid, check `frontend/nginx.conf` and restart:
+
+```bash
+docker compose -f docker-compose.frontend.yml restart frontend
+```
+
+#### Step 7: Check frontend files exist
+
+```bash
+# Verify frontend files are present
+ls -la /opt/Project-Management-V2.0/frontend/
+
+# Should see: index.html, main.js, styles.css, nginx.conf
+```
+
+If files are missing:
+
+```bash
+cd /opt/Project-Management-V2.0
+git pull origin main
+docker compose -f docker-compose.frontend.yml restart frontend
+```
+
+#### Step 8: Test from backend server
+
+From **172.28.80.51** (backend server):
+
+```bash
+# Test frontend via private IP
+curl http://172.28.80.50:1818/health
+curl http://172.28.80.50:1818/api/health
+
+# Or test via public IP
+curl http://147.139.176.70:1818/health
+curl http://147.139.176.70:1818/api/health
+```
+
+If these fail, it's a network/firewall issue between servers.
+
+### 8.2. Backend API not reachable from frontend
+
+If the frontend loads but API calls fail:
+
+#### Step 1: Test backend from frontend server
+
+On **172.28.80.50**:
+
+```bash
+# Test direct connection to backend via public IP
+curl http://147.139.176.70:1819/health
+# Should return: {"ok":true}
+
+# Or test via private IP (if within same VPC)
+curl http://172.28.80.51:3000/health
+# Should return: {"ok":true}
+```
+
+If this fails, the backend might not be accessible from the frontend server.
+
+#### Step 2: Verify nginx proxy configuration
+
+```bash
+# Check nginx.conf has correct backend IP
+cat /opt/Project-Management-V2.0/frontend/nginx.conf | grep proxy_pass
+
+# Should show: proxy_pass http://147.139.176.70:1819;
+```
+
+If incorrect, update and restart:
+
+```bash
+# Edit the file (or pull from git if updated)
+cd /opt/Project-Management-V2.0
+# Edit frontend/nginx.conf if needed
+docker compose -f docker-compose.frontend.yml restart frontend
+```
+
+#### Step 3: Check backend server firewall
+
+On **172.28.80.51** (backend server):
+
+```bash
+# Check if backend allows connections from frontend IP
+sudo ufw status | grep 3000
+
+# Should allow connections from 172.28.80.50
+```
+
+#### Step 4: Verify backend container is running
+
+On **172.28.80.51**:
+
+```bash
+docker ps | grep backend
+curl http://localhost:3000/health
+```
+
+### 8.3. Quick diagnostic script
+
+Create `/usr/local/bin/pm-diagnose.sh` on the frontend server:
+
+```bash
+#!/usr/bin/env bash
+echo "=== Frontend Diagnostic ==="
+echo ""
+echo "1. Docker containers:"
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "NAMES|frontend"
+echo ""
+echo "2. Frontend container logs (last 20 lines):"
+docker logs project_management_frontend --tail 20 2>&1 | tail -20
+echo ""
+echo "3. Port 80 listening:"
+docker ps --format "{{.Ports}}" | grep "80->80"
+echo ""
+echo "4. Local health check:"
+curl -sS http://localhost/health || echo "FAILED"
+echo ""
+echo "5. Nginx config test:"
+docker exec project_management_frontend nginx -t 2>&1
+echo ""
+echo "6. Frontend files:"
+ls -la /opt/Project-Management-V2.0/frontend/ | grep -E "index.html|nginx.conf"
+echo ""
+echo "7. Firewall status (port 1818):"
+sudo ufw status | grep "1818/tcp" || echo "No UFW rule found for port 1818"
+```
+
+Make it executable:
+
+```bash
+sudo chmod +x /usr/local/bin/pm-diagnose.sh
+```
+
+Run it:
+
+```bash
+pm-diagnose.sh
+```
+
+---
