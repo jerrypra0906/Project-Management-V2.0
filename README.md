@@ -25,11 +25,11 @@ The system consists of:
 ## 🌐 Production Environment
 
 **Production URLs:**
-- **Frontend**: http://147.139.176.70:1817
+- **Frontend**: http://pm.energi-up.com:1817 (or http://147.139.176.70:1817)
 - **Backend API**: http://8.215.56.98:1819
 
 **Server Configuration:**
-- Frontend Server: `172.28.80.50` (Private) / `147.139.176.70:1817` (Public)
+- Frontend Server: `172.28.80.50` (Private) / `147.139.176.70:1817` (Public) / `pm.energi-up.com`
 - Backend Server: `172.28.80.51` (Private) / `8.215.56.98:1819` (Public)
 
 For detailed production deployment instructions, see [DEPLOYMENT-ALIYUN.md](DEPLOYMENT-ALIYUN.md).
