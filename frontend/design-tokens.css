@@ -1,0 +1,121 @@
+/* KPN Downstream Design System - Design Tokens */
+/* Industrial clarity over decoration */
+
+/* Import Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* Import Merriweather for headings (optional) */
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap');
+
+:root {
+  /* ===== COLOR PRIMITIVES ===== */
+  /* Brand Colors */
+  --color-brand-red-primary: #C43A31;
+  --color-brand-red-deep: #9E2C25;
+  
+  /* Text Colors */
+  --color-text-charcoal: #2B2B2B;
+  --color-text-steel: #6B6B6B;
+  --color-text-white: #FFFFFF;
+  
+  /* Background Colors */
+  --color-bg-white: #FFFFFF;
+  --color-bg-light: #F4F4F4;
+  --color-bg-lighter: #FAFAFA;
+  
+  /* Border Colors */
+  --color-border-light: #E0E0E0;
+  --color-border-medium: #C4C4C4;
+  --color-border-dark: #9E9E9E;
+  
+  /* ===== SEMANTIC COLORS ===== */
+  /* Primary (Brand Red) */
+  --color-primary-default: var(--color-brand-red-primary);
+  --color-primary-foreground: var(--color-text-white);
+  --color-primary-hover: var(--color-brand-red-deep);
+  
+  /* Secondary */
+  --color-secondary-default: var(--color-bg-light);
+  --color-secondary-foreground: var(--color-text-charcoal);
+  --color-secondary-hover: #E8E8E8;
+  
+  /* Destructive */
+  --color-destructive-default: var(--color-brand-red-primary);
+  --color-destructive-foreground: var(--color-text-white);
+  
+  /* ===== TYPOGRAPHY ===== */
+  /* Font Families */
+  --font-family-primary: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family-heading: 'Merriweather', Georgia, serif;
+  
+  /* Font Sizes */
+  --font-size-h1: 40px;
+  --font-size-h2: 32px;
+  --font-size-h3: 24px;
+  --font-size-base: 16px;
+  --font-size-small: 14px;
+  --font-size-xs: 12px;
+  
+  /* Font Weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  /* Line Height */
+  --line-height-default: 1.5;
+  
+  /* ===== SPACING ===== */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 16px;
+  --spacing-4: 24px;
+  --spacing-5: 32px;
+  --spacing-6: 40px;
+  --spacing-7: 64px;
+  
+  /* ===== BORDER RADIUS ===== */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  
+  /* ===== ELEVATION (Shadows) ===== */
+  --elevation-none: none;
+  --elevation-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --elevation-md: 0 2px 4px 0 rgba(0, 0, 0, 0.08);
+  --elevation-lg: 0 4px 8px 0 rgba(0, 0, 0, 0.10);
+  
+  /* ===== ANIMATION ===== */
+  --animation-duration-fast: 150ms;
+  --animation-duration-base: 200ms;
+  --animation-duration-slow: 250ms;
+  --animation-easing-default: ease-out;
+  
+  /* ===== LEGACY COMPATIBILITY (mapped to new tokens) ===== */
+  --brand: var(--color-primary-default);
+  --brand-hover: var(--color-primary-hover);
+  --text: var(--color-text-charcoal);
+  --text-light: var(--color-text-steel);
+  --bg: var(--color-bg-lighter);
+  --surface: var(--color-bg-white);
+  --border: var(--color-border-medium);
+  --border-light: var(--color-border-light);
+  --muted: var(--color-text-steel);
+  --shadow: var(--elevation-sm);
+  --shadow-lg: var(--elevation-md);
+  --shadow-hover: var(--elevation-md);
+  --pad: var(--spacing-3);
+  --gap: var(--spacing-2);
+  
+  /* Success, Warning, Danger (keeping for compatibility) */
+  --success: #00d97e;
+  --warning: #fdab3d;
+  --danger: var(--color-brand-red-primary);
+  
+  /* Gray scale (keeping for compatibility) */
+  --gray-50: var(--color-bg-lighter);
+  --gray-100: var(--color-bg-light);
+  --gray-200: #E5E7EB;
+}
+
