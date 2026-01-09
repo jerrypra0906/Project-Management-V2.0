@@ -120,8 +120,27 @@ cd /opt/Project-Management-V2.0
 # Build images (first time or after code changes)
 docker compose build postgres backend
 
-# Start DB + backend in detached mode
+# Start DB first, wait for it to be healthy, then start backend
+docker compose up -d postgres
+
+# Wait for database to be ready (check health status)
+sleep 10
+docker exec project_management_db pg_isready -U postgres
+
+# Now start backend
+docker compose up -d backend
+```
+
+**OR start both together (recommended):**
+
+```bash
+cd /opt/Project-Management-V2.0
+
+# Start DB + backend (depends_on ensures DB starts first)
 docker compose up -d postgres backend
+
+# Wait a few seconds
+sleep 10
 ```
 
 Check containers:
@@ -130,6 +149,33 @@ Check containers:
 docker ps
 docker logs project_management_db --tail 50
 docker logs project_management_backend --tail 50
+```
+
+**If you get "getaddrinfo EAI_AGAIN postgres" error:**
+
+This means the backend cannot resolve the "postgres" hostname. Fix it:
+
+```bash
+# 1. Check if both containers are on the same network
+docker network inspect project-management-v20_default | grep -A 5 "Containers"
+
+# 2. Verify network exists
+docker network ls | grep project-management
+
+# 3. If network is missing or containers not connected, recreate:
+cd /opt/Project-Management-V2.0
+docker compose down
+docker compose up -d postgres
+sleep 10
+docker compose up -d backend
+
+# 4. Verify containers can communicate
+docker exec project_management_backend ping -c 2 postgres
+# Should return successful pings
+
+# 5. Check if backend can resolve postgres hostname
+docker exec project_management_backend getent hosts postgres
+# Should return an IP address
 ```
 
 ### 2.3. Database migrations
@@ -209,11 +255,13 @@ On **172.28.80.50**:
 cd /opt/Project-Management-V2.0
 ```
 
-Edit `frontend/nginx.conf` and set the `proxy_pass` targets to the backend IP:
+Edit `frontend/nginx.conf` and set the `proxy_pass` targets to the backend IP.
+
+**Recommended: Use private IP for better performance and reliability** (since both servers are in the same VPC):
 
 ```nginx
 location /api/ {
-    proxy_pass http://8.215.56.98:1819;
+    proxy_pass http://172.28.80.51:3000;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection 'upgrade';
@@ -222,17 +270,38 @@ location /api/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_cache_bypass $http_upgrade;
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
 }
 
 location /docs/ {
-    proxy_pass http://8.215.56.98:1819;
+    proxy_pass http://172.28.80.51:3000;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
 }
 ```
+
+**Alternative: Use public IP** (only if NAT Gateway DNAT is properly configured):
+
+```nginx
+location /api/ {
+    proxy_pass http://8.215.56.98:1819;
+    # ... rest of configuration
+}
+```
+
+**Note**: Using private IP (`172.28.80.51:3000`) is recommended because:
+- Faster (direct VPC communication)
+- More reliable (no NAT Gateway dependency)
+- Lower latency
+- No NAT Gateway costs for internal traffic
 
 Leave the rest of the file (static asset caching, security headers, SPA routing) as is.
 
@@ -613,15 +682,105 @@ If private IP works but public IP doesn't (even with Security Group configured c
 
 ### 5.2. Simple status script (optional)
 
-Create `/usr/local/bin/pm-status.sh` (on each server):
+Create `/usr/local/bin/pm-status.sh` (on backend server):
 
 ```bash
 #!/usr/bin/env bash
-echo \"=== Docker containers ===\"
-docker ps
+echo "=== Docker containers ==="
+docker ps -a
 echo
-echo \"=== Backend health ===\"
-curl -sS http://localhost:3000/health || echo \"backend not reachable\"
+echo "=== Backend container status ==="
+docker ps -a | grep backend
+echo
+echo "=== Backend logs (last 50 lines) ==="
+docker logs project_management_backend --tail 50 2>&1
+echo
+echo "=== Database container status ==="
+docker ps -a | grep db
+echo
+echo "=== Database health ==="
+docker exec project_management_db pg_isready -U postgres 2>&1 || echo "Database not ready"
+echo
+echo "=== Backend health ==="
+curl -sS http://localhost:3000/health || echo "backend not reachable"
+```
+
+**If container is in "Restarting" state:**
+
+This indicates the backend is crashing on startup. Follow these steps:
+
+1. **Check container logs for errors:**
+   ```bash
+   docker logs project_management_backend --tail 100
+   # Look for error messages, stack traces, or connection failures
+   ```
+
+2. **Check if database is running:**
+   ```bash
+   docker ps | grep db
+   # Should show project_management_db as "Up"
+   
+   # Test database connection
+   docker exec project_management_db pg_isready -U postgres
+   # Should return: postgres:5432 - accepting connections
+   ```
+
+3. **Check database is accessible from backend:**
+   ```bash
+   # Test connection from backend container (if it can start briefly)
+   docker exec project_management_backend ping -c 2 postgres 2>&1 || echo "Cannot ping postgres"
+   
+   # Or check network connectivity
+   docker network inspect project-management-v20_default | grep -A 5 postgres
+   ```
+
+4. **Check environment variables:**
+   ```bash
+   # Check if .env file exists and is readable
+   ls -la /opt/Project-Management-V2.0/.env
+   
+   # Check environment variables in docker-compose
+   cd /opt/Project-Management-V2.0
+   docker compose config | grep -A 20 "backend:"
+   ```
+
+5. **Check if migrations have been run:**
+   ```bash
+   docker exec project_management_db psql -U postgres -d project_management_v2 -c "\dt" 2>&1
+   # Should show tables like: users, initiatives, notifications, etc.
+   # If no tables, run migrations as shown in section 2.3
+   ```
+
+6. **Common causes and fixes:**
+   - **Database not running**: Start with `docker compose up -d postgres`
+   - **Database connection failed**: Check DATABASE_URL in .env or docker-compose.yml
+   - **Port 3000 already in use**: Check with `sudo netstat -tulpn | grep 3000`
+   - **Missing environment variables**: Ensure .env file exists with required variables
+   - **Database schema not initialized**: Run migrations (section 2.3)
+
+**Quick fix commands:**
+
+```bash
+# Stop the crashing container
+docker stop project_management_backend
+
+# Check database is running first
+docker ps | grep db
+# If database is not running:
+docker compose up -d postgres
+
+# Wait for database to be ready
+sleep 5
+docker exec project_management_db pg_isready -U postgres
+
+# Check logs to see the actual error
+docker logs project_management_backend --tail 100
+
+# Try starting backend again
+docker compose up -d backend
+
+# Watch logs in real-time
+docker logs -f project_management_backend
 ```
 
 Make it executable:
@@ -635,6 +794,43 @@ Run as needed:
 ```bash
 pm-status.sh
 ```
+
+**If container is in "Restarting" state:**
+
+This indicates the backend is crashing. Follow these steps:
+
+1. **Check container logs for errors:**
+   ```bash
+   docker logs project_management_backend --tail 100
+   # Look for error messages, stack traces, or connection failures
+   ```
+
+2. **Check if database is running:**
+   ```bash
+   docker ps | grep db
+   # Should show project_management_db as "Up"
+   
+   # Test database connection
+   docker exec project_management_db pg_isready -U postgres
+   ```
+
+3. **Check environment variables:**
+   ```bash
+   docker exec project_management_backend env | grep -E "DATABASE|POSTGRES|NODE_ENV"
+   ```
+
+4. **Check if migrations have been run:**
+   ```bash
+   docker exec project_management_db psql -U postgres -d project_management_v2 -c "\dt"
+   # Should show tables like: users, initiatives, notifications, etc.
+   ```
+
+5. **Common causes:**
+   - Database not running or not accessible
+   - Missing environment variables (.env file not loaded)
+   - Database connection string incorrect
+   - Missing database tables (migrations not run)
+   - Port conflict (3000 already in use)
 
 You can also integrate these checks into AliCloud CloudMonitor or your own monitoring system.
 
@@ -1051,6 +1247,35 @@ If the frontend loads but API calls fail (e.g., `ERR_EMPTY_RESPONSE`, `Failed to
 - Frontend UI loads but login/API calls fail
 - Browser console shows: `net::ERR_EMPTY_RESPONSE` or `Failed to fetch`
 - API endpoints return empty responses or timeouts
+
+**Quick Diagnostic:**
+
+Run this on the frontend server (172.28.80.50):
+
+```bash
+echo "=== Backend Connectivity Diagnostic ==="
+echo ""
+
+echo "1. Test backend via public IP:"
+curl -v --connect-timeout 10 http://8.215.56.98:1819/health 2>&1 | head -20
+echo ""
+
+echo "2. Test backend via private IP:"
+curl -v --connect-timeout 10 http://172.28.80.51:3000/health 2>&1 | head -20
+echo ""
+
+echo "3. Check if backend IP is reachable (ping test):"
+ping -c 3 8.215.56.98 2>&1 | head -5
+echo ""
+
+echo "4. Check if backend port is open (using telnet or nc):"
+timeout 5 bash -c 'cat < /dev/null > /dev/tcp/8.215.56.98/1819' 2>&1 && echo "Port 1819 is OPEN" || echo "Port 1819 is CLOSED or FILTERED"
+echo ""
+
+echo "5. Test from backend server itself:"
+echo "   (SSH to backend server and run: curl http://localhost:3000/health)"
+echo ""
+```
 
 **Quick Diagnostic:**
 
