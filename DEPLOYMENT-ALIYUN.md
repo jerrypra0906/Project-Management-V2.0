@@ -2256,11 +2256,75 @@ SMTP_PASSWORD=your-password
 
 ```bash
 cd /opt/Project-Management-V2.0
+
+# IMPORTANT: Verify .env file has correct values before restarting
+grep -E "SMTP_HOST|SMTP_USER" .env
+# Should show: SMTP_HOST=mail.energi-up.com (NOT smtp.yourprovider.com)
+
+# Restart backend to reload environment variables
 docker compose restart backend
 
-# Verify SMTP configuration loaded
+# Wait a few seconds for container to start
+sleep 5
+
+# Verify environment variables are loaded correctly
+docker exec project_management_backend printenv | grep SMTP
+
+# Check backend logs for email configuration
 docker logs project_management_backend --tail 50 | grep -i "smtp\|email"
+
+# Test SMTP connection (optional)
+docker exec project_management_backend node -e "
+const nodemailer = require('nodemailer');
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASSWORD
+  }
+});
+transporter.verify((error, success) => {
+  if (error) {
+    console.log('❌ SMTP connection failed:', error.message);
+    process.exit(1);
+  } else {
+    console.log('✅ SMTP connection successful!');
+  }
+});
+"
 ```
+
+**If environment variables are not loading correctly:**
+
+1. **Check .env file is in the correct location:**
+   ```bash
+   cd /opt/Project-Management-V2.0
+   ls -la .env
+   # Should show the file exists and is readable
+   
+   # Verify it has the correct values
+   cat .env | grep SMTP_HOST
+   # Should show: SMTP_HOST=mail.energi-up.com
+   ```
+
+2. **Check docker-compose.yml is mounting .env file correctly:**
+   ```bash
+   cat docker-compose.yml | grep -A 2 "\.env"
+   # Should show: - ./.env:/app/.env:ro
+   ```
+
+3. **Force recreate the container (if restart doesn't work):**
+   ```bash
+   docker compose down backend
+   docker compose up -d backend
+   ```
+
+4. **Check if there are multiple .env files:**
+   ```bash
+   find /opt/Project-Management-V2.0 -name ".env*" -type f
+   ```
 
 ### 10.3. Test Email Configuration
 
@@ -2287,6 +2351,215 @@ docker logs project_management_backend --tail 50 | grep -i "email\|smtp"
 **If email failed, you'll see:**
 ```
 [EMAIL ERROR] Failed to send password reset email: [error details]
+```
+
+### 10.4. Comprehensive Email Troubleshooting
+
+If emails are still not being sent, run this comprehensive diagnostic script:
+
+**On backend server (172.28.80.51):**
+
+```bash
+#!/bin/bash
+echo "=== Email Configuration Diagnostic ==="
+echo ""
+
+cd /opt/Project-Management-V2.0
+
+echo "1. Checking .env file exists and is readable:"
+ls -la .env
+echo ""
+
+echo "2. Checking SMTP settings in .env file:"
+grep -E "SMTP_HOST|SMTP_USER|SMTP_PASSWORD|EMAIL_FROM|SMTP_PORT|SMTP_SECURE|SMTP_REJECT" .env | sed 's/PASSWORD=.*/PASSWORD=***HIDDEN***/' | sed 's/^/  /'
+echo ""
+
+echo "3. Checking if backend container is running:"
+docker ps | grep backend
+echo ""
+
+echo "4. Checking environment variables in running container:"
+docker exec project_management_backend printenv | grep -E "SMTP|EMAIL" | sed 's/PASSWORD=.*/PASSWORD=***HIDDEN***/' | sed 's/^/  /'
+echo ""
+
+echo "5. Checking if .env file is mounted in container:"
+docker exec project_management_backend ls -la /app/.env 2>&1 | sed 's/^/  /'
+echo ""
+
+echo "6. Checking content of .env file inside container (SMTP section only):"
+docker exec project_management_backend grep -E "SMTP|EMAIL" /app/.env 2>&1 | sed 's/PASSWORD=.*/PASSWORD=***HIDDEN***/' | sed 's/^/  /'
+echo ""
+
+echo "7. Checking recent backend logs for email activity:"
+docker logs project_management_backend --tail 50 | grep -i "email\|smtp\|activation" | tail -10 | sed 's/^/  /'
+echo ""
+
+echo "8. Testing SMTP connection from container:"
+docker exec project_management_backend node -e "
+const nodemailer = require('nodemailer');
+require('dotenv').config({ path: '/app/.env' });
+
+console.log('  SMTP_HOST:', process.env.SMTP_HOST || 'NOT SET');
+console.log('  SMTP_PORT:', process.env.SMTP_PORT || 'NOT SET');
+console.log('  SMTP_USER:', process.env.SMTP_USER || 'NOT SET');
+console.log('  SMTP_PASSWORD:', process.env.SMTP_PASSWORD ? '***SET***' : 'NOT SET');
+console.log('  SMTP_SECURE:', process.env.SMTP_SECURE || 'NOT SET');
+console.log('  EMAIL_FROM:', process.env.EMAIL_FROM || 'NOT SET');
+
+if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
+  console.log('  ❌ ERROR: SMTP configuration is incomplete!');
+  process.exit(1);
+}
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASSWORD
+  },
+  tls: {
+    rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== 'false'
+  }
+});
+
+console.log('');
+console.log('  Attempting to verify SMTP connection...');
+transporter.verify((error, success) => {
+  if (error) {
+    console.log('  ❌ SMTP Connection FAILED:');
+    console.log('  Error:', error.message);
+    console.log('  Code:', error.code);
+    process.exit(1);
+  } else {
+    console.log('  ✅ SMTP Connection SUCCESSFUL!');
+    console.log('  Server is ready to send emails.');
+  }
+});
+" 2>&1 | sed 's/^/  /'
+echo ""
+
+echo "=== Diagnostic Complete ==="
+```
+
+**Save and run:**
+
+```bash
+# Save the script
+cat > /tmp/check-email-config.sh << 'EOF'
+# [paste the script above]
+EOF
+
+chmod +x /tmp/check-email-config.sh
+/tmp/check-email-config.sh
+```
+
+**Common Issues and Fixes:**
+
+**Issue 1: Environment variables are empty or showing placeholder values**
+
+```bash
+# Check .env file content
+cat .env | grep SMTP
+
+# If values are placeholders (like "smtp.yourprovider.com"), update them:
+nano .env
+# Edit SMTP_HOST, SMTP_USER, SMTP_PASSWORD with real values
+# Save and exit
+
+# Restart backend container
+docker compose restart backend
+```
+
+**Issue 2: .env file not being read by container**
+
+```bash
+# Verify .env file is mounted
+docker exec project_management_backend cat /app/.env | head -20
+
+# If file is empty or not found, check docker-compose.yml has this line:
+# - ./.env:/app/.env:ro
+
+# Force recreate container
+docker compose down backend
+docker compose up -d backend
+```
+
+**Issue 3: SMTP connection fails with "ENOTFOUND" error**
+
+This means the SMTP_HOST cannot be resolved. Check:
+
+```bash
+# Test DNS resolution from container
+docker exec project_management_backend nslookup mail.energi-up.com
+
+# If it fails, the SMTP hostname might be wrong
+# Try with IP address instead or check the SMTP hostname is correct
+```
+
+**Issue 4: SMTP connection fails with authentication error**
+
+```bash
+# Verify SMTP_USER and SMTP_PASSWORD are correct
+# Some SMTP servers require:
+# - Full email address as username (e.g., noreply@energi-up.com)
+# - App-specific password (for Gmail)
+# - Correct port (587 for TLS, 465 for SSL)
+
+# Test with telnet from container (if available)
+docker exec project_management_backend sh -c "echo 'QUIT' | nc -v mail.energi-up.com 587"
+```
+
+**Issue 5: SMTP_REJECT_UNAUTHORIZED blocking connection**
+
+If your SMTP server uses self-signed certificates:
+
+```bash
+# Edit .env file
+nano .env
+
+# Change:
+SMTP_REJECT_UNAUTHORIZED=false
+
+# Restart backend
+docker compose restart backend
+```
+
+**Issue 6: Container not restarting properly**
+
+```bash
+# Force recreate the container
+docker compose stop backend
+docker compose rm -f backend
+docker compose up -d backend
+
+# Check logs immediately
+docker logs project_management_backend --tail 50 -f
+```
+
+**Quick Fix - Force Reload Environment:**
+
+```bash
+cd /opt/Project-Management-V2.0
+
+# Stop backend
+docker compose stop backend
+
+# Remove container (this forces environment reload)
+docker compose rm -f backend
+
+# Start backend (will load fresh .env)
+docker compose up -d backend
+
+# Wait a few seconds
+sleep 5
+
+# Verify environment variables
+docker exec project_management_backend printenv | grep SMTP
+
+# Check logs
+docker logs project_management_backend --tail 30
 ```
 
 ---

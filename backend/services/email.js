@@ -116,6 +116,10 @@ Please do not reply to this email.
       const info = await transporter.sendMail(emailContent);
       console.log(`[EMAIL SENT] Activation email sent to ${email}`);
       console.log(`[EMAIL INFO] Message ID: ${info.messageId}`);
+      console.log(`[EMAIL INFO] Response: ${info.response || 'N/A'}`);
+      console.log(`[EMAIL INFO] From: ${fromEmail}`);
+      console.log(`[EMAIL INFO] To: ${email}`);
+      console.log(`[EMAIL INFO] Activation Link: ${activationLink}`);
       return true;
     } else {
       // Fallback to console logging if SMTP is not configured
