@@ -384,10 +384,22 @@ Please do not reply to this email.
 
     if (transporter) {
       try {
-        await transporter.sendMail(emailContent);
+        const info = await transporter.sendMail(emailContent);
         console.log(`[EMAIL SENT] Password reset email sent to ${email}`);
+        console.log(`[EMAIL INFO] Message ID: ${info.messageId}`);
+        console.log(`[EMAIL INFO] Response: ${info.response || 'N/A'}`);
+        console.log(`[EMAIL INFO] From: ${fromEmail}`);
+        console.log(`[EMAIL INFO] To: ${email}`);
+        console.log(`[EMAIL INFO] Reset Link: ${resetLink}`);
       } catch (emailError) {
         console.error('[EMAIL ERROR] Failed to send password reset email:', emailError);
+        console.error('[EMAIL ERROR] Error details:', {
+          message: emailError.message,
+          code: emailError.code,
+          command: emailError.command,
+          response: emailError.response,
+          responseCode: emailError.responseCode
+        });
         // Fallback to console logging
         console.log('='.repeat(60));
         console.log('[PASSWORD RESET EMAIL - FALLBACK MODE]');
