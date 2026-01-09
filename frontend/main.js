@@ -856,19 +856,24 @@ async function renderList() {
       <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
     </table>
     <div id="column-settings-modal" class="modal hidden">
-      <div class="modal-content">
-        <h3>Column Visibility</h3>
-        <div id="column-checkboxes" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 16px 0;">
+      <div class="modal-content column-settings-modal">
+        <h3 class="modal-title">Column Visibility</h3>
+        <div class="modal-checkbox-controls">
+          <button class="btn-link" onclick="checkAllColumns('list')">Check All</button>
+          <span class="control-separator">|</span>
+          <button class="btn-link" onclick="uncheckAllColumns('list')">Uncheck All</button>
+        </div>
+        <div id="column-checkboxes" class="column-checkboxes-grid">
           ${columns.filter(c => c.key !== 'actions').map(col => `
-            <label style="display: flex; align-items: center; cursor: pointer;">
-              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} style="margin-right: 8px;">
-              ${col.label}
+            <label class="column-checkbox-label">
+              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} class="column-checkbox">
+              <span class="column-checkbox-text">${col.label}</span>
             </label>
           `).join('')}
         </div>
-        <div>
-          <button class="primary" onclick="saveColumnSettings('list')">Save View</button>
-          <button onclick="closeColumnSettings()">Cancel</button>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="closeColumnSettings()">Cancel</button>
+          <button class="btn-primary" onclick="saveColumnSettings('list')">Save View</button>
         </div>
       </div>
     </div>
@@ -979,6 +984,22 @@ async function renderList() {
     const modalCr = document.getElementById('column-settings-modal-cr');
     if (modal) modal.classList.add('hidden');
     if (modalCr) modalCr.classList.add('hidden');
+  };
+  
+  window.checkAllColumns = (viewType) => {
+    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
+    checkboxes.forEach(cb => {
+      cb.checked = true;
+    });
+  };
+  
+  window.uncheckAllColumns = (viewType) => {
+    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
+    checkboxes.forEach(cb => {
+      cb.checked = false;
+    });
   };
   
   // Close modal when clicking backdrop
@@ -2867,19 +2888,24 @@ async function renderCRList() {
       <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
     </table>
     <div id="column-settings-modal-cr" class="modal hidden">
-      <div class="modal-content">
-        <h3>Column Visibility</h3>
-        <div id="column-checkboxes-cr" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 16px 0;">
+      <div class="modal-content column-settings-modal">
+        <h3 class="modal-title">Column Visibility</h3>
+        <div class="modal-checkbox-controls">
+          <button class="btn-link" onclick="checkAllColumns('crlist')">Check All</button>
+          <span class="control-separator">|</span>
+          <button class="btn-link" onclick="uncheckAllColumns('crlist')">Uncheck All</button>
+        </div>
+        <div id="column-checkboxes-cr" class="column-checkboxes-grid">
           ${columns.filter(c => c.key !== 'actions').map(col => `
-            <label style="display: flex; align-items: center; cursor: pointer;">
-              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} style="margin-right: 8px;">
-              ${col.label}
+            <label class="column-checkbox-label">
+              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} class="column-checkbox">
+              <span class="column-checkbox-text">${col.label}</span>
             </label>
           `).join('')}
         </div>
-        <div>
-          <button class="primary" onclick="saveColumnSettings('crlist')">Save View</button>
-          <button onclick="closeColumnSettings()">Cancel</button>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="closeColumnSettings()">Cancel</button>
+          <button class="btn-primary" onclick="saveColumnSettings('crlist')">Save View</button>
         </div>
       </div>
     </div>
