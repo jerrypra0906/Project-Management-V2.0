@@ -543,7 +543,7 @@ function initiativeRow(i, crData = null, colVisibility = null) {
   return `<tr class="status-${statusClass}">
     <td class="col-ticket" style="display: ${colVisibility['col-ticket'] !== false ? 'table-cell' : 'none'}">${i.ticket || ''}</td>
     <td class="col-name" style="display: ${colVisibility['col-name'] !== false ? 'table-cell' : 'none'}"><strong><a href="#view/${i.id}">${i.name}</a></strong></td>
-    <td class="col-priority" style="display: ${colVisibility['col-priority'] !== false ? 'table-cell' : 'none'}"><span class="priority-badge priority-${priorityClass}">${i.priority}</span></td>
+    <td class="col-priority" style="display: ${colVisibility['col-priority'] !== false ? 'table-cell' : 'none'}"><span class="priority-badge priority-${priorityClass.toLowerCase()}">${i.priority}</span></td>
     <td class="col-status" style="display: ${colVisibility['col-status'] !== false ? 'table-cell' : 'none'}"><span class="status-badge status-${statusClass}">${i.status}</span></td>
     <td class="col-milestone" style="display: ${colVisibility['col-milestone'] !== false ? 'table-cell' : 'none'}">${i.milestone}</td>
     <td class="col-department" style="display: ${colVisibility['col-department'] !== false ? 'table-cell' : 'none'}">${dep}</td>
@@ -558,7 +558,6 @@ function initiativeRow(i, crData = null, colVisibility = null) {
     ${timelineCell}
     <td class="col-actions">
       <button data-id="${i.id}" class="view" style="margin-right: 8px;">View</button>
-      <button data-id="${i.id}" class="edit" style="margin-right: 8px; color: var(--brand);">Edit</button>
       ${currentUser?.isAdmin ? `<button data-id="${i.id}" class="delete" style="color: var(--danger);">Delete</button>` : ''}
     </td>
   </tr>`;
@@ -1052,13 +1051,12 @@ async function renderList() {
   document.querySelectorAll('button.view').forEach(btn => {
     btn.onclick = () => location.hash = `#view/${btn.dataset.id}`;
   });
-  document.querySelectorAll('button.edit').forEach(btn => {
-    btn.onclick = () => location.hash = `#edit/${btn.dataset.id}`;
-  });
 }
 
-function formRow(label, inputHtml) {
-  return `<div class="form-row"><label>${label}</label><div>${inputHtml}</div></div>`;
+function formRow(label, inputHtml, isRequired = true, isOptional = false, showIcons = true) {
+  const requiredIcon = (isRequired && showIcons) ? '<span style="color: var(--color-primary-default); margin-left: 4px;" title="Required">*</span>' : '';
+  const optionalIcon = (isOptional && showIcons) ? '<span style="color: var(--color-text-steel); margin-left: 4px; font-size: 12px;" title="Optional">(Optional)</span>' : '';
+  return `<div class="form-row"><label>${label}${requiredIcon}${optionalIcon}</label><div>${inputHtml}</div></div>`;
 }
 
 // Helper function to create multi-select dropdown for forms
@@ -1132,33 +1130,37 @@ function initializeMultiSelects() {
 
 function commonFields(initiative = null) {
   const option = (value, label, selected) => `<option value="${value}" ${selected ? 'selected' : ''}>${label}</option>`;
+  const isCR = initiative && initiative.type === 'CR';
+  const nameLabel = isCR ? 'CR Name' : 'Initiative Name';
+  
+  // Business Impact is optional for CR, required for Project
+  const businessImpactRequired = !isCR;
+  const businessImpactOptional = isCR;
   
   return [
-    formRow('Type', `<select name="type" required><option value="Project" ${!initiative || initiative.type === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${initiative && initiative.type === 'CR' ? 'selected' : ''}>CR</option></select>`),
-    formRow('Initiative Name', `<input name="name" value="${initiative ? (initiative.name || '').replace(/"/g, '&quot;') : ''}" required />`),
+    formRow('Type', `<select name="type" required id="initiative-type-select" onchange="window.updateInitiativeNameLabel && window.updateInitiativeNameLabel()"><option value="Project" ${!initiative || initiative.type === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${initiative && initiative.type === 'CR' ? 'selected' : ''}>CR</option></select>`),
+    formRow('Ticket', `<input name="ticket" value="${initiative ? (initiative.ticket || '').replace(/"/g, '&quot;') : ''}" placeholder="Enter ticket number or reference" />`, false, true),
+    `<div class="form-row name-label-row"><label>${nameLabel}<span style="color: var(--color-primary-default); margin-left: 4px;" title="Required">*</span></label><div><input name="name" value="${initiative ? (initiative.name || '').replace(/"/g, '&quot;') : ''}" required /></div></div>`,
     formRow('Description', `<textarea name="description" class="long-text" required>${initiative ? (initiative.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
-    formRow('Business Impact', `<textarea name="businessImpact" class="long-text" required>${initiative ? (initiative.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
-    formRow('Priority', `<select name="priority">${option('P0', 'P0', initiative?.priority === 'P0')}${option('P1', 'P1', initiative?.priority === 'P1')}${option('P2', 'P2', !initiative || initiative.priority === 'P2')}</select>`),
-    formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.businessOwnerId === u.id)).join('')}</select>`),
-    formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, initiative?.businessUserIds || [])),
-    formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => option(d.id, d.name, initiative?.departmentId === d.id)).join('')}</select>`),
+    formRow('Business Impact', `<textarea name="businessImpact" class="long-text" ${businessImpactRequired ? 'required' : ''}>${initiative ? (initiative.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`, businessImpactRequired, businessImpactOptional),
+    formRow('Priority', `<select name="priority"><option value="" ${!initiative?.priority ? 'selected' : ''}>Select...</option>${option('P0', 'P0', initiative?.priority === 'P0')}${option('P1', 'P1', initiative?.priority === 'P1')}${option('P2', 'P2', initiative?.priority === 'P2')}</select>`),
+    formRow('Business Owner / Requestor', `<select name="businessOwnerId" required><option value="" ${!initiative?.businessOwnerId ? 'selected' : ''}>Select...</option>${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.businessOwnerId === u.id)).join('')}</select>`),
+    formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, initiative?.businessUserIds || []), true, false),
+    formRow('Department', `<select name="departmentId" required><option value="" ${!initiative?.departmentId ? 'selected' : ''}>Select...</option>${LOOKUPS.departments.map(d => option(d.id, d.name, initiative?.departmentId === d.id)).join('')}</select>`),
     formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, initiative?.itPicIds || (initiative?.itPicId ? [initiative.itPicId] : []))),
-    formRow('IT PM', `<select name="itPmId">${option('', 'None', !initiative?.itPmId)}${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.itPmId === u.id)).join('')}</select>`),
-    formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, initiative?.itManagerIds || [])),
+    formRow('IT PM', `<select name="itPmId" required><option value="" ${!initiative?.itPmId ? 'selected' : ''}>Select...</option>${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.itPmId === u.id)).join('')}</select>`),
+    formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, initiative?.itManagerIds || []), true, false),
     formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => option(s, s, initiative?.status === s)).join('')}</select>`),
     formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, initiative?.milestone === m)).join('')}</select>`),
     formRow('Start Date', `<input type="date" name="startDate" value="${initiative?.startDate?.slice(0,10) || ''}" required />`),
-    formRow('End Date', `<input type="date" name="endDate" value="${initiative?.endDate?.slice(0,10) || ''}" />`),
-    formRow('Remark', `<textarea name="remark" class="long-text">${initiative ? (initiative.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
-    formRow('Project Doc Link', `<input name="documentationLink" type="url" value="${initiative?.documentationLink || ''}" />`)
+    formRow('Remark', `<textarea name="remark" class="long-text">${initiative ? (initiative.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`, false, true),
+    formRow('Project Doc Link', `<input name="documentationLink" type="url" value="${initiative?.documentationLink || ''}" />`, false, true)
   ].join('');
 }
 
 function crFields() {
   return `
     <div id="crFields">
-      ${formRow('CR Submission Start', `<input type="date" name="cr.crSubmissionStart" />`)}
-      ${formRow('CR Submission End', `<input type="date" name="cr.crSubmissionEnd" />`)}
       ${formRow('Development Start', `<input type="date" name="cr.developmentStart" />`)}
       ${formRow('Development End', `<input type="date" name="cr.developmentEnd" />`)}
       ${formRow('SIT Start', `<input type="date" name="cr.sitStart" />`)}
@@ -1172,21 +1174,35 @@ function crFields() {
 async function renderNew() {
   setActive('#new');
   await ensureLookups();
+  
+  // Check URL parameter for default type (from CR List or navigation)
+  // Parse from hash: #new?type=CR or from search params
+  const hash = window.location.hash;
+  let defaultType = 'Project';
+  if (hash.includes('?')) {
+    const hashParts = hash.split('?');
+    if (hashParts.length > 1) {
+      const urlParams = new URLSearchParams(hashParts[1]);
+      defaultType = urlParams.get('type') || 'Project';
+    }
+  } else {
+    const urlParams = new URLSearchParams(window.location.search);
+    defaultType = urlParams.get('type') || 'Project';
+  }
+  
+  const isCR = defaultType === 'CR';
+  const defaultInitiative = isCR ? { type: 'CR' } : null;
+  
   app.innerHTML = `
     <div class="card">
-      <h2>New Initiative</h2>
+      <h2>New ${isCR ? 'Change Request' : 'Initiative'}</h2>
       <form id="f" class="form">
-        ${commonFields()}
-        <div id="crContainer" class="card" style="display:none">
-          <h3>CR Details</h3>
-          ${crFields()}
-        </div>
-        <div>
-          <button class="primary" type="submit">Create</button>
+        ${commonFields(defaultInitiative)}
+        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 20px;">
           <a href="#list"><button type="button">Cancel</button></a>
+          <button class="primary" type="submit">Create</button>
         </div>
       </form>
-      <div class="muted">Note: For CR, CR Submission Start is required.</div>
     </div>
   `;
   
@@ -1195,11 +1211,67 @@ async function renderNew() {
   
   const f = document.getElementById('f');
   const typeEl = f.querySelector('select[name="type"]');
-  const crBox = document.getElementById('crContainer');
-  typeEl.onchange = () => {
-    crBox.style.display = typeEl.value === 'CR' ? 'block' : 'none';
+  
+  // Set initial type if coming from CR List
+  if (typeEl && isCR) {
+    typeEl.value = 'CR';
+  }
+  
+  // Function to update the name label and Business Impact required status based on type
+  const updateNameLabel = () => {
+    if (!typeEl || !f) {
+      return;
+    }
+    
+    const isCR = typeEl.value === 'CR';
+    const newLabel = isCR ? 'CR Name' : 'Initiative Name';
+    
+    // Find the name label using the name-label-row class
+    const nameLabelRow = f.querySelector('.name-label-row');
+    if (nameLabelRow) {
+      const label = nameLabelRow.querySelector('label');
+      if (label) {
+        label.textContent = newLabel;
+      }
+    }
+    
+    // Update Business Impact required status
+    const businessImpactRow = Array.from(f.querySelectorAll('.form-row')).find(row => {
+      const label = row.querySelector('label');
+      return label && label.textContent.includes('Business Impact');
+    });
+    if (businessImpactRow) {
+      const label = businessImpactRow.querySelector('label');
+      const textarea = businessImpactRow.querySelector('textarea[name="businessImpact"]');
+      if (label && textarea) {
+        // Remove existing required/optional indicators
+        label.innerHTML = label.innerHTML.replace(/\s*<span[^>]*>.*?<\/span>/g, '');
+        label.innerHTML = label.innerHTML.replace(/\s*\(Optional\)/g, '');
+        
+        if (isCR) {
+          // Make optional for CR
+          label.innerHTML += '<span style="color: var(--color-text-steel); margin-left: 4px; font-size: 12px;" title="Optional">(Optional)</span>';
+          textarea.removeAttribute('required');
+        } else {
+          // Make required for Project
+          label.innerHTML += '<span style="color: var(--color-primary-default); margin-left: 4px;" title="Required">*</span>';
+          textarea.setAttribute('required', 'required');
+        }
+      }
+    }
   };
-  typeEl.onchange();
+  
+  // Make function globally accessible for inline onchange
+  window.updateInitiativeNameLabel = updateNameLabel;
+  
+  // Attach event listener and set initial state
+  if (typeEl) {
+    typeEl.onchange = updateNameLabel;
+    typeEl.addEventListener('change', updateNameLabel);
+    
+    // Set initial state
+    setTimeout(updateNameLabel, 0);
+  }
   f.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(f);
@@ -1210,18 +1282,37 @@ async function renderNew() {
     const itPicIds = obj.itPicIds ? obj.itPicIds.split(',').filter(Boolean) : [];
     const itManagerIds = obj.itManagerIds ? obj.itManagerIds.split(',').filter(Boolean) : [];
     
+    // Validate required fields
+    if (!obj.name || obj.name.trim() === '') {
+      alert(`${obj.type === 'CR' ? 'CR Name' : 'Initiative Name'} is required`);
+      return;
+    }
+    if (businessUserIds.length === 0) {
+      alert('Business Users is required');
+      return;
+    }
+    if (!obj.itPmId) {
+      alert('IT PM is required');
+      return;
+    }
+    if (itManagerIds.length === 0) {
+      alert('IT Manager is required');
+      return;
+    }
+    
     const payload = {
       type: obj.type,
       name: obj.name,
+      ticket: obj.ticket || null,
       description: obj.description,
-      businessImpact: obj.businessImpact,
+      businessImpact: obj.businessImpact || (obj.type === 'CR' ? null : obj.businessImpact),
       priority: obj.priority,
       businessOwnerId: obj.businessOwnerId,
-      businessUserIds: businessUserIds.length > 0 ? businessUserIds : null,
+      businessUserIds: businessUserIds,
       departmentId: obj.departmentId,
       itPicIds: itPicIds.length > 0 ? itPicIds : null,
-      itPmId: obj.itPmId || null,
-      itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
+      itPmId: obj.itPmId,
+      itManagerIds: itManagerIds,
       status: obj.status,
       milestone: obj.milestone,
       startDate: obj.startDate,
@@ -1231,8 +1322,8 @@ async function renderNew() {
     };
     if (obj.type === 'CR') {
       payload.cr = {
-        crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-        crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
+        crSubmissionStart: null,
+        crSubmissionEnd: null,
         developmentStart: obj['cr.developmentStart'] || null,
         developmentEnd: obj['cr.developmentEnd'] || null,
         sitStart: obj['cr.sitStart'] || null,
@@ -1244,8 +1335,14 @@ async function renderNew() {
     }
     try {
       await fetchJSON('/api/initiatives', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-      location.hash = '#list';
-      renderList();
+      // Redirect based on initiative type
+      if (obj.type === 'CR') {
+        location.hash = '#crlist';
+        renderCRList();
+      } else {
+        location.hash = '#list';
+        renderList();
+      }
     } catch (e) {
       alert(e.message);
     }
@@ -1253,10 +1350,11 @@ async function renderNew() {
 }
 
 async function renderView(id) {
-  setActive('#list');
   await ensureLookups();
   await getCurrentUser();
   const i = await fetchJSON('/api/initiatives/' + id);
+  // Set active navigation based on initiative type
+  setActive(i.type === 'CR' ? '#crlist' : '#list');
   const boName = nameById(LOOKUPS.users, i.businessOwnerId);
   const depName = nameById(LOOKUPS.departments, i.departmentId);
   const itPicName = nameById(LOOKUPS.users, i.itPicId);
@@ -1303,6 +1401,7 @@ async function renderView(id) {
   const formatActivityFieldLabel = (field) => {
     if (!field) return '';
     const mapping = {
+      name: i.type === 'CR' ? 'CR Name' : 'Initiative Name',
       businessOwnerId: 'Business Owner / Requestor',
       businessUserIds: 'Business Users',
       departmentId: 'Department',
@@ -1404,7 +1503,7 @@ async function renderView(id) {
         <div><div class="muted">Ticket</div><div>${i.ticket || i.id}</div></div>
         <div><div class="muted">Type</div><div>${i.type}</div></div>
         <div><div class="muted">Create Date</div><div>${i.createdAt?.slice(0,10) || ''}</div></div>
-        <div><div class="muted">Priority</div><div><span class="priority-badge priority-${i.priority}">${i.priority}</span></div></div>
+        <div><div class="muted">Priority</div><div><span class="priority-badge priority-${i.priority?.toLowerCase()}">${i.priority}</span></div></div>
         <div><div class="muted">Status</div><div><span class="status-badge status-${i.status?.replace(/\s+/g, '-')}">${i.status}</span></div></div>
         <div><div class="muted">% Completion</div><div><strong>${completionPercent}%</strong></div></div>
         <div><div class="muted">Milestone</div><div>${i.milestone}</div></div>
@@ -1463,16 +1562,6 @@ async function renderView(id) {
         </div>
       </div>
       
-      ${i.type === 'CR' ? `
-        <h3>CR Dates</h3>
-        <div class="grid">
-          <div><div class="muted">Submission</div><div>${i.cr?.crSubmissionStart || ''} → ${i.cr?.crSubmissionEnd || ''}</div></div>
-          <div><div class="muted">Development</div><div>${i.cr?.developmentStart || ''} → ${i.cr?.developmentEnd || ''}</div></div>
-          <div><div class="muted">SIT</div><div>${i.cr?.sitStart || ''} → ${i.cr?.sitEnd || ''}</div></div>
-          <div><div class="muted">UAT</div><div>${i.cr?.uatStart || ''} → ${i.cr?.uatEnd || ''}</div></div>
-          <div><div class="muted">Live</div><div>${i.cr?.liveDate || ''}</div></div>
-        </div>
-      ` : ''}
       <!-- Activity Log Section -->
       <div style="grid-column: 1 / -1; margin-top: 24px;">
         <h3>📋 Activity Log</h3>
@@ -1836,58 +1925,46 @@ async function renderView(id) {
     card.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
         <h2 style="margin: 0;">Edit Initiative</h2>
-        <div>
+        <div style="display: flex; gap: 12px;">
+          <button id="cancel-edit-btn">Cancel</button>
           <button id="save-btn" class="primary">💾 Save</button>
-          <button id="cancel-edit-btn" style="margin-left: 8px;">Cancel</button>
         </div>
       </div>
       <form id="edit-form" class="form">
-        ${formRow('Initiative Name', `<input name="name" value="${(i.name || '').replace(/"/g, '&quot;')}" required />`)}
-        ${formRow('Ticket', `<input name="ticket" value="${(i.ticket || '').replace(/"/g, '&quot;')}" readonly style="background: #f0f0f0;" />`)}
-        ${formRow('Type', `<input name="type" value="${i.type}" readonly style="background: #f0f0f0;" />`)}
-        ${formRow('Create Date', `<input type="date" value="${i.createdAt?.slice(0,10) || ''}" readonly style="background: #f0f0f0;" />`)}
-        ${formRow('Priority', `<select name="priority">${['P0','P1','P2'].map(p => `<option value="${p}" ${i.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
-          ${formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => `<option value="${s}" ${i.status && i.status.toLowerCase() === s.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}</select>`)}
-        ${formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
-        ${formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => `<option value="${d.id}" ${d.id === i.departmentId ? 'selected' : ''}>${d.name}</option>`).join('')}</select>`)}
-        ${formRow('Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" required />`)}
-        ${formRow('End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
+        ${formRow(i.type === 'CR' ? 'CR Name' : 'Initiative Name', `<input name="name" value="${(i.name || '').replace(/"/g, '&quot;')}" required />`, true, false, false)}
+        ${formRow('Ticket', `<input name="ticket" value="${(i.ticket || '').replace(/"/g, '&quot;')}" placeholder="Enter ticket number or reference" />`, false, true, false)}
+        ${formRow('Type', `<input name="type" value="${i.type}" readonly style="background: #f0f0f0;" />`, false, false, false)}
+        ${formRow('Create Date', `<input type="date" value="${i.createdAt?.slice(0,10) || ''}" readonly style="background: #f0f0f0;" />`, false, false, false)}
+        ${formRow('Priority', `<select name="priority">${['P0','P1','P2'].map(p => `<option value="${p}" ${i.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`, false, false, false)}
+          ${formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => `<option value="${s}" ${i.status && i.status.toLowerCase() === s.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}</select>`, false, false, false)}
+        ${formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`, false, false, false)}
+        ${formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => `<option value="${d.id}" ${d.id === i.departmentId ? 'selected' : ''}>${d.name}</option>`).join('')}</select>`, true, false, false)}
+        ${formRow('Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" required />`, true, false, false)}
+        ${formRow('End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`, false, true, false)}
         <div class="form-row"><label>Age Since Created</label><div><strong>${daysSinceCreated} days</strong></div></div>
-        ${formRow('Description', `<textarea name="description" class="long-text" required style="min-height: 100px;">${(i.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
-        ${formRow('Business Impact', `<textarea name="businessImpact" class="long-text" required style="min-height: 100px;">${(i.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
-        ${formRow('Remark', `<textarea name="remark" class="long-text" style="min-height: 80px;">${(i.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
-        ${formRow('Project Doc Link', `<input name="documentationLink" type="url" value="${i.documentationLink || ''}" />`)}
+        ${formRow('Description', `<textarea name="description" class="long-text" required style="min-height: 100px;">${(i.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`, true, false, false)}
+        ${formRow('Business Impact', `<textarea name="businessImpact" class="long-text" ${i.type === 'CR' ? '' : 'required'} style="min-height: 100px;">${(i.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`, i.type !== 'CR', i.type === 'CR', false)}
+        ${formRow('Remark', `<textarea name="remark" class="long-text" style="min-height: 80px;">${(i.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`, false, true, false)}
+        ${formRow('Project Doc Link', `<input name="documentationLink" type="url" value="${i.documentationLink || ''}" />`, false, true, false)}
         
         <!-- Project Team Section -->
         <div style="margin-top: 24px; padding: 20px; background: var(--gray-50); border-radius: 8px;">
           <h3 style="margin: 0 0 16px 0; color: var(--text);">👥 Project Team</h3>
-          ${formRow('IT PM', `<select name="itPmId">${[''].concat(LOOKUPS.users.map(u => u.id)).map(uid => `<option value="${uid}" ${i.itPmId === uid ? 'selected' : ''}>${uid ? nameById(LOOKUPS.users, uid) : 'None'}</option>`).join('')}</select>`)}
-          ${formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, itPicIds))}
-          ${formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, i.itManagerIds || []))}
-          ${formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => `<option value="${u.id}" ${u.id === i.businessOwnerId ? 'selected' : ''}>${u.name}</option>`).join('')}</select>`)}
-          ${formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, i.businessUserIds || []))}
+          ${formRow('IT PM', `<select name="itPmId" required>${LOOKUPS.users.map(u => `<option value="${u.id}" ${i.itPmId === u.id ? 'selected' : ''}>${u.name}</option>`).join('')}</select>`, true, false, false)}
+          ${formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, itPicIds), true, false, false)}
+          ${formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, i.itManagerIds || []), true, false, false)}
+          ${formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => `<option value="${u.id}" ${u.id === i.businessOwnerId ? 'selected' : ''}>${u.name}</option>`).join('')}</select>`, true, false, false)}
+          ${formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, i.businessUserIds || []), true, false, false)}
         </div>
         
-        ${i.type === 'CR' ? `
-          <div style="margin-top: 24px;">
-            <h3>CR Dates</h3>
-            ${formRow('CR Submission Start', `<input type="date" name="cr.crSubmissionStart" value="${i.cr?.crSubmissionStart?.slice(0,10) || ''}" />`)}
-            ${formRow('CR Submission End', `<input type="date" name="cr.crSubmissionEnd" value="${i.cr?.crSubmissionEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('Development Start', `<input type="date" name="cr.developmentStart" value="${i.cr?.developmentStart?.slice(0,10) || ''}" />`)}
-            ${formRow('Development End', `<input type="date" name="cr.developmentEnd" value="${i.cr?.developmentEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('SIT Start', `<input type="date" name="cr.sitStart" value="${i.cr?.sitStart?.slice(0,10) || ''}" />`)}
-            ${formRow('SIT End', `<input type="date" name="cr.sitEnd" value="${i.cr?.sitEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('UAT Start', `<input type="date" name="cr.uatStart" value="${i.cr?.uatStart?.slice(0,10) || ''}" />`)}
-            ${formRow('UAT End', `<input type="date" name="cr.uatEnd" value="${i.cr?.uatEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('Live Date', `<input type="date" name="cr.liveDate" value="${i.cr?.liveDate?.slice(0,10) || ''}" />`)}
+        <div style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; gap: 12px;">
+            <button type="button" id="cancel-edit-btn-2">Cancel</button>
+            <a href="#list"><button type="button">Back</button></a>
           </div>
-        ` : ''}
-        <div style="margin-top: 20px; display: flex; gap: 12px;">
-          <button type="button" id="cancel-edit-btn-2">Cancel</button>
           <button type="button" id="save-btn-2" class="primary">💾 Save</button>
         </div>
       </form>
-      <div style="margin-top:12px"><a href="#list"><button>Back</button></a></div>
     `;
     
     initializeMultiSelects();
@@ -1932,8 +2009,8 @@ async function renderView(id) {
       
       if (i.type === 'CR') {
         payload.cr = {
-          crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-          crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
+          crSubmissionStart: null,
+          crSubmissionEnd: null,
           developmentStart: obj['cr.developmentStart'] || null,
           developmentEnd: obj['cr.developmentEnd'] || null,
           sitStart: obj['cr.sitStart'] || null,
@@ -2595,9 +2672,9 @@ async function renderEdit(id) {
           <h3>CR Details</h3>
           ${crFields()}
         </div>
-        <div>
-          <button class="primary" type="submit">Save Changes</button>
+        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 20px;">
           <a href="#view/${id}"><button type="button">Cancel</button></a>
+          <button class="primary" type="submit">Save Changes</button>
         </div>
       </form>
     </div>
@@ -2617,17 +2694,36 @@ async function renderEdit(id) {
     const itPicIds = obj.itPicIds ? obj.itPicIds.split(',').filter(Boolean) : [];
     const itManagerIds = obj.itManagerIds ? obj.itManagerIds.split(',').filter(Boolean) : [];
     
+    // Validate required fields
+    if (!obj.name || obj.name.trim() === '') {
+      alert(`${i.type === 'CR' ? 'CR Name' : 'Initiative Name'} is required`);
+      return;
+    }
+    if (businessUserIds.length === 0) {
+      alert('Business Users is required');
+      return;
+    }
+    if (!obj.itPmId) {
+      alert('IT PM is required');
+      return;
+    }
+    if (itManagerIds.length === 0) {
+      alert('IT Manager is required');
+      return;
+    }
+    
     const payload = {
       name: obj.name,
+      ticket: obj.ticket || null,
       description: obj.description,
       businessImpact: obj.businessImpact,
       priority: obj.priority,
       businessOwnerId: obj.businessOwnerId,
-      businessUserIds: businessUserIds.length > 0 ? businessUserIds : null,
+      businessUserIds: businessUserIds,
       departmentId: obj.departmentId,
       itPicIds: itPicIds.length > 0 ? itPicIds : null,
-      itPmId: obj.itPmId || null,
-      itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
+      itPmId: obj.itPmId,
+      itManagerIds: itManagerIds,
       status: obj.status,
       milestone: obj.milestone,
       startDate: obj.startDate,
@@ -2638,8 +2734,8 @@ async function renderEdit(id) {
     };
     if (i.type === 'CR') {
       payload.cr = {
-        crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-        crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
+        crSubmissionStart: null,
+        crSubmissionEnd: null,
         developmentStart: obj['cr.developmentStart'] || null,
         developmentEnd: obj['cr.developmentEnd'] || null,
         sitStart: obj['cr.sitStart'] || null,
@@ -2870,7 +2966,7 @@ async function renderCRList() {
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('crlist')" title="Column Settings" class="icon-btn">⚙️</button>
-          <a href="#new"><button class="primary">+ New CR</button></a>
+          <a href="#new?type=CR"><button class="primary">+ New CR</button></a>
         </div>
       </div>
     </div>
@@ -3016,9 +3112,6 @@ async function renderCRList() {
   });
   document.querySelectorAll('button.view').forEach(btn => {
     btn.onclick = () => location.hash = `#view/${btn.dataset.id}`;
-  });
-  document.querySelectorAll('button.edit').forEach(btn => {
-    btn.onclick = () => location.hash = `#edit/${btn.dataset.id}`;
   });
 }
 
