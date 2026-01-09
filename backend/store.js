@@ -4,7 +4,7 @@ const { Pool } = pkg;
 
 const databaseUrl =
   process.env.DATABASE_URL ||
-  'postgres://postgres:postgres123@localhost:5434/project_management_v2';
+  'postgres://postgres:postgres123@localhost:5544/project_management_v2';
 
 const pool = new Pool({ connectionString: databaseUrl });
 let initialized = false;
