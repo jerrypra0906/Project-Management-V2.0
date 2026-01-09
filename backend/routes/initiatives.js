@@ -9,15 +9,33 @@ const uuid = () => crypto.randomUUID();
 
 function validateCommon(body) {
   const required = [
-    'type','name','description','businessImpact','priority','businessOwnerId','departmentId','status','milestone','startDate'
+    'type','name','description','priority','businessOwnerId','departmentId','status','milestone','startDate'
   ];
+  // businessImpact is required for Project, optional for CR
+  if (body.type === 'Project' && !body.businessImpact) {
+    return 'Missing required field: businessImpact';
+  }
   // itPicId is now optional (can use itPicIds instead)
   // But at least one of itPicId or itPicIds must be provided
   if (!body.itPicId && (!body.itPicIds || (Array.isArray(body.itPicIds) && body.itPicIds.length === 0))) {
     return 'Missing required field: IT PIC (itPicId or itPicIds)';
   }
+  // Business Users is required
+  if (!body.businessUserIds || (Array.isArray(body.businessUserIds) && body.businessUserIds.length === 0)) {
+    return 'Missing required field: businessUserIds';
+  }
+  // IT PM is required
+  if (!body.itPmId) {
+    return 'Missing required field: itPmId';
+  }
+  // IT Manager is required
+  if (!body.itManagerIds || (Array.isArray(body.itManagerIds) && body.itManagerIds.length === 0)) {
+    return 'Missing required field: itManagerIds';
+  }
   for (const key of required) {
-    if (!body[key]) return `Missing required field: ${key}`;
+    if (!body[key] || (typeof body[key] === 'string' && body[key].trim() === '')) {
+      return `Missing required field: ${key}`;
+    }
   }
   if (!['Project','CR'].includes(body.type)) return 'Invalid type';
   if (!['P0','P1','P2'].includes(body.priority)) return 'Invalid priority';
@@ -138,7 +156,7 @@ router.post('/', async (req, res) => {
   const createdAt = now();
   const updatedAt = createdAt;
   const {
-    type,name,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,status,milestone,startDate,endDate,remark,documentationLink
+    type,name,ticket,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,status,milestone,startDate,endDate,remark,documentationLink
   } = req.body;
   const data = await store.read();
   
@@ -151,7 +169,7 @@ router.post('/', async (req, res) => {
   const finalItPicIds = itPicIdsStr || (itPicId ? itPicId : null);
   
   data.initiatives.push({ 
-    id,type,name,description,businessImpact,priority,
+    id,type,name,ticket: ticket||null,description,businessImpact,priority,
     businessOwnerId,businessUserIds: businessUserIdsStr,
     departmentId,
     itPicId: itPicId || null, // Keep for backward compatibility
@@ -163,11 +181,10 @@ router.post('/', async (req, res) => {
   });
   if (type === 'CR') {
     const cr = req.body.cr || {};
-    if (!cr.crSubmissionStart) return res.status(400).json({ error: 'CR requires cr.crSubmissionStart' });
     data.changeRequests.push({
       initiativeId: id,
-      crSubmissionStart: cr.crSubmissionStart,
-      crSubmissionEnd: cr.crSubmissionEnd || null,
+      crSubmissionStart: null,
+      crSubmissionEnd: null,
       developmentStart: cr.developmentStart || null,
       developmentEnd: cr.developmentEnd || null,
       sitStart: cr.sitStart || null,
@@ -210,7 +227,7 @@ router.put('/:id', async (req, res) => {
   const initiative = data.initiatives[idx];
   const changes = [];
   const updatedAt = now();
-  const allowed = ['name','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','startDate','endDate','remark','documentationLink'];
+  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','startDate','endDate','remark','documentationLink'];
   
   // Track changes and update fields
   for (const k of allowed) {
@@ -290,7 +307,7 @@ router.put('/:id', async (req, res) => {
   // Track CR changes
   if (initiative.type === 'CR' && req.body.cr) {
     let cr = data.changeRequests.find(x => x.initiativeId === req.params.id);
-    if (!cr && req.body.cr.crSubmissionStart) {
+    if (!cr) {
       cr = { initiativeId: req.params.id };
       data.changeRequests.push(cr);
     }

@@ -128,32 +128,63 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
+    console.log('[LOGIN] Request received');
     const { email, password } = req.body || {};
+    
     if (!email || !password) {
+      console.log('[LOGIN] Missing email or password');
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const user = await findUserByEmail(email);
+    console.log('[LOGIN] Looking up user:', email);
+    let user;
+    try {
+      user = await findUserByEmail(email);
+    } catch (dbError) {
+      console.error('[LOGIN] Database error:', dbError);
+      return res.status(500).json({ error: 'Database error', details: dbError.message });
+    }
+    
     if (!user) {
+      console.log('[LOGIN] User not found');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    console.log('[LOGIN] User found:', user.email, 'isAdmin:', user.isAdmin);
+
     // If user exists but has no password, they need to register first
     if (!user.passwordHash) {
+      console.log('[LOGIN] User has no password hash');
       return res.status(401).json({ 
         error: 'No password set for this account. Please register to set a password, or contact an administrator.',
         needsRegistration: true
       });
     }
 
-    const ok = await bcrypt.compare(password, user.passwordHash);
+    console.log('[LOGIN] Comparing password');
+    let ok;
+    try {
+      ok = await bcrypt.compare(password, user.passwordHash);
+    } catch (bcryptError) {
+      console.error('[LOGIN] Bcrypt error:', bcryptError);
+      return res.status(500).json({ error: 'Password verification error' });
+    }
+    
     if (!ok) {
+      console.log('[LOGIN] Password mismatch');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     // Check email activation for non-admin users
-    if (!user.isAdmin && !user.emailActivated) {
-      const isAllowedDomain = isEmailDomainAllowed(user.email);
+    // Ensure isAdmin is properly converted to boolean
+    const userIsAdmin = !!user.isAdmin;
+    const userEmailActivated = !!user.emailActivated;
+    
+    console.log('[LOGIN] User isAdmin:', userIsAdmin, 'emailActivated:', userEmailActivated);
+    
+    if (!userIsAdmin && !userEmailActivated) {
+      console.log('[LOGIN] User not activated');
+      const isAllowedDomain = isEmailDomainAllowed(user.email || '');
       const errorMessage = isAllowedDomain 
         ? 'Email not activated. Please check your email for the activation link.'
         : 'Account pending admin approval. Please contact an administrator to activate your account.';
@@ -164,18 +195,45 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const token = jwt.sign(
-      { sub: user.id, email: user.email, name: user.name, isAdmin: !!user.isAdmin },
-      JWT_SECRET,
-      { expiresIn: '8h' }
-    );
+    // Ensure JWT_SECRET is set
+    if (!JWT_SECRET) {
+      console.error('[LOGIN] JWT_SECRET is not configured');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+
+    console.log('[LOGIN] Creating JWT token');
+    let token;
+    try {
+      token = jwt.sign(
+        { sub: user.id, email: user.email || '', name: user.name || '', isAdmin: userIsAdmin },
+        JWT_SECRET,
+        { expiresIn: '8h' }
+      );
+    } catch (jwtError) {
+      console.error('[LOGIN] JWT signing error:', jwtError);
+      return res.status(500).json({ error: 'Token generation error', details: jwtError.message });
+    }
+    
+    console.log('[LOGIN] Login successful');
     return res.json({
       token,
-      user: { id: user.id, email: user.email, name: user.name, isAdmin: !!user.isAdmin },
+      user: { id: user.id, email: user.email || '', name: user.name || '', isAdmin: userIsAdmin },
     });
   } catch (e) {
-    console.error('Login error', e);
-    return res.status(500).json({ error: 'Internal error' });
+    console.error('[LOGIN] Unexpected error:', e);
+    console.error('[LOGIN] Error message:', e.message);
+    console.error('[LOGIN] Error stack:', e.stack);
+    
+    // Ensure response is sent even if there's an error
+    if (!res.headersSent) {
+      const errorDetails = process.env.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production' 
+        ? { message: e.message, stack: e.stack } 
+        : undefined;
+      return res.status(500).json({ 
+        error: 'Internal error', 
+        ...(errorDetails && { details: errorDetails })
+      });
+    }
   }
 });
 

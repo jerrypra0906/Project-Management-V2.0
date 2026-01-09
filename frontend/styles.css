@@ -72,6 +72,22 @@ nav {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  justify-content: space-between;
+}
+
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 nav a { 
   margin-left: var(--spacing-2); 
@@ -106,7 +122,6 @@ nav a.active:hover {
 /* Notifications Menu */
 .notifications-menu {
   position: relative;
-  margin-left: 12px;
 }
 
 .notifications-btn {
@@ -320,7 +335,6 @@ nav a.active:hover {
 /* Profile Menu */
 .profile-menu {
   position: relative;
-  margin-left: 12px;
 }
 
 .profile-menu-btn {
@@ -1684,9 +1698,9 @@ th { position: relative; white-space: nowrap; }
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-.priority-p0 { background: #ffccd7; color: #c4003c; border: 1px solid #e44258; }
-.priority-p1 { background: #ffe6cc; color: #c87400; border: 1px solid #fdab3d; }
-.priority-p2 { background: #cce5ff; color: #0060b9; border: 1px solid #0073ea; }
+.priority-p0 { background: #fee2e2; color: #dc2626; border: 1px solid #ef4444; }
+.priority-p1 { background: #fef3c7; color: #d97706; border: 1px solid #f59e0b; }
+.priority-p2 { background: #f3f4f6; color: #6b7280; border: 1px solid #9ca3af; }
 
 /* Status badges - Monday.com style with softer colors */
 .status-badge {
@@ -1984,10 +1998,17 @@ th { position: relative; white-space: nowrap; }
   box-sizing: border-box;
 }
 
+/* Form buttons - remove full width when in flex containers */
+.form > div[style*="flex"] button,
+.form > div[style*="justify-content"] button {
+  width: auto;
+  margin-top: 0;
+}
+
 .form button.primary {
   margin-top: var(--spacing-2);
-  width: 100%;
   box-sizing: border-box;
+  padding: var(--spacing-2) var(--spacing-4);
 }
 
 /* Monday.com-inspired Dashboard Styles */
