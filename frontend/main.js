@@ -1091,7 +1091,34 @@ function formRow(label, inputHtml) {
   return `<div class="form-row"><label>${label}</label><div>${inputHtml}</div></div>`;
 }
 
-// Helper function to create multi-select dropdown for forms
+// Helper function to create searchable single-select dropdown
+function createSearchableSelect(name, options, selectedValue = '', placeholder = 'Select...', allowNone = false) {
+  const selectedOption = options.find(opt => opt.id === selectedValue);
+  const displayText = selectedOption ? selectedOption.name : placeholder;
+  
+  return `
+    <div class="searchable-select-wrapper">
+      <button type="button" class="searchable-select-btn" data-field="${name}">
+        <span class="searchable-select-text">${displayText}</span>
+        <span class="searchable-select-arrow">▼</span>
+      </button>
+      <div class="searchable-select-dropdown" id="searchable-dropdown-${name}">
+        <div class="searchable-select-search">
+          <input type="text" class="searchable-select-input" placeholder="Search..." data-field="${name}">
+        </div>
+        <div class="searchable-select-options">
+          ${allowNone ? `<div class="searchable-select-option ${!selectedValue ? 'selected' : ''}" data-value="" data-field="${name}">None</div>` : ''}
+          ${options.map(opt => `
+            <div class="searchable-select-option ${selectedValue === opt.id ? 'selected' : ''}" data-value="${opt.id}" data-field="${name}">${opt.name}</div>
+          `).join('')}
+        </div>
+      </div>
+      <input type="hidden" name="${name}" value="${selectedValue || ''}">
+    </div>
+  `;
+}
+
+// Helper function to create multi-select dropdown for forms with search
 function createMultiSelect(name, options, selectedValues = []) {
   const selectedSet = new Set(Array.isArray(selectedValues) ? selectedValues : [selectedValues].filter(Boolean));
   const selectedIds = Array.from(selectedSet);
@@ -1102,12 +1129,17 @@ function createMultiSelect(name, options, selectedValues = []) {
         ${selectedIds.length > 0 ? `${selectedIds.length} selected` : 'Select...'}
       </button>
       <div class="multi-select-dropdown" id="dropdown-${name}">
-        ${options.map(opt => `
-          <label class="multi-select-option">
-            <input type="checkbox" value="${opt.id}" ${selectedSet.has(opt.id) ? 'checked' : ''} data-field="${name}">
-            ${opt.name}
-          </label>
-        `).join('')}
+        <div class="multi-select-search">
+          <input type="text" class="multi-select-search-input" placeholder="Search..." data-field="${name}">
+        </div>
+        <div class="multi-select-options">
+          ${options.map(opt => `
+            <label class="multi-select-option" data-name="${(opt.name || '').toLowerCase()}">
+              <input type="checkbox" value="${opt.id}" ${selectedSet.has(opt.id) ? 'checked' : ''} data-field="${name}">
+              ${opt.name}
+            </label>
+          `).join('')}
+        </div>
       </div>
       <input type="hidden" name="${name}" value="${selectedIds.join(',')}">
     </div>
@@ -1116,6 +1148,7 @@ function createMultiSelect(name, options, selectedValues = []) {
 
 // Initialize multi-select dropdowns in forms
 function initializeMultiSelects() {
+  // Multi-select button click
   document.querySelectorAll('.multi-select-btn[data-field]').forEach(btn => {
     btn.onclick = (e) => {
       e.stopPropagation();
@@ -1125,11 +1158,29 @@ function initializeMultiSelects() {
       
       // Close all dropdowns
       document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+      document.querySelectorAll('.searchable-select-dropdown').forEach(d => d.classList.remove('open'));
       
       // Toggle current dropdown
       if (!isOpen) {
         dropdown.classList.add('open');
+        // Focus search input
+        const searchInput = dropdown.querySelector('.multi-select-search-input');
+        if (searchInput) setTimeout(() => searchInput.focus(), 10);
       }
+    };
+  });
+  
+  // Multi-select search functionality
+  document.querySelectorAll('.multi-select-search-input').forEach(input => {
+    input.onclick = (e) => e.stopPropagation();
+    input.oninput = (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      const fieldName = input.dataset.field;
+      const options = document.querySelectorAll(`#dropdown-${fieldName} .multi-select-option`);
+      options.forEach(opt => {
+        const name = opt.dataset.name || opt.textContent.toLowerCase();
+        opt.style.display = name.includes(searchTerm) ? 'flex' : 'none';
+      });
     };
   });
   
@@ -1137,6 +1188,9 @@ function initializeMultiSelects() {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.multi-select-wrapper')) {
       document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+    }
+    if (!e.target.closest('.searchable-select-wrapper')) {
+      document.querySelectorAll('.searchable-select-dropdown').forEach(d => d.classList.remove('open'));
     }
   });
   
@@ -1158,10 +1212,115 @@ function initializeMultiSelects() {
       }
     };
   });
+  
+  // Initialize searchable single-select dropdowns
+  document.querySelectorAll('.searchable-select-btn[data-field]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const fieldName = btn.dataset.field;
+      const dropdown = document.getElementById(`searchable-dropdown-${fieldName}`);
+      const isOpen = dropdown.classList.contains('open');
+      
+      // Close all dropdowns
+      document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+      document.querySelectorAll('.searchable-select-dropdown').forEach(d => d.classList.remove('open'));
+      
+      // Toggle current dropdown
+      if (!isOpen) {
+        dropdown.classList.add('open');
+        // Focus search input
+        const searchInput = dropdown.querySelector('.searchable-select-input');
+        if (searchInput) setTimeout(() => searchInput.focus(), 10);
+      }
+    };
+  });
+  
+  // Searchable select search functionality
+  document.querySelectorAll('.searchable-select-input').forEach(input => {
+    input.onclick = (e) => e.stopPropagation();
+    input.oninput = (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      const fieldName = input.dataset.field;
+      const options = document.querySelectorAll(`#searchable-dropdown-${fieldName} .searchable-select-option`);
+      options.forEach(opt => {
+        const name = opt.textContent.toLowerCase();
+        opt.style.display = name.includes(searchTerm) ? 'block' : 'none';
+      });
+    };
+  });
+  
+  // Searchable select option click
+  document.querySelectorAll('.searchable-select-option').forEach(opt => {
+    opt.onclick = (e) => {
+      e.stopPropagation();
+      const fieldName = opt.dataset.field;
+      const value = opt.dataset.value;
+      const text = opt.textContent.trim();
+      
+      // Update hidden input
+      const hiddenInput = document.querySelector(`.searchable-select-wrapper input[type="hidden"][name="${fieldName}"]`);
+      if (hiddenInput) hiddenInput.value = value;
+      
+      // Update button text
+      const btn = document.querySelector(`.searchable-select-btn[data-field="${fieldName}"]`);
+      if (btn) {
+        const textSpan = btn.querySelector('.searchable-select-text');
+        if (textSpan) textSpan.textContent = text;
+      }
+      
+      // Update selected state
+      const allOptions = document.querySelectorAll(`#searchable-dropdown-${fieldName} .searchable-select-option`);
+      allOptions.forEach(o => o.classList.remove('selected'));
+      opt.classList.add('selected');
+      
+      // Close dropdown and clear search
+      const dropdown = document.getElementById(`searchable-dropdown-${fieldName}`);
+      if (dropdown) {
+        dropdown.classList.remove('open');
+        const searchInput = dropdown.querySelector('.searchable-select-input');
+        if (searchInput) {
+          searchInput.value = '';
+          allOptions.forEach(o => o.style.display = 'block');
+        }
+      }
+    };
+  });
+}
+
+// Filter users by role for specific fields
+function filterUsersByRole(users, roleFilter) {
+  return users.filter(u => {
+    const role = (u.role || '').toLowerCase().trim();
+    const type = (u.type || '').toLowerCase().trim();
+    const isAdmin = u.isAdmin === true || u.isAdmin === 1 || role === 'admin';
+    
+    switch (roleFilter) {
+      case 'businessOwner':
+        // Business User and Admin role
+        return role === 'business user' || isAdmin;
+      case 'itPic':
+        // IT, IT - PM, and Admin role
+        return role === 'it' || role === 'it - pm' || role === 'it-pm' || role === 'itpm' || isAdmin;
+      case 'itManager':
+        // Admin role OR IT role with Manager type
+        return isAdmin || (role === 'it' && type === 'manager');
+      case 'itPm':
+        // IT - PM, IT PM, and Admin role
+        return role === 'it - pm' || role === 'it-pm' || role === 'itpm' || role === 'it pm' || isAdmin;
+      default:
+        return true;
+    }
+  });
 }
 
 function commonFields(initiative = null) {
   const option = (value, label, selected) => `<option value="${value}" ${selected ? 'selected' : ''}>${label}</option>`;
+  
+  // Filter users for specific fields
+  const businessOwnerUsers = filterUsersByRole(LOOKUPS.users, 'businessOwner');
+  const itPicUsers = filterUsersByRole(LOOKUPS.users, 'itPic');
+  const itManagerUsers = filterUsersByRole(LOOKUPS.users, 'itManager');
+  const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
   
   return [
     formRow('Type', `<select name="type" required><option value="Project" ${!initiative || initiative.type === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${initiative && initiative.type === 'CR' ? 'selected' : ''}>CR</option></select>`),
@@ -1169,12 +1328,12 @@ function commonFields(initiative = null) {
     formRow('Description', `<textarea name="description" class="long-text" required>${initiative ? (initiative.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Business Impact', `<textarea name="businessImpact" class="long-text" required>${initiative ? (initiative.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Priority', `<select name="priority">${option('P0', 'P0', initiative?.priority === 'P0')}${option('P1', 'P1', initiative?.priority === 'P1')}${option('P2', 'P2', !initiative || initiative.priority === 'P2')}</select>`),
-    formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.businessOwnerId === u.id)).join('')}</select>`),
+    formRow('Business Owner / Requestor', createSearchableSelect('businessOwnerId', businessOwnerUsers, initiative?.businessOwnerId || '', 'Select...')),
     formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, initiative?.businessUserIds || [])),
-    formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => option(d.id, d.name, initiative?.departmentId === d.id)).join('')}</select>`),
-    formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, initiative?.itPicIds || (initiative?.itPicId ? [initiative.itPicId] : []))),
-    formRow('IT PM', `<select name="itPmId">${option('', 'None', !initiative?.itPmId)}${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.itPmId === u.id)).join('')}</select>`),
-    formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, initiative?.itManagerIds || [])),
+    formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, initiative?.departmentId || '', 'Select...')),
+    formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, initiative?.itPicIds || (initiative?.itPicId ? [initiative.itPicId] : []))),
+    formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, initiative?.itPmId || '', 'Select...', true)),
+    formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, initiative?.itManagerIds || [])),
     formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => option(s, s, initiative?.status === s)).join('')}</select>`),
     formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, initiative?.milestone === m)).join('')}</select>`),
     formRow('Start Date', `<input type="date" name="startDate" value="${initiative?.startDate?.slice(0,10) || ''}" required />`),
@@ -1503,101 +1662,111 @@ async function renderView(id) {
           <div><div class="muted">Live</div><div>${i.cr?.liveDate || ''}</div></div>
         </div>
       ` : ''}
-      <!-- Activity Log Section -->
-      <div style="grid-column: 1 / -1; margin-top: 24px;">
-        <h3>📋 Activity Log</h3>
-        <div class="card" style="margin-top: 16px; max-height: 600px; overflow-y: auto;">
-          ${i.changeHistory && i.changeHistory.length > 0 ? `
-            ${i.changeHistory.map((history, idx) => {
-              const changedByName = nameById(LOOKUPS.users, history.changedBy) || history.changedBy || 'System';
-              const timestamp = new Date(history.timestamp);
-              const formattedDate = timestamp.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-              const formattedTime = timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-              return `
-                <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: ${idx < i.changeHistory.length - 1 ? '1px solid #e5e7eb' : 'none'};">
-                  <div style="display: flex; align-items: center; margin-bottom: 12px;">
-                    <div style="width: 8px; height: 8px; background: var(--brand); border-radius: 50%; margin-right: 12px;"></div>
-                    <div style="flex: 1;">
-                      <div style="font-weight: 600; color: var(--text); margin-bottom: 4px;">${changedByName}</div>
-                      <div class="muted" style="font-size: 12px;">${formattedDate} at ${formattedTime}</div>
-                    </div>
-                  </div>
-              ${history.changes && history.changes.length > 0 ? `
-                    <div style="margin-left: 20px; padding-left: 16px; border-left: 2px solid var(--border-light);">
-                      ${history.changes.map(change => {
-                        const fieldLabel = formatActivityFieldLabel(change.field);
-                        const oldFormatted = formatActivityValue(change.field, change.oldValue);
-                        const newFormatted = formatActivityValue(change.field, change.newValue);
-                        return `
-                          <div style="margin: 8px 0; padding: 10px; background: #f8fafc; border-radius: 6px; border-left: 3px solid var(--brand);">
-                            <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">${fieldLabel}</div>
-                            <div style="font-size: 13px; line-height: 1.6;">
-                              <span style="color: #ef4444; text-decoration: line-through; padding: 2px 6px; background: #fee2e2; border-radius: 3px;">${oldFormatted}</span>
-                              <span style="margin: 0 8px; color: var(--muted);">→</span>
-                              <span style="color: #10b981; padding: 2px 6px; background: #d1fae5; border-radius: 3px;">${newFormatted}</span>
-                            </div>
-                          </div>
-                        `;
-                      }).join('')}
-                    </div>
-                  ` : `
-                    <div style="margin-left: 20px; padding: 8px; color: var(--muted); font-size: 13px; font-style: italic;">
-                      No specific field changes recorded
-                    </div>
-                  `}
-                </div>
-              `;
-            }).join('')}
-          ` : `
-            <div style="padding: 40px; text-align: center; color: var(--muted);">
-              <div style="font-size: 48px; margin-bottom: 12px;">📝</div>
-              <div style="font-weight: 500; margin-bottom: 4px;">No activity recorded yet</div>
-              <div style="font-size: 13px;">Changes to this initiative will appear here</div>
-            </div>
-          `}
-        </div>
-      </div>
       <div style="margin-top:12px"><a href="#list"><button>Back</button></a></div>
     </div>
     
     
-    <!-- Comments Section -->
+    <!-- Comments & Activity Log Combined Section -->
     <div class="card" style="margin-top: 24px;">
-      <h3>Comments</h3>
-      <div id="comments-list" style="margin-bottom: 16px;">
-        ${comments.length === 0 ? '<p class="muted">No comments yet. Be the first to comment!</p>' : ''}
-        ${comments.map(c => {
-          const author = nameById(LOOKUPS.users, c.authorId) || 'Unknown';
-          const canEdit = currentUser && (c.authorId === currentUser.id || currentUser.isAdmin);
-          return `
-            <div class="comment-item" style="margin-bottom: 16px; padding: 12px; background: var(--gray-50); border-radius: 8px;">
-              <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
-                <div>
-                  <strong>${author}</strong>
-                  <span class="muted" style="font-size: 12px; margin-left: 8px;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</span>
-                  ${c.updatedAt ? `<span class="muted" style="font-size: 11px; margin-left: 8px;">(edited)</span>` : ''}
-                </div>
-                ${canEdit ? `
-                  <div>
-                    <button class="edit-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; margin-right: 4px;">Edit</button>
-                    <button class="delete-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; color: var(--danger);">Delete</button>
-                  </div>
-                ` : ''}
-              </div>
-              <div class="comment-body">${formatCommentBody(c.body || '')}</div>
-            </div>
-          `;
-        }).join('')}
+      <!-- Tabs Header -->
+      <div style="display: flex; border-bottom: 2px solid var(--border); margin-bottom: 16px;">
+        <button id="tab-comments" class="tab-btn active" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid var(--brand); margin-bottom: -2px; color: var(--brand);">
+          💬 Comments <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${comments.length}</span>
+        </button>
+        <button id="tab-activity" class="tab-btn" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--muted);">
+          📋 Activity Log <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${i.changeHistory?.length || 0}</span>
+        </button>
       </div>
-      <div>
-        <div style="position: relative;">
-          <textarea id="new-comment" placeholder="Add a comment... (use @username to mention someone)" rows="3" style="width: 100%; margin-bottom: 8px;"></textarea>
-          <div id="mention-autocomplete" class="mention-autocomplete hidden"></div>
+      
+      <!-- Comments Tab Content -->
+      <div id="tab-content-comments" class="tab-content">
+        <div id="comments-list" style="margin-bottom: 16px;">
+          ${comments.length === 0 ? '<p class="muted">No comments yet. Be the first to comment!</p>' : ''}
+          ${comments.map(c => {
+            const author = nameById(LOOKUPS.users, c.authorId) || 'Unknown';
+            const canEdit = currentUser && (c.authorId === currentUser.id || currentUser.isAdmin);
+            return `
+              <div class="comment-item" style="margin-bottom: 16px; padding: 12px; background: var(--gray-50); border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                  <div>
+                    <strong>${author}</strong>
+                    <span class="muted" style="font-size: 12px; margin-left: 8px;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</span>
+                    ${c.updatedAt ? `<span class="muted" style="font-size: 11px; margin-left: 8px;">(edited)</span>` : ''}
+                  </div>
+                  ${canEdit ? `
+                    <div>
+                      <button class="edit-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; margin-right: 4px;">Edit</button>
+                      <button class="delete-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; color: var(--danger);">Delete</button>
+                    </div>
+                  ` : ''}
+                </div>
+                <div class="comment-body">${formatCommentBody(c.body || '')}</div>
+              </div>
+            `;
+          }).join('')}
         </div>
-        <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
-          💡 Tip: Type @ followed by a username to mention someone
+        <div>
+          <div style="position: relative;">
+            <textarea id="new-comment" placeholder="Add a comment... (use @username to mention someone)" rows="3" style="width: 100%; margin-bottom: 8px;"></textarea>
+            <div id="mention-autocomplete" class="mention-autocomplete hidden"></div>
+          </div>
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
+            💡 Tip: Type @ followed by a username to mention someone
+          </div>
+          <button id="add-comment-btn" class="primary">Add Comment</button>
         </div>
-        <button id="add-comment-btn" class="primary">Add Comment</button>
+      </div>
+      
+      <!-- Activity Log Tab Content -->
+      <div id="tab-content-activity" class="tab-content" style="display: none; max-height: 600px; overflow-y: auto;">
+        ${i.changeHistory && i.changeHistory.length > 0 ? `
+          ${i.changeHistory.map((history, idx) => {
+            const changedByName = nameById(LOOKUPS.users, history.changedBy) || history.changedBy || 'System';
+            const timestamp = new Date(history.timestamp);
+            const formattedDate = timestamp.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+            const formattedTime = timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            return `
+              <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: ${idx < i.changeHistory.length - 1 ? '1px solid #e5e7eb' : 'none'};">
+                <div style="display: flex; align-items: center; margin-bottom: 12px;">
+                  <div style="width: 8px; height: 8px; background: var(--brand); border-radius: 50%; margin-right: 12px;"></div>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; color: var(--text); margin-bottom: 4px;">${changedByName}</div>
+                    <div class="muted" style="font-size: 12px;">${formattedDate} at ${formattedTime}</div>
+                  </div>
+                </div>
+            ${history.changes && history.changes.length > 0 ? `
+                  <div style="margin-left: 20px; padding-left: 16px; border-left: 2px solid var(--border-light);">
+                    ${history.changes.map(change => {
+                      const fieldLabel = formatActivityFieldLabel(change.field);
+                      const oldFormatted = formatActivityValue(change.field, change.oldValue);
+                      const newFormatted = formatActivityValue(change.field, change.newValue);
+                      return `
+                        <div style="margin: 8px 0; padding: 10px; background: #f8fafc; border-radius: 6px; border-left: 3px solid var(--brand);">
+                          <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">${fieldLabel}</div>
+                          <div style="font-size: 13px; line-height: 1.6;">
+                            <span style="color: #ef4444; text-decoration: line-through; padding: 2px 6px; background: #fee2e2; border-radius: 3px;">${oldFormatted}</span>
+                            <span style="margin: 0 8px; color: var(--muted);">→</span>
+                            <span style="color: #10b981; padding: 2px 6px; background: #d1fae5; border-radius: 3px;">${newFormatted}</span>
+                          </div>
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+                ` : `
+                  <div style="margin-left: 20px; padding: 8px; color: var(--muted); font-size: 13px; font-style: italic;">
+                    No specific field changes recorded
+                  </div>
+                `}
+              </div>
+            `;
+          }).join('')}
+        ` : `
+          <div style="padding: 40px; text-align: center; color: var(--muted);">
+            <div style="font-size: 48px; margin-bottom: 12px;">📝</div>
+            <div style="font-weight: 500; margin-bottom: 4px;">No activity recorded yet</div>
+            <div style="font-size: 13px;">Changes to this initiative will appear here</div>
+          </div>
+        `}
       </div>
     </div>
     
@@ -1859,9 +2028,46 @@ async function renderView(id) {
   // Setup @mention autocomplete for comment textarea
   setupMentionAutocomplete('new-comment');
   
+  // Tab switching for Comments/Activity Log
+  const tabComments = document.getElementById('tab-comments');
+  const tabActivity = document.getElementById('tab-activity');
+  const contentComments = document.getElementById('tab-content-comments');
+  const contentActivity = document.getElementById('tab-content-activity');
+  
+  const switchTab = (activeTab) => {
+    // Update tab buttons
+    [tabComments, tabActivity].forEach(tab => {
+      tab.style.borderBottomColor = 'transparent';
+      tab.style.color = 'var(--muted)';
+      tab.style.fontWeight = '500';
+    });
+    activeTab.style.borderBottomColor = 'var(--brand)';
+    activeTab.style.color = 'var(--brand)';
+    activeTab.style.fontWeight = '600';
+    
+    // Show/hide content
+    if (activeTab === tabComments) {
+      contentComments.style.display = 'block';
+      contentActivity.style.display = 'none';
+    } else {
+      contentComments.style.display = 'none';
+      contentActivity.style.display = 'block';
+    }
+  };
+  
+  tabComments.onclick = () => switchTab(tabComments);
+  tabActivity.onclick = () => switchTab(tabActivity);
+  
   // Edit mode toggle button - replace view with edit form
   document.getElementById('toggle-edit-btn').onclick = () => {
     const itPicIds = i.itPicIds || (i.itPicId ? [i.itPicId] : []);
+    
+    // Filter users for specific fields
+    const businessOwnerUsers = filterUsersByRole(LOOKUPS.users, 'businessOwner');
+    const itPicUsers = filterUsersByRole(LOOKUPS.users, 'itPic');
+    const itManagerUsers = filterUsersByRole(LOOKUPS.users, 'itManager');
+    const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
+    
     const card = document.querySelector('.card');
     card.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -1879,7 +2085,7 @@ async function renderView(id) {
         ${formRow('Priority', `<select name="priority">${['P0','P1','P2'].map(p => `<option value="${p}" ${i.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
           ${formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => `<option value="${s}" ${i.status && i.status.toLowerCase() === s.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}</select>`)}
         ${formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
-        ${formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => `<option value="${d.id}" ${d.id === i.departmentId ? 'selected' : ''}>${d.name}</option>`).join('')}</select>`)}
+        ${formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, i.departmentId || '', 'Select...'))}
         ${formRow('Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" required />`)}
         ${formRow('End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
         <div class="form-row"><label>Age Since Created</label><div><strong>${daysSinceCreated} days</strong></div></div>
@@ -1891,10 +2097,10 @@ async function renderView(id) {
         <!-- Project Team Section -->
         <div style="margin-top: 24px; padding: 20px; background: var(--gray-50); border-radius: 8px;">
           <h3 style="margin: 0 0 16px 0; color: var(--text);">👥 Project Team</h3>
-          ${formRow('IT PM', `<select name="itPmId">${[''].concat(LOOKUPS.users.map(u => u.id)).map(uid => `<option value="${uid}" ${i.itPmId === uid ? 'selected' : ''}>${uid ? nameById(LOOKUPS.users, uid) : 'None'}</option>`).join('')}</select>`)}
-          ${formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, itPicIds))}
-          ${formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, i.itManagerIds || []))}
-          ${formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => `<option value="${u.id}" ${u.id === i.businessOwnerId ? 'selected' : ''}>${u.name}</option>`).join('')}</select>`)}
+          ${formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, i.itPmId || '', 'Select...', true))}
+          ${formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, itPicIds))}
+          ${formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, i.itManagerIds || []))}
+          ${formRow('Business Owner / Requestor', createSearchableSelect('businessOwnerId', businessOwnerUsers, i.businessOwnerId || '', 'Select...'))}
           ${formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, i.businessUserIds || []))}
         </div>
         
@@ -2353,9 +2559,9 @@ function renderGanttChart(tasks, initiativeId) {
           return `
             <div style="position: relative; height: ${rowHeight}px; border-bottom: 1px solid var(--gray-200); display: flex;">
               <!-- Sidebar -->
-              <div style="width: ${sidebarWidth}px; padding: 8px; border-right: 1px solid var(--border); background: var(--gray-50); display: flex; flex-direction: column; justify-content: center; position: sticky; left: 0; z-index: 5;">
-                <div style="font-weight: 600; font-size: 13px; margin-bottom: 2px;">${task.name}</div>
-                <div style="font-size: 11px; color: var(--muted);">
+              <div style="width: ${sidebarWidth}px; min-width: ${sidebarWidth}px; padding: 8px; border-right: 1px solid var(--border); background: var(--gray-50); display: flex; flex-direction: column; justify-content: center; position: sticky; left: 0; z-index: 5; overflow: hidden;">
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: ${sidebarWidth - 20}px;" title="${task.name}">${task.name}</div>
+                <div style="font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                   <span style="display: inline-block; width: 8px; height: 8px; background: ${color}; border-radius: 50%; margin-right: 4px;"></span>
                   ${status} • ${assignee}
                 </div>
@@ -2381,9 +2587,10 @@ function renderGanttChart(tasks, initiativeId) {
                               font-size: 11px;
                               font-weight: 500;
                               box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                              transition: transform 0.2s, box-shadow 0.2s;"
+                              transition: transform 0.2s, box-shadow 0.2s;
+                              overflow: hidden;"
                        title="${task.name} (${task.startDate ? task.startDate.slice(0,10) : 'No start'} → ${task.endDate ? task.endDate.slice(0,10) : 'No end'})">
-                    ${task.milestone ? `📍 ${task.milestone}` : task.name.length > 15 ? task.name.substring(0, 15) + '...' : task.name}
+                    <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;">${task.milestone ? `📍 ${task.milestone}` : task.name}</span>
                   </div>
                 ` : `
                   <div style="position: absolute; left: 0; top: 8px; padding: 8px; color: var(--muted); font-size: 11px; font-style: italic;">
@@ -3245,12 +3452,12 @@ async function renderDashboard() {
   const departmentOptions = LOOKUPS.departments.map(d => ({ value: d.id, label: d.name }));
   const itPmOptions = LOOKUPS.users
     .filter(u => {
-      // Only include active users with roles: IT Manager, IT PM, or Admin
+      // Only include active users with roles: IT Manager, IT PM, IT - PM, or Admin
       if (u.active === false) return false;
       const role = (u.role || '').toLowerCase().trim();
       const isAdmin = u.isAdmin === true || u.isAdmin === 1 || role === 'admin' || role === 'administrator';
-      // Check for IT Manager, IT PM, or Admin roles (case-insensitive)
-      return role === 'it manager' || role === 'it pm' || role === 'itpm' || isAdmin;
+      // Check for IT Manager, IT PM, IT - PM, or Admin roles (case-insensitive)
+      return role === 'it manager' || role === 'it pm' || role === 'it - pm' || role === 'itpm' || isAdmin;
     })
     .map(u => ({ value: u.id, label: u.name || u.email }))
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -3822,12 +4029,73 @@ async function renderAdminUsers() {
     await ensureLookups();
     const users = await fetchJSON('/api/admin/users');
     
+    // Get unique roles and types from users
+    const roles = [...new Set(users.map(u => u.role).filter(Boolean))].sort();
+    const types = [...new Set(users.map(u => u.type).filter(Boolean))].sort();
+    
+    // Function to render user rows
+    const renderUserRows = (filteredUsers) => {
+      return filteredUsers.map(user => `
+        <tr data-name="${(user.name || '').toLowerCase()}" data-email="${(user.email || '').toLowerCase()}" data-role="${(user.role || '').toLowerCase()}" data-type="${(user.type || '').toLowerCase()}" data-department="${user.departmentId || ''}">
+          <td>${user.name}</td>
+          <td>${user.email}</td>
+          <td>${user.role || 'N/A'}</td>
+          <td>${user.type || 'N/A'}</td>
+          <td>${nameById(LOOKUPS.departments, user.departmentId) || 'N/A'}</td>
+          <td>${user.active ? '✓' : '✗'}</td>
+          <td>${user.isAdmin ? '✓' : '✗'}</td>
+          <td>${user.emailActivated ? '✓' : '✗'}</td>
+          <td>
+            <button onclick="editUser('${user.id}')" style="margin-right: 8px;">Edit</button>
+            <button onclick="resetUserPassword('${user.id}', '${user.email}')" style="margin-right: 8px;" title="Reset Password">🔑</button>
+            ${user.id !== currentUser?.id ? `<button onclick="deleteUser('${user.id}')" style="color: var(--danger);">Delete</button>` : ''}
+          </td>
+        </tr>
+      `).join('');
+    };
+    
     app.innerHTML = `
       <div class="card">
         <h2>User Management</h2>
-        <div style="margin-bottom: 16px;">
+        
+        <!-- Search and Create Button Row -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 16px; flex-wrap: wrap;">
           <button class="primary" onclick="showCreateUserForm()">+ Create User</button>
+          <div style="position: relative; flex: 1; max-width: 400px;">
+            <input type="text" id="user-search" placeholder="Search by name or email..." style="width: 100%; padding: 10px 16px 10px 40px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; box-sizing: border-box;" />
+            <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted);">🔍</span>
+          </div>
+          <div style="color: var(--muted); font-size: 14px;">
+            Total: <strong id="user-count" style="color: var(--text);">${users.length}</strong> users
+          </div>
         </div>
+        
+        <!-- Filter Row -->
+        <div style="display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 14px; color: var(--muted); white-space: nowrap;">Role:</label>
+            <select id="filter-role" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 140px;">
+              <option value="">All Roles</option>
+              ${roles.map(r => `<option value="${r.toLowerCase()}">${r}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 14px; color: var(--muted); white-space: nowrap;">Type:</label>
+            <select id="filter-type" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 140px;">
+              <option value="">All Types</option>
+              ${types.map(t => `<option value="${t.toLowerCase()}">${t}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 14px; color: var(--muted); white-space: nowrap;">Department:</label>
+            <select id="filter-department" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 160px;">
+              <option value="">All Departments</option>
+              ${LOOKUPS.departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
+            </select>
+          </div>
+          <button id="clear-filters-btn" style="padding: 8px 16px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: var(--surface); cursor: pointer; display: none;">Clear Filters</button>
+        </div>
+        
         <table>
           <thead>
             <tr>
@@ -3842,24 +4110,8 @@ async function renderAdminUsers() {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody>
-            ${users.map(user => `
-              <tr>
-                <td>${user.name}</td>
-                <td>${user.email}</td>
-                <td>${user.role || 'N/A'}</td>
-                <td>${user.type || 'N/A'}</td>
-                <td>${nameById(LOOKUPS.departments, user.departmentId) || 'N/A'}</td>
-                <td>${user.active ? '✓' : '✗'}</td>
-                <td>${user.isAdmin ? '✓' : '✗'}</td>
-                <td>${user.emailActivated ? '✓' : '✗'}</td>
-                <td>
-                  <button onclick="editUser('${user.id}')" style="margin-right: 8px;">Edit</button>
-                  <button onclick="resetUserPassword('${user.id}', '${user.email}')" style="margin-right: 8px;" title="Reset Password">🔑</button>
-                  ${user.id !== currentUser?.id ? `<button onclick="deleteUser('${user.id}')" style="color: var(--danger);">Delete</button>` : ''}
-                </td>
-              </tr>
-            `).join('')}
+          <tbody id="users-tbody">
+            ${renderUserRows(users)}
           </tbody>
         </table>
       </div>
@@ -3887,6 +4139,7 @@ async function renderAdminUsers() {
               <select name="role">
                 <option value="">None</option>
                 <option value="IT">IT</option>
+                <option value="IT - PM">IT - PM</option>
                 <option value="Business User">Business User</option>
                 <option value="Admin">Admin</option>
               </select>
@@ -3906,29 +4159,85 @@ async function renderAdminUsers() {
                 ${LOOKUPS.departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
               </select>
             </div>
-            <div class="form-row">
-              <label>
-                <input type="checkbox" name="active" checked /> Active
-              </label>
+            <div class="form-row" style="flex-direction: row; align-items: center; gap: 8px;">
+              <label style="margin: 0;">Active</label>
+              <input type="checkbox" name="active" checked style="width: auto; margin: 0;" />
             </div>
-            <div class="form-row">
-              <label>
-                <input type="checkbox" name="isAdmin" /> Admin
-              </label>
+            <div class="form-row" style="flex-direction: row; align-items: center; gap: 8px;">
+              <label style="margin: 0;">Admin</label>
+              <input type="checkbox" name="isAdmin" style="width: auto; margin: 0;" />
             </div>
-            <div class="form-row">
-              <label>
-                <input type="checkbox" name="emailActivated" checked /> Email Activated
-              </label>
+            <div class="form-row" style="flex-direction: row; align-items: center; gap: 8px;">
+              <label style="margin: 0;">Email Activated</label>
+              <input type="checkbox" name="emailActivated" checked style="width: auto; margin: 0;" />
             </div>
-            <div>
-              <button type="submit" class="primary">Save</button>
-              <button type="button" onclick="closeUserForm()">Cancel</button>
+            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 16px;">
+              <button type="button" onclick="closeUserForm()" style="padding: 8px 24px; font-size: 14px; line-height: 1; margin: 0;">Cancel</button>
+              <button type="submit" style="padding: 8px 24px; font-size: 14px; line-height: 1; margin: 0; background: var(--color-primary-default); color: white; border-color: var(--color-primary-default);">Save</button>
             </div>
           </form>
         </div>
       </div>
     `;
+    
+    // Search and Filter functionality
+    const searchInput = document.getElementById('user-search');
+    const filterRole = document.getElementById('filter-role');
+    const filterType = document.getElementById('filter-type');
+    const filterDepartment = document.getElementById('filter-department');
+    const clearFiltersBtn = document.getElementById('clear-filters-btn');
+    const usersTbody = document.getElementById('users-tbody');
+    const userCount = document.getElementById('user-count');
+    
+    const applyFilters = () => {
+      const searchTerm = searchInput.value.toLowerCase().trim();
+      const roleFilter = filterRole.value.toLowerCase();
+      const typeFilter = filterType.value.toLowerCase();
+      const deptFilter = filterDepartment.value;
+      
+      const rows = usersTbody.querySelectorAll('tr');
+      let visibleCount = 0;
+      
+      rows.forEach(row => {
+        const name = row.dataset.name || '';
+        const email = row.dataset.email || '';
+        const role = row.dataset.role || '';
+        const type = row.dataset.type || '';
+        const dept = row.dataset.department || '';
+        
+        // Check search match
+        const searchMatch = !searchTerm || name.includes(searchTerm) || email.includes(searchTerm);
+        
+        // Check filter matches
+        const roleMatch = !roleFilter || role === roleFilter;
+        const typeMatch = !typeFilter || type === typeFilter;
+        const deptMatch = !deptFilter || dept === deptFilter;
+        
+        const matches = searchMatch && roleMatch && typeMatch && deptMatch;
+        row.style.display = matches ? '' : 'none';
+        if (matches) visibleCount++;
+      });
+      
+      userCount.textContent = visibleCount;
+      
+      // Show/hide clear filters button
+      const hasFilters = searchTerm || roleFilter || typeFilter || deptFilter;
+      clearFiltersBtn.style.display = hasFilters ? 'block' : 'none';
+    };
+    
+    // Add event listeners
+    searchInput.addEventListener('input', applyFilters);
+    filterRole.addEventListener('change', applyFilters);
+    filterType.addEventListener('change', applyFilters);
+    filterDepartment.addEventListener('change', applyFilters);
+    
+    clearFiltersBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      filterRole.value = '';
+      filterType.value = '';
+      filterDepartment.value = '';
+      applyFilters();
+    });
     
     window.showCreateUserForm = () => {
       document.getElementById('user-form-title').textContent = 'Create User';
@@ -4066,7 +4375,7 @@ async function renderAdminRoles() {
     });
     
     // Sort roles by predefined order, then by user count (descending)
-    const predefinedRoleOrder = ['Admin', 'SeniorManagement', 'PMO', 'IT Manager', 'IT PM', 'ITPIC', 'BusinessOwner', 'User'];
+    const predefinedRoleOrder = ['Admin', 'SeniorManagement', 'PMO', 'IT Manager', 'IT PM', 'IT - PM', 'ITPIC', 'BusinessOwner', 'User'];
     const sortedRoles = Object.entries(usersByRole).sort(([roleA, usersA], [roleB, usersB]) => {
       const indexA = predefinedRoleOrder.indexOf(roleA);
       const indexB = predefinedRoleOrder.indexOf(roleB);
