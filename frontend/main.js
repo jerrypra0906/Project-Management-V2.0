@@ -1442,10 +1442,12 @@ async function renderNew() {
 }
 
 async function renderView(id) {
-  setActive('#list');
   await ensureLookups();
   await getCurrentUser();
   const i = await fetchJSON('/api/initiatives/' + id);
+  
+  // Set active nav based on initiative type
+  setActive(i.type === 'CR' ? '#crlist' : '#list');
   const boName = nameById(LOOKUPS.users, i.businessOwnerId);
   const depName = nameById(LOOKUPS.departments, i.departmentId);
   const itPicName = nameById(LOOKUPS.users, i.itPicId);
@@ -2818,9 +2820,11 @@ function showTaskUploadModal(initiativeId) {
 }
 
 async function renderEdit(id) {
-  setActive('#list');
   await ensureLookups();
   const i = await fetchJSON('/api/initiatives/' + id);
+  
+  // Set active nav based on initiative type
+  setActive(i.type === 'CR' ? '#crlist' : '#list');
   
   app.innerHTML = `
     <div class="card">
@@ -4510,10 +4514,12 @@ async function renderCRDashboard() {
   const departmentOptions = LOOKUPS.departments.map(d => ({ value: d.id, label: d.name }));
   const itManagerOptions = LOOKUPS.users
     .filter(u => {
-      // Only include active users with role: IT Manager
+      // Only include active users with (Role: IT AND Type: Manager) OR Admin
       if (u.active === false) return false;
       const role = (u.role || '').toLowerCase().trim();
-      return role === 'it manager';
+      const type = (u.type || '').toLowerCase().trim();
+      const isAdmin = u.isAdmin === true || u.isAdmin === 1 || role === 'admin' || role === 'administrator';
+      return isAdmin || (role === 'it' && type === 'manager');
     })
     .map(u => ({ value: u.id, label: u.name || u.email }))
     .sort((a, b) => a.label.localeCompare(b.label));
