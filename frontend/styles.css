@@ -71,9 +71,9 @@ header {
 nav {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
   justify-content: space-between;
+  width: 100%;
+  gap: 8px;
 }
 
 .nav-left {
@@ -1670,13 +1670,14 @@ th { position: relative; white-space: nowrap; }
   text-transform: uppercase;
   letter-spacing: 0.025em;
 }
-.status-Not-Started { background: #f1f5f9; color: #64748b; }
-.status-On-Hold { background: #fef3c7; color: #92400e; }
-.status-On-Track { background: #d1fae5; color: #065f46; }
-.status-At-Risk { background: #fed7aa; color: #9a3412; }
-.status-Delayed { background: #fecaca; color: #991b1b; }
-.status-Live { background: #dbeafe; color: #1e40af; }
-.status-Cancelled { background: #f3f4f6; color: #6b7280; }
+/* Status-based row coloring - case-insensitive (all lowercase) */
+.status-not-started { background: #f1f5f9; color: #64748b; }
+.status-on-hold { background: #fef3c7; color: #92400e; }
+.status-on-track { background: #d1fae5; color: #065f46; }
+.status-at-risk { background: #fed7aa; color: #9a3412; }
+.status-delayed { background: #fecaca; color: #991b1b; }
+.status-live { background: #dbeafe; color: #1e40af; }
+.status-cancelled { background: #f3f4f6; color: #6b7280; }
 
 /* Priority badges */
 .priority-badge { 
@@ -1698,9 +1699,9 @@ th { position: relative; white-space: nowrap; }
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-.priority-p0 { background: #fee2e2; color: #dc2626; border: 1px solid #ef4444; }
-.priority-p1 { background: #fef3c7; color: #d97706; border: 1px solid #f59e0b; }
-.priority-p2 { background: #f3f4f6; color: #6b7280; border: 1px solid #9ca3af; }
+.priority-p0 { background: #ffccd7; color: #c4003c; border: 1px solid #e44258; }
+.priority-p1 { background: #ffe6cc; color: #c87400; border: 1px solid #fdab3d; }
+.priority-p2 { background: #cce5ff; color: #0060b9; border: 1px solid #0073ea; }
 
 /* Status badges - Monday.com style with softer colors */
 .status-badge {
@@ -1998,17 +1999,10 @@ th { position: relative; white-space: nowrap; }
   box-sizing: border-box;
 }
 
-/* Form buttons - remove full width when in flex containers */
-.form > div[style*="flex"] button,
-.form > div[style*="justify-content"] button {
-  width: auto;
-  margin-top: 0;
-}
-
 .form button.primary {
   margin-top: var(--spacing-2);
+  width: 100%;
   box-sizing: border-box;
-  padding: var(--spacing-2) var(--spacing-4);
 }
 
 /* Monday.com-inspired Dashboard Styles */

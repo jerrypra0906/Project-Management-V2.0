@@ -626,7 +626,10 @@ async function write(data) {
     }
 
     await client.query('COMMIT');
+    console.log(`[STORE] Write completed successfully - Users: ${(data.users || []).length}, Initiatives: ${(data.initiatives || []).length}`);
   } catch (e) {
+    console.error(`[STORE] Write error:`, e.message);
+    console.error(`[STORE] Error stack:`, e.stack);
     await client.query('ROLLBACK');
     throw e;
   } finally {

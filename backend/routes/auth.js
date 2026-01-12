@@ -97,8 +97,26 @@ router.post('/register', async (req, res) => {
     }
 
     console.log(`[REGISTER] Saving user ${email} with activationToken: ${activationToken ? activationToken.substring(0, 8) + '...' : 'null'}, expiry: ${activationTokenExpiry}`);
-    await store.write(data);
-    console.log(`[REGISTER] User saved successfully`);
+    console.log(`[REGISTER] Total users before write: ${data.users.length}`);
+    console.log(`[REGISTER] New user data:`, JSON.stringify(data.users.find(u => u.email === email), null, 2));
+    try {
+      await store.write(data);
+      console.log(`[REGISTER] User saved successfully to database`);
+      
+      // Verify the user was saved
+      const verifyData = await store.read();
+      const savedUser = verifyData.users.find(u => u.email && u.email.toLowerCase() === email.toLowerCase());
+      if (savedUser) {
+        console.log(`[REGISTER] Verification SUCCESS: User found in database - ID: ${savedUser.id}, Email: ${savedUser.email}`);
+      } else {
+        console.error(`[REGISTER] Verification FAILED: User NOT found in database after write!`);
+        console.error(`[REGISTER] Total users in database: ${verifyData.users.length}`);
+      }
+    } catch (writeError) {
+      console.error(`[REGISTER] Error writing to database:`, writeError);
+      console.error(`[REGISTER] Error stack:`, writeError.stack);
+      throw writeError;
+    }
 
     // Send activation email only for allowed domains
     if (isAllowedDomain && activationToken) {
