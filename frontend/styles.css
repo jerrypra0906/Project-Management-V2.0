@@ -2031,6 +2031,73 @@ th { position: relative; white-space: nowrap; }
   width: 100%;
 }
 
+/* Form Actions - right-aligned button group */
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+/* Shared fixed-size button class - enforces EXACT same dimensions for all buttons */
+.btn-fixed,
+button.btn-fixed,
+button.btn-fixed.primary {
+  /* Explicit dimensions - override everything */
+  width: 140px !important;
+  height: 40px !important;
+  min-width: 140px !important;
+  max-width: 140px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  
+  /* Reset padding and line-height for consistent height */
+  padding: 0 !important;
+  line-height: 38px !important; /* 40px - 2px for border */
+  
+  /* Typography */
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font-family-primary);
+  text-align: center;
+  
+  /* Layout */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 140px;
+  
+  /* Appearance */
+  border-radius: 6px;
+  cursor: pointer;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+/* Default (Cancel) button style */
+.btn-fixed:not(.primary) {
+  background: #F4F4F4;
+  color: #2B2B2B;
+  border: 1px solid #C4C4C4;
+}
+
+.btn-fixed:not(.primary):hover {
+  background: #E8E8E8;
+}
+
+/* Primary (Create) button style */
+button.btn-fixed.primary {
+  background: #C43A31;
+  color: #FFFFFF;
+  border: 1px solid #C43A31;
+}
+
+button.btn-fixed.primary:hover {
+  background: #9E2C25;
+  border-color: #9E2C25;
+}
+
 /* Monday.com-inspired Dashboard Styles */
 .dashboard {
   padding: 0;

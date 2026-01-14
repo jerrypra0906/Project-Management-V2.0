@@ -76,7 +76,6 @@ function getDefaultColumns(viewType) {
       'col-impact': true,
       'col-remark': true,
       'col-doc': true,
-      'col-timeline': true,
       'col-actions': true
     };
   }
@@ -514,32 +513,8 @@ function initiativeRow(i, crData = null, colVisibility = null) {
   // Default visibility if not provided
   if (!colVisibility) colVisibility = getDefaultColumns('list');
   
-  // CR Timeline display
-  let crTimeline = '';
-  if (i.type === 'CR' && crData) {
-    const phases = [
-      { name: 'CR Sec 1', start: crData.crSection1Start, end: crData.crSection1End },
-      { name: 'CR Sec 2', start: crData.crSection2Start, end: crData.crSection2End },
-      { name: 'CR Sec 3', start: crData.crSection3Start, end: crData.crSection3End },
-      { name: 'Dev', start: crData.developmentStart, end: crData.developmentEnd },
-      { name: 'SIT', start: crData.sitStart, end: crData.sitEnd },
-      { name: 'UAT', start: crData.uatStart, end: crData.uatEnd },
-      { name: 'Live', start: crData.liveStart, end: crData.liveEnd }
-    ];
-    
-    const activePhases = phases.filter(p => p.start || p.end);
-    if (activePhases.length > 0) {
-      crTimeline = `<div style="font-size: 10px; line-height: 1.2;">
-        ${activePhases.map(p => 
-          `<div style="margin-bottom: 2px;">
-            <strong>${p.name}:</strong> ${p.start || ''} - ${p.end || 'Ongoing'}
-          </div>`
-        ).join('')}
-      </div>`;
-    }
-  }
-  
-  const timelineCell = i.type === 'CR' ? `<td class="col-timeline" style="display: ${colVisibility['col-timeline'] !== false ? 'table-cell' : 'none'}">${crTimeline}</td>` : '';
+  // CR Timeline display - removed (CR dates no longer used)
+  const timelineCell = '';
   
   return `<tr class="status-${statusClass}">
     <td class="col-ticket" style="display: ${colVisibility['col-ticket'] !== false ? 'table-cell' : 'none'}">${i.ticket || ''}</td>
@@ -840,7 +815,7 @@ async function renderList() {
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('list')" title="Column Settings" class="icon-btn">⚙️</button>
-          <a href="#new"><button class="primary">+ New Initiative</button></a>
+          <a href="#new/Project"><button class="primary">+ New Initiative</button></a>
         </div>
       </div>
     </div>
@@ -1313,7 +1288,7 @@ function filterUsersByRole(users, roleFilter) {
   });
 }
 
-function commonFields(initiative = null) {
+function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'Initiative Name') {
   const option = (value, label, selected) => `<option value="${value}" ${selected ? 'selected' : ''}>${label}</option>`;
   
   // Filter users for specific fields
@@ -1322,9 +1297,12 @@ function commonFields(initiative = null) {
   const itManagerUsers = filterUsersByRole(LOOKUPS.users, 'itManager');
   const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
   
+  // Determine selected type: from initiative if exists, otherwise from defaultType
+  const selectedType = initiative ? initiative.type : defaultType;
+  
   return [
-    formRow('Type', `<select name="type" required><option value="Project" ${!initiative || initiative.type === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${initiative && initiative.type === 'CR' ? 'selected' : ''}>CR</option></select>`),
-    formRow('Initiative Name', `<input name="name" value="${initiative ? (initiative.name || '').replace(/"/g, '&quot;') : ''}" required />`),
+    formRow('Type', `<select name="type" id="typeSelect" required><option value="Project" ${selectedType === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${selectedType === 'CR' ? 'selected' : ''}>CR</option></select>`),
+    formRow(`<span id="nameLabelText">${nameLabel}</span>`, `<input name="name" id="nameInput" value="${initiative ? (initiative.name || '').replace(/"/g, '&quot;') : ''}" required />`),
     formRow('Description', `<textarea name="description" class="long-text" required>${initiative ? (initiative.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Business Impact', `<textarea name="businessImpact" class="long-text" required>${initiative ? (initiative.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Priority', `<select name="priority">${option('P0', 'P0', initiative?.priority === 'P0')}${option('P1', 'P1', initiative?.priority === 'P1')}${option('P2', 'P2', !initiative || initiative.priority === 'P2')}</select>`),
@@ -1344,38 +1322,29 @@ function commonFields(initiative = null) {
 }
 
 function crFields() {
-  return `
-    <div id="crFields">
-      ${formRow('CR Submission Start', `<input type="date" name="cr.crSubmissionStart" />`)}
-      ${formRow('CR Submission End', `<input type="date" name="cr.crSubmissionEnd" />`)}
-      ${formRow('Development Start', `<input type="date" name="cr.developmentStart" />`)}
-      ${formRow('Development End', `<input type="date" name="cr.developmentEnd" />`)}
-      ${formRow('SIT Start', `<input type="date" name="cr.sitStart" />`)}
-      ${formRow('SIT End', `<input type="date" name="cr.sitEnd" />`)}
-      ${formRow('UAT Start', `<input type="date" name="cr.uatStart" />`)}
-      ${formRow('UAT End', `<input type="date" name="cr.uatEnd" />`)}
-      ${formRow('Live Date', `<input type="date" name="cr.liveDate" />`)}
-    </div>`;
+  // CR dates have been removed - no longer used
+  return `<div id="crFields"></div>`;
 }
 
-async function renderNew() {
+async function renderNew(defaultType = 'Project') {
   setActive('#new');
   await ensureLookups();
+  
+  const isCR = defaultType === 'CR';
+  const pageTitle = isCR ? 'New CR' : 'New Initiative';
+  const nameLabel = isCR ? 'CR Name' : 'Initiative Name';
+  const cancelHref = isCR ? '#crlist' : '#list';
+  
   app.innerHTML = `
     <div class="card">
-      <h2>New Initiative</h2>
+      <h2>${pageTitle}</h2>
       <form id="f" class="form">
-        ${commonFields()}
-        <div id="crContainer" class="card" style="display:none">
-          <h3>CR Details</h3>
-          ${crFields()}
-        </div>
-        <div>
-          <button class="primary" type="submit">Create</button>
-          <a href="#list"><button type="button">Cancel</button></a>
+        ${commonFields(null, defaultType, nameLabel)}
+        <div class="form-actions">
+          <button type="button" class="btn-fixed" onclick="location.hash='${cancelHref}'">Cancel</button>
+          <button type="submit" class="btn-fixed primary">Create</button>
         </div>
       </form>
-      <div class="muted">Note: For CR, CR Submission Start is required.</div>
     </div>
   `;
   
@@ -1384,11 +1353,19 @@ async function renderNew() {
   
   const f = document.getElementById('f');
   const typeEl = f.querySelector('select[name="type"]');
-  const crBox = document.getElementById('crContainer');
-  typeEl.onchange = () => {
-    crBox.style.display = typeEl.value === 'CR' ? 'block' : 'none';
+  const nameLabelEl = document.getElementById('nameLabelText');
+  const pageTitleEl = document.querySelector('.card h2');
+  
+  // Function to update labels based on type
+  const updateLabelsForType = () => {
+    const isCR = typeEl.value === 'CR';
+    if (nameLabelEl) nameLabelEl.textContent = isCR ? 'CR Name' : 'Initiative Name';
+    if (pageTitleEl) pageTitleEl.textContent = isCR ? 'New CR' : 'New Initiative';
   };
-  typeEl.onchange();
+  
+  typeEl.onchange = updateLabelsForType;
+  updateLabelsForType(); // Apply initial state
+  
   f.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(f);
@@ -1418,23 +1395,20 @@ async function renderNew() {
       remark: obj.remark || null,
       documentationLink: obj.documentationLink || null
     };
+    // CR dates removed - no longer used
     if (obj.type === 'CR') {
-      payload.cr = {
-        crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-        crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
-        developmentStart: obj['cr.developmentStart'] || null,
-        developmentEnd: obj['cr.developmentEnd'] || null,
-        sitStart: obj['cr.sitStart'] || null,
-        sitEnd: obj['cr.sitEnd'] || null,
-        uatStart: obj['cr.uatStart'] || null,
-        uatEnd: obj['cr.uatEnd'] || null,
-        liveDate: obj['cr.liveDate'] || null
-      };
+      payload.cr = {};
     }
     try {
       await fetchJSON('/api/initiatives', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-      location.hash = '#list';
-      renderList();
+      // Redirect to appropriate list based on type
+      if (obj.type === 'CR') {
+        location.hash = '#crlist';
+        renderCRList();
+      } else {
+        location.hash = '#list';
+        renderList();
+      }
     } catch (e) {
       alert(e.message);
     }
@@ -1654,16 +1628,6 @@ async function renderView(id) {
         </div>
       </div>
       
-      ${i.type === 'CR' ? `
-        <h3>CR Dates</h3>
-        <div class="grid">
-          <div><div class="muted">Submission</div><div>${i.cr?.crSubmissionStart || ''} → ${i.cr?.crSubmissionEnd || ''}</div></div>
-          <div><div class="muted">Development</div><div>${i.cr?.developmentStart || ''} → ${i.cr?.developmentEnd || ''}</div></div>
-          <div><div class="muted">SIT</div><div>${i.cr?.sitStart || ''} → ${i.cr?.sitEnd || ''}</div></div>
-          <div><div class="muted">UAT</div><div>${i.cr?.uatStart || ''} → ${i.cr?.uatEnd || ''}</div></div>
-          <div><div class="muted">Live</div><div>${i.cr?.liveDate || ''}</div></div>
-        </div>
-      ` : ''}
       <div style="margin-top:12px"><a href="#list"><button>Back</button></a></div>
     </div>
     
@@ -2106,20 +2070,6 @@ async function renderView(id) {
           ${formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, i.businessUserIds || []))}
         </div>
         
-        ${i.type === 'CR' ? `
-          <div style="margin-top: 24px;">
-            <h3>CR Dates</h3>
-            ${formRow('CR Submission Start', `<input type="date" name="cr.crSubmissionStart" value="${i.cr?.crSubmissionStart?.slice(0,10) || ''}" />`)}
-            ${formRow('CR Submission End', `<input type="date" name="cr.crSubmissionEnd" value="${i.cr?.crSubmissionEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('Development Start', `<input type="date" name="cr.developmentStart" value="${i.cr?.developmentStart?.slice(0,10) || ''}" />`)}
-            ${formRow('Development End', `<input type="date" name="cr.developmentEnd" value="${i.cr?.developmentEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('SIT Start', `<input type="date" name="cr.sitStart" value="${i.cr?.sitStart?.slice(0,10) || ''}" />`)}
-            ${formRow('SIT End', `<input type="date" name="cr.sitEnd" value="${i.cr?.sitEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('UAT Start', `<input type="date" name="cr.uatStart" value="${i.cr?.uatStart?.slice(0,10) || ''}" />`)}
-            ${formRow('UAT End', `<input type="date" name="cr.uatEnd" value="${i.cr?.uatEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('Live Date', `<input type="date" name="cr.liveDate" value="${i.cr?.liveDate?.slice(0,10) || ''}" />`)}
-          </div>
-        ` : ''}
         <div style="margin-top: 20px; display: flex; gap: 12px;">
           <button type="button" id="cancel-edit-btn-2">Cancel</button>
           <button type="button" id="save-btn-2" class="primary">💾 Save</button>
@@ -2168,18 +2118,9 @@ async function renderView(id) {
         changedBy: currentUser?.id || 'Unknown'
       };
       
+      // CR dates removed - no longer used
       if (i.type === 'CR') {
-        payload.cr = {
-          crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-          crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
-          developmentStart: obj['cr.developmentStart'] || null,
-          developmentEnd: obj['cr.developmentEnd'] || null,
-          sitStart: obj['cr.sitStart'] || null,
-          sitEnd: obj['cr.sitEnd'] || null,
-          uatStart: obj['cr.uatStart'] || null,
-          uatEnd: obj['cr.uatEnd'] || null,
-          liveDate: obj['cr.liveDate'] || null
-        };
+        payload.cr = {};
       }
       
       try {
@@ -2502,18 +2443,31 @@ function renderGanttChart(tasks, initiativeId) {
     };
   };
   
-  // Status colors
+  // Status colors - supports both new enum values and legacy values
   const statusColors = {
+    // New enum values (lowercase)
+    'not started': '#94a3b8',
+    'in progress': '#10b981',
+    'at risk': '#ef4444',
+    'cancel': '#6b7280',
+    'done': '#3b82f6',
+    // Legacy values for backward compatibility
     'Not Started': '#94a3b8',
     'On Hold': '#f59e0b',
     'On Track': '#10b981',
     'At Risk': '#ef4444',
     'Delayed': '#dc2626',
     'Live': '#3b82f6',
-    'Cancelled': '#6b7280'
+    'Cancelled': '#6b7280',
+    'In Progress': '#10b981',
+    'Done': '#3b82f6'
   };
   
-  const getStatusColor = (status) => statusColors[status] || '#94a3b8';
+  const getStatusColor = (status) => {
+    if (!status) return '#94a3b8';
+    // Try exact match first, then lowercase match
+    return statusColors[status] || statusColors[status.toLowerCase()] || '#94a3b8';
+  };
   
   // Render Gantt chart
   const rowHeight = 50;
@@ -2685,8 +2639,14 @@ async function showTaskModal(initiativeId, taskId = null) {
           <div>
             <label>Status</label>
             <select name="status" style="width: 100%;">
-              ${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => 
-                `<option value="${s}" ${(task?.status || 'Not Started') === s ? 'selected' : ''}>${s}</option>`
+              ${[
+                { value: 'not started', label: 'Not Started' },
+                { value: 'in progress', label: 'In Progress' },
+                { value: 'at risk', label: 'At Risk' },
+                { value: 'cancel', label: 'Cancelled' },
+                { value: 'done', label: 'Done' }
+              ].map(s => 
+                `<option value="${s.value}" ${(task?.status || 'not started') === s.value ? 'selected' : ''}>${s.label}</option>`
               ).join('')}
             </select>
           </div>
@@ -2695,8 +2655,15 @@ async function showTaskModal(initiativeId, taskId = null) {
           <label>Milestone</label>
           <select name="milestone" style="width: 100%;">
             <option value="">None</option>
-            ${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => 
-              `<option value="${m}" ${task?.milestone === m ? 'selected' : ''}>${m}</option>`
+            ${[
+              { value: 'Business Requirement', label: 'Business Requirement' },
+              { value: 'Tech Assessment', label: 'Tech Assessment' },
+              { value: 'Planning', label: 'Planning' },
+              { value: 'Development', label: 'Development' },
+              { value: 'Testing', label: 'Testing' },
+              { value: 'Live Preparation', label: 'Live Preparation' }
+            ].map(m => 
+              `<option value="${m.value}" ${task?.milestone === m.value ? 'selected' : ''}>${m.label}</option>`
             ).join('')}
           </select>
         </div>
@@ -2720,7 +2687,7 @@ async function showTaskModal(initiativeId, taskId = null) {
       startDate: formData.get('startDate') || null,
       endDate: formData.get('endDate') || null,
       assigneeId: formData.get('assigneeId') || null,
-      status: formData.get('status') || 'Not Started',
+      status: formData.get('status') || 'not started',
       milestone: formData.get('milestone') || null
     };
     
@@ -2754,11 +2721,16 @@ function showTaskUploadModal(initiativeId) {
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.innerHTML = `
-    <div class="modal-content" style="max-width: 600px;">
+    <div class="modal-content" style="max-width: 700px;">
       <h3>Upload Tasks (CSV)</h3>
-      <p class="muted" style="margin-bottom: 16px;">
-        Upload a CSV file with columns: name, description, startDate, endDate, assigneeId, status, milestone
+      <p class="muted" style="margin-bottom: 12px;">
+        Upload a CSV file with columns: <code>name, description, startDate, endDate, assigneeId, status, milestone</code>
       </p>
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 16px; font-size: 13px;">
+        <strong>Valid Status values:</strong> not started, in progress, at risk, cancel, done<br>
+        <strong>Valid Milestone values:</strong> Business Requirement, Tech Assessment, Planning, Development, Testing, Live Preparation<br>
+        <span class="muted" style="font-size: 12px;">Note: Values are case-insensitive. Invalid values will be normalized automatically.</span>
+      </div>
       <input type="file" id="task-file-input" accept=".csv" style="margin-bottom: 16px;">
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
         <button type="button" onclick="this.closest('.modal').remove()">Cancel</button>
@@ -2877,18 +2849,9 @@ async function renderEdit(id) {
       documentationLink: obj.documentationLink || null,
       changedBy: currentUser?.id || 'Unknown'
     };
+    // CR dates removed - no longer used
     if (i.type === 'CR') {
-      payload.cr = {
-        crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-        crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
-        developmentStart: obj['cr.developmentStart'] || null,
-        developmentEnd: obj['cr.developmentEnd'] || null,
-        sitStart: obj['cr.sitStart'] || null,
-        sitEnd: obj['cr.sitEnd'] || null,
-        uatStart: obj['cr.uatStart'] || null,
-        uatEnd: obj['cr.uatEnd'] || null,
-        liveDate: obj['cr.liveDate'] || null
-      };
+      payload.cr = {};
     }
     try {
       await fetchJSON(`/api/initiatives/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
@@ -3025,7 +2988,6 @@ async function renderCRList() {
     { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
     { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
     { key: 'documentationLink', class: 'col-doc', label: 'CR Doc Link', sortable: true },
-    { key: 'timeline', class: 'col-timeline', label: 'CR Timeline', sortable: false },
     { key: 'actions', class: 'col-actions', label: 'Actions', sortable: false }
   ];
   
@@ -3112,7 +3074,7 @@ async function renderCRList() {
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('crlist')" title="Column Settings" class="icon-btn">⚙️</button>
-          <a href="#new"><button class="primary">+ New CR</button></a>
+          <a href="#new/CR"><button class="primary">+ New CR</button></a>
         </div>
       </div>
     </div>
@@ -5028,7 +4990,11 @@ async function router() {
     if (h.startsWith('#admin-users')) return renderAdminUsers();
     if (h.startsWith('#admin-roles')) return renderAdminRoles();
     if (h.startsWith('#profile')) return renderProfile();
-    if (h.startsWith('#new')) return renderNew();
+    if (h.startsWith('#new')) {
+      const parts = h.split('/');
+      const defaultType = parts[1] || 'Project'; // Default to Project if no type specified
+      return renderNew(defaultType);
+    }
     if (h.startsWith('#edit/')) return renderEdit(h.split('/')[1]);
     if (h.startsWith('#view/')) return renderView(h.split('/')[1]);
     if (h.startsWith('#crdashboard')) return renderCRDashboard();

@@ -24,7 +24,7 @@ services:
       dockerfile: Dockerfile
     container_name: project_management_backend
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=${NODE_ENV:-development}
       - DATABASE_URL=postgres://postgres:postgres123@postgres:5432/project_management_v2
       - PORT=3000
       - HOST=0.0.0.0
