@@ -540,6 +540,41 @@ function initiativeRow(i, crData = null, colVisibility = null) {
   </tr>`;
 }
 
+// Keep a CSS variable in sync with the actual header height so sticky table headers
+// sit just below the main page header and never collide with it.
+function updateHeaderHeightVar() {
+  const headerEl = document.querySelector('header');
+  if (!headerEl) return;
+  const height = headerEl.offsetHeight || 0;
+  document.documentElement.style.setProperty('--app-header-height', `${height}px`);
+}
+
+// Initialize once on load and keep in sync on resize.
+window.addEventListener('load', updateHeaderHeightVar);
+window.addEventListener('resize', () => {
+  // Use rAF to avoid layout thrash during continuous resize
+  window.requestAnimationFrame(updateHeaderHeightVar);
+});
+
+// Enhance wide table UX: add subtle left/right shadows on horizontal overflow so
+// users can immediately tell the table is scrollable.
+function initScrollableTables() {
+  document.querySelectorAll('.table-wrapper').forEach(wrapper => {
+    const el = wrapper;
+    const updateShadows = () => {
+      const { scrollLeft, scrollWidth, clientWidth } = el;
+      const canScrollRight = scrollWidth - clientWidth - scrollLeft > 1;
+      const canScrollLeft = scrollLeft > 1;
+      wrapper.classList.toggle('has-left-shadow', canScrollLeft);
+      wrapper.classList.toggle('has-right-shadow', canScrollRight);
+    };
+
+    el.addEventListener('scroll', updateShadows);
+    // Run once on init in case the table overflows immediately
+    updateShadows();
+  });
+}
+
 async function renderList() {
   console.log('renderList called');
   setActive('#list');
@@ -819,19 +854,21 @@ async function renderList() {
         </div>
       </div>
     </div>
-    <table id="initiatives-table">
-      <thead>
-        <tr>
-          ${columns.map(col => {
-            const visible = colVisibility[col.class] !== false;
-            const sortClass = col.sortable ? 'sortable' : '';
-            const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-            return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-          }).join('')}
-        </tr>
-      </thead>
-      <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
-    </table>
+    <div class="table-wrapper">
+      <table id="initiatives-table">
+        <thead>
+          <tr>
+            ${columns.map(col => {
+              const visible = colVisibility[col.class] !== false;
+              const sortClass = col.sortable ? 'sortable' : '';
+              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+            }).join('')}
+          </tr>
+        </thead>
+        <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
+      </table>
+    </div>
     <div id="column-settings-modal" class="modal hidden">
       <div class="modal-content column-settings-modal">
         <h3 class="modal-title">Column Visibility</h3>
@@ -855,6 +892,9 @@ async function renderList() {
       </div>
     </div>
   `;
+
+  // Initialize horizontal scroll affordance for the main initiatives table.
+  initScrollableTables();
   // Multi-select dropdown handlers
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
@@ -1347,6 +1387,9 @@ async function renderNew(defaultType = 'Project') {
       </form>
     </div>
   `;
+
+  // Initialize horizontal scroll affordance for the CR table.
+  initScrollableTables();
   
   // Initialize multi-select dropdowns
   initializeMultiSelects();
@@ -1442,6 +1485,13 @@ async function renderView(id) {
 
   // Calculate % Completion based on task statuses (fallback to initiative status when no tasks)
   const statusToPercent = {
+    // Task status enum values
+    'not started': 0,
+    'in progress': 50,
+    'at risk': 25,
+    'cancel': 100,
+    'done': 100,
+    // Initiative status values (for fallback)
     'Not Started': 0,
     'On Hold': 0,
     'On Track': 50,
@@ -1450,10 +1500,14 @@ async function renderView(id) {
     'Live': 100,
     'Cancelled': 100
   };
-  const getPercentForStatus = (status) => statusToPercent[status] ?? 0;
+  const getPercentForStatus = (status) => {
+    // Normalize to lowercase for task statuses
+    const normalized = status?.toLowerCase();
+    return statusToPercent[normalized] ?? statusToPercent[status] ?? 0;
+  };
   const completionPercent = (() => {
     if (Array.isArray(tasks) && tasks.length > 0) {
-      const total = tasks.reduce((sum, t) => sum + getPercentForStatus(t.status || 'Not Started'), 0);
+      const total = tasks.reduce((sum, t) => sum + getPercentForStatus(t.status || 'not started'), 0);
       return Math.round(total / tasks.length);
     }
     return getPercentForStatus(i.status || 'Not Started');
@@ -1768,12 +1822,15 @@ async function renderView(id) {
             ${tasks.length === 0 ? '<tr><td colspan="7" class="muted" style="text-align: center; padding: 20px;">No tasks yet</td></tr>' : ''}
             ${tasks.map(t => {
               const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
+              const taskStatus = (t.status || 'not started').toLowerCase();
+              const taskStatusLabels = { 'not started': 'Not Started', 'in progress': 'In Progress', 'at risk': 'At Risk', 'cancel': 'Cancelled', 'done': 'Done' };
+              const taskStatusLabel = taskStatusLabels[taskStatus] || t.status || 'Not Started';
               return `
                 <tr>
                   <td><strong>${t.name}</strong>${t.description ? `<br><small class="muted">${t.description}</small>` : ''}</td>
                   <td>${t.milestone || '-'}</td>
                   <td>${assignee}</td>
-                  <td><span class="status-badge status-${(t.status || 'Not Started')?.replace(/\s+/g, '-')}">${t.status || 'Not Started'}</span></td>
+                  <td><span class="status-badge status-${taskStatus.replace(/\s+/g, '-')}">${taskStatusLabel}</span></td>
                   <td>${t.startDate ? t.startDate.slice(0,10) : '-'}</td>
                   <td>${t.endDate ? t.endDate.slice(0,10) : '-'}</td>
                   <td>
@@ -1790,30 +1847,41 @@ async function renderView(id) {
       <!-- Task Kanban View -->
       <div id="tasks-kanban-view" class="task-view hidden">
         <div class="kanban-board" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
-          ${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(status => {
-            const statusTasks = tasks.filter(t => (t.status || 'Not Started') === status);
-            return `
-              <div class="kanban-column" data-status="${status}" style="background: var(--gray-50); border-radius: 8px; padding: 12px; min-height: 200px;">
-                <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600;">${status} (${statusTasks.length})</h4>
-                <div class="kanban-tasks" data-status="${status}">
-                  ${statusTasks.map(t => {
-                    const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
-                    return `
-                      <div class="kanban-task" draggable="true" data-id="${t.id}" data-status="${t.status || 'Not Started'}" style="background: white; padding: 12px; margin-bottom: 8px; border-radius: 6px; cursor: move; box-shadow: var(--shadow);">
-                        <div style="font-weight: 600; margin-bottom: 4px;">${t.name}</div>
-                        ${t.description ? `<div class="muted" style="font-size: 12px; margin-bottom: 4px;">${t.description}</div>` : ''}
-                        <div style="font-size: 11px; color: var(--muted);">
-                          <div>👤 ${assignee}</div>
-                          ${t.milestone ? `<div>📍 ${t.milestone}</div>` : ''}
-                          ${t.startDate || t.endDate ? `<div>📅 ${t.startDate ? t.startDate.slice(0,10) : ''} ${t.endDate ? '→ ' + t.endDate.slice(0,10) : ''}</div>` : ''}
+          ${(() => {
+            // Task status enums with display labels
+            const KANBAN_STATUSES = [
+              { value: 'not started', label: 'Not Started' },
+              { value: 'in progress', label: 'In Progress' },
+              { value: 'at risk', label: 'At Risk' },
+              { value: 'cancel', label: 'Cancelled' },
+              { value: 'done', label: 'Done' }
+            ];
+            return KANBAN_STATUSES.map(({ value: status, label }) => {
+              // Match tasks by normalizing status to lowercase
+              const statusTasks = tasks.filter(t => (t.status || 'not started').toLowerCase() === status);
+              return `
+                <div class="kanban-column" data-status="${status}" style="background: var(--gray-50); border-radius: 8px; padding: 12px; min-height: 200px;">
+                  <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600;">${label} (${statusTasks.length})</h4>
+                  <div class="kanban-tasks" data-status="${status}">
+                    ${statusTasks.map(t => {
+                      const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
+                      return `
+                        <div class="kanban-task" draggable="true" data-id="${t.id}" data-status="${(t.status || 'not started').toLowerCase()}" style="background: white; padding: 12px; margin-bottom: 8px; border-radius: 6px; cursor: move; box-shadow: var(--shadow);">
+                          <div style="font-weight: 600; margin-bottom: 4px;">${t.name}</div>
+                          ${t.description ? `<div class="muted" style="font-size: 12px; margin-bottom: 4px;">${t.description}</div>` : ''}
+                          <div style="font-size: 11px; color: var(--muted);">
+                            <div>👤 ${assignee}</div>
+                            ${t.milestone ? `<div>📍 ${t.milestone}</div>` : ''}
+                            ${t.startDate || t.endDate ? `<div>📅 ${t.startDate ? t.startDate.slice(0,10) : ''} ${t.endDate ? '→ ' + t.endDate.slice(0,10) : ''}</div>` : ''}
+                          </div>
                         </div>
-                      </div>
-                    `;
-                  }).join('')}
+                      `;
+                    }).join('')}
+                  </div>
                 </div>
-              </div>
-            `;
-          }).join('')}
+              `;
+            }).join('');
+          })()}
         </div>
       </div>
       
@@ -2333,7 +2401,16 @@ async function renderView(id) {
           const header = col.querySelector('h4');
           if (header) {
             const status = col.dataset.status;
-            header.textContent = `${status} (${count})`;
+            // Map enum value to display label
+            const statusLabels = {
+              'not started': 'Not Started',
+              'in progress': 'In Progress',
+              'at risk': 'At Risk',
+              'cancel': 'Cancelled',
+              'done': 'Done'
+            };
+            const label = statusLabels[status] || status;
+            header.textContent = `${label} (${count})`;
           }
         };
         updateColumnCount(oldColumn);
@@ -2352,14 +2429,14 @@ async function renderView(id) {
 // Download task template function
 function downloadTaskTemplate() {
   const headers = ['name', 'description', 'startDate', 'endDate', 'assigneeId', 'status', 'milestone'];
-  const exampleRow = ['Task Name', 'Task Description', '2025-01-01', '2025-01-15', '', 'Not Started', 'Preparation'];
+  const exampleRow = ['Task Name', 'Task Description', '2025-01-01', '2025-01-15', '', 'not started', 'Development'];
   
   const csvContent = [
     headers.join(','),
     exampleRow.join(','),
     'Note: assigneeId should be a user ID from the system',
-    'Status options: Not Started, On Hold, On Track, At Risk, Delayed, Live, Cancelled',
-    'Milestone options: Preparation, Business Requirement, Tech Assessment, Planning, Development, Testing, Live'
+    'Status options: not started, in progress, at risk, cancel, done',
+    'Milestone options: Business Requirement, Tech Assessment, Planning, Development, Testing, Live Preparation'
   ].join('\n');
   
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -2508,7 +2585,7 @@ function renderGanttChart(tasks, initiativeId) {
       <div style="position: relative;">
         ${tasks.map((task, idx) => {
           const assignee = nameById(LOOKUPS.users, task.assigneeId) || 'Unassigned';
-          const status = task.status || 'Not Started';
+          const status = task.status || 'not started';
           const color = getStatusColor(status);
           const pos = calculateTaskPosition(task);
           
@@ -3078,19 +3155,21 @@ async function renderCRList() {
         </div>
       </div>
     </div>
-    <table id="cr-table">
-      <thead>
-        <tr>
-          ${columns.map(col => {
-            const visible = colVisibility[col.class] !== false;
-            const sortClass = col.sortable ? 'sortable' : '';
-            const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-            return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-          }).join('')}
-        </tr>
-      </thead>
-      <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
-    </table>
+    <div class="table-wrapper">
+      <table id="cr-table">
+        <thead>
+          <tr>
+            ${columns.map(col => {
+              const visible = colVisibility[col.class] !== false;
+              const sortClass = col.sortable ? 'sortable' : '';
+              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+            }).join('')}
+          </tr>
+        </thead>
+        <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
+      </table>
+    </div>
     <div id="column-settings-modal-cr" class="modal hidden">
       <div class="modal-content column-settings-modal">
         <h3 class="modal-title">Column Visibility</h3>

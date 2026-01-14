@@ -1084,8 +1084,10 @@ button.primary:hover {
   border-radius: 8px;
   box-shadow: var(--shadow);
   overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--border-light);
   position: relative;
+  max-width: 100%;
 }
 
 /* Ensure table background extends when scrolling horizontally */
@@ -1100,7 +1102,7 @@ button.primary:hover {
   background: var(--color-bg-lighter);
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 20;
 }
 
 #initiatives-table thead tr,
@@ -1111,6 +1113,37 @@ button.primary:hover {
 #initiatives-table thead th,
 #cr-table thead th {
   background: var(--color-bg-lighter);
+}
+
+/* Horizontal scroll affordance for wide tables */
+.table-wrapper::before,
+.table-wrapper::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.table-wrapper::before {
+  left: 0;
+  box-shadow: 8px 0 12px -8px rgba(15, 23, 42, 0.25);
+}
+
+.table-wrapper::after {
+  right: 0;
+  box-shadow: -8px 0 12px -8px rgba(15, 23, 42, 0.25);
+}
+
+.table-wrapper.has-left-shadow::before {
+  opacity: 1;
+}
+
+.table-wrapper.has-right-shadow::after {
+  opacity: 1;
 }
 
 .modern-table { 
@@ -1126,7 +1159,7 @@ button.primary:hover {
   background: var(--color-bg-lighter);
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 20;
 }
 
 .modern-table thead tr {
@@ -1699,6 +1732,10 @@ th { position: relative; white-space: nowrap; }
 .status-delayed { background: #fecaca; color: #991b1b; }
 .status-live { background: #dbeafe; color: #1e40af; }
 .status-cancelled { background: #f3f4f6; color: #6b7280; }
+/* Task status enums */
+.status-in-progress { background: #d1fae5; color: #065f46; }
+.status-cancel { background: #f3f4f6; color: #6b7280; }
+.status-done { background: #dbeafe; color: #1e40af; }
 
 /* Priority badges */
 .priority-badge { 
@@ -1739,6 +1776,10 @@ th { position: relative; white-space: nowrap; }
 .status-delayed { background: #fecaca; color: #991b1b; }
 .status-live { background: #dbeafe; color: #1e40af; }
 .status-cancelled { background: #e5e7eb; color: #6b7280; }
+/* Task status enums */
+.status-in-progress { background: #d1fae5; color: #065f46; }
+.status-cancel { background: #e5e7eb; color: #6b7280; }
+.status-done { background: #dbeafe; color: #1e40af; }
 
 /* Column widths - Monday.com inspired */
 .col-ticket { width: 100px; min-width: 90px; font-family: var(--font-family-primary); }
@@ -2770,7 +2811,7 @@ button.btn-fixed.primary:hover {
   position: sticky;
   top: 0;
   background: var(--gray-100);
-  z-index: 10;
+  z-index: 20;
 }
 
 .milestone-table th {
@@ -2822,6 +2863,17 @@ button.btn-fixed.primary:hover {
 
 .milestone-table tbody tr:hover td.sticky-col {
   background-color: var(--gray-50);
+}
+
+/* Sticky key columns so context is preserved while scrolling horizontally */
+#initiatives-table th.col-ticket,
+#initiatives-table td.col-ticket,
+#cr-table th.col-ticket,
+#cr-table td.col-ticket {
+  position: sticky;
+  left: 0;
+  z-index: 30;
+  background: var(--color-bg-lighter);
 }
 
 .milestone-cell {
