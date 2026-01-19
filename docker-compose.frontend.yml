@@ -5,9 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: project_management_frontend
     ports:
-      - "1817:80"   # External port 1817 maps to container port 80
-      # For standard HTTP port (80), change to: "80:80"
-      - "18443:443" # HTTPS (change to "443:443" for standard HTTPS port)
+      - "80:80"     # Standard HTTP
+      - "443:443"   # Standard HTTPS
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
       # Use SSL nginx config (serves HTTPS on 443 and redirects HTTP->HTTPS)
