@@ -76,7 +76,6 @@ function getDefaultColumns(viewType) {
       'col-impact': true,
       'col-remark': true,
       'col-doc': true,
-      'col-timeline': true,
       'col-actions': true
     };
   }
@@ -507,38 +506,15 @@ function initiativeRow(i, crData = null, colVisibility = null) {
   const itpic = nameById(LOOKUPS.users, i.itPicId);
   const bo = nameById(LOOKUPS.users, i.businessOwnerId);
   const doc = i.documentationLink || '';
-  const statusClass = i.status?.replace(/\s+/g, '-') || '';
+  // Normalize status to lowercase for case-insensitive CSS matching
+  const statusClass = i.status?.toLowerCase().replace(/\s+/g, '-') || '';
   const priorityClass = i.priority || '';
   
   // Default visibility if not provided
   if (!colVisibility) colVisibility = getDefaultColumns('list');
   
-  // CR Timeline display
-  let crTimeline = '';
-  if (i.type === 'CR' && crData) {
-    const phases = [
-      { name: 'CR Sec 1', start: crData.crSection1Start, end: crData.crSection1End },
-      { name: 'CR Sec 2', start: crData.crSection2Start, end: crData.crSection2End },
-      { name: 'CR Sec 3', start: crData.crSection3Start, end: crData.crSection3End },
-      { name: 'Dev', start: crData.developmentStart, end: crData.developmentEnd },
-      { name: 'SIT', start: crData.sitStart, end: crData.sitEnd },
-      { name: 'UAT', start: crData.uatStart, end: crData.uatEnd },
-      { name: 'Live', start: crData.liveStart, end: crData.liveEnd }
-    ];
-    
-    const activePhases = phases.filter(p => p.start || p.end);
-    if (activePhases.length > 0) {
-      crTimeline = `<div style="font-size: 10px; line-height: 1.2;">
-        ${activePhases.map(p => 
-          `<div style="margin-bottom: 2px;">
-            <strong>${p.name}:</strong> ${p.start || ''} - ${p.end || 'Ongoing'}
-          </div>`
-        ).join('')}
-      </div>`;
-    }
-  }
-  
-  const timelineCell = i.type === 'CR' ? `<td class="col-timeline" style="display: ${colVisibility['col-timeline'] !== false ? 'table-cell' : 'none'}">${crTimeline}</td>` : '';
+  // CR Timeline display - removed (CR dates no longer used)
+  const timelineCell = '';
   
   return `<tr class="status-${statusClass}">
     <td class="col-ticket" style="display: ${colVisibility['col-ticket'] !== false ? 'table-cell' : 'none'}">${i.ticket || ''}</td>
@@ -564,6 +540,41 @@ function initiativeRow(i, crData = null, colVisibility = null) {
   </tr>`;
 }
 
+// Keep a CSS variable in sync with the actual header height so sticky table headers
+// sit just below the main page header and never collide with it.
+function updateHeaderHeightVar() {
+  const headerEl = document.querySelector('header');
+  if (!headerEl) return;
+  const height = headerEl.offsetHeight || 0;
+  document.documentElement.style.setProperty('--app-header-height', `${height}px`);
+}
+
+// Initialize once on load and keep in sync on resize.
+window.addEventListener('load', updateHeaderHeightVar);
+window.addEventListener('resize', () => {
+  // Use rAF to avoid layout thrash during continuous resize
+  window.requestAnimationFrame(updateHeaderHeightVar);
+});
+
+// Enhance wide table UX: add subtle left/right shadows on horizontal overflow so
+// users can immediately tell the table is scrollable.
+function initScrollableTables() {
+  document.querySelectorAll('.table-wrapper').forEach(wrapper => {
+    const el = wrapper;
+    const updateShadows = () => {
+      const { scrollLeft, scrollWidth, clientWidth } = el;
+      const canScrollRight = scrollWidth - clientWidth - scrollLeft > 1;
+      const canScrollLeft = scrollLeft > 1;
+      wrapper.classList.toggle('has-left-shadow', canScrollLeft);
+      wrapper.classList.toggle('has-right-shadow', canScrollRight);
+    };
+
+    el.addEventListener('scroll', updateShadows);
+    // Run once on init in case the table overflows immediately
+    updateShadows();
+  });
+}
+
 async function renderList() {
   console.log('renderList called');
   setActive('#list');
@@ -576,19 +587,20 @@ async function renderList() {
     return;
   }
   const urlParams = new URLSearchParams(location.search);
-  const q = urlParams.get('q') || '';
+  // Use project-specific search key to keep Project and CR searches separate
+  const q = urlParams.get('project_q') || '';
   // Parse multi-value filters (comma-separated)
   const parseFilter = (key) => {
     const val = urlParams.get(key);
     return val ? val.split(',').filter(v => v) : [];
   };
   const filter = {
-    departmentId: parseFilter('departmentId'),
-    priority: parseFilter('priority'),
-    status: parseFilter('status'),
-    milestone: parseFilter('milestone')
+    departmentId: parseFilter('project_departmentId'),
+    priority: parseFilter('project_priority'),
+    status: parseFilter('project_status'),
+    milestone: parseFilter('project_milestone')
   };
-  const sortParam = urlParams.get('sort') || '';
+  const sortParam = urlParams.get('project_sort') || '';
   
   // Build API query string with multi-value filters
   const apiQs = new URLSearchParams();
@@ -838,41 +850,51 @@ async function renderList() {
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('list')" title="Column Settings" class="icon-btn">⚙️</button>
-          <a href="#new"><button class="primary">+ New Initiative</button></a>
+          <a href="#new/Project"><button class="primary">+ New Initiative</button></a>
         </div>
       </div>
     </div>
-    <table id="initiatives-table">
-      <thead>
-        <tr>
-          ${columns.map(col => {
-            const visible = colVisibility[col.class] !== false;
-            const sortClass = col.sortable ? 'sortable' : '';
-            const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-            return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-          }).join('')}
-        </tr>
-      </thead>
-      <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
-    </table>
+    <div class="table-wrapper">
+      <table id="initiatives-table">
+        <thead>
+          <tr>
+            ${columns.map(col => {
+              const visible = colVisibility[col.class] !== false;
+              const sortClass = col.sortable ? 'sortable' : '';
+              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+            }).join('')}
+          </tr>
+        </thead>
+        <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
+      </table>
+    </div>
     <div id="column-settings-modal" class="modal hidden">
-      <div class="modal-content">
-        <h3>Column Visibility</h3>
-        <div id="column-checkboxes" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 16px 0;">
+      <div class="modal-content column-settings-modal">
+        <h3 class="modal-title">Column Visibility</h3>
+        <div class="modal-checkbox-controls">
+          <button class="btn-link" onclick="checkAllColumns('list')">Check All</button>
+          <span class="control-separator">|</span>
+          <button class="btn-link" onclick="uncheckAllColumns('list')">Uncheck All</button>
+        </div>
+        <div id="column-checkboxes" class="column-checkboxes-grid">
           ${columns.filter(c => c.key !== 'actions').map(col => `
-            <label style="display: flex; align-items: center; cursor: pointer;">
-              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} style="margin-right: 8px;">
-              ${col.label}
+            <label class="column-checkbox-label">
+              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} class="column-checkbox">
+              <span class="column-checkbox-text">${col.label}</span>
             </label>
           `).join('')}
         </div>
-        <div>
-          <button class="primary" onclick="saveColumnSettings('list')">Save View</button>
-          <button onclick="closeColumnSettings()">Cancel</button>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="closeColumnSettings()">Cancel</button>
+          <button class="btn-primary" onclick="saveColumnSettings('list')">Save View</button>
         </div>
       </div>
     </div>
   `;
+
+  // Initialize horizontal scroll affordance for the main initiatives table.
+  initScrollableTables();
   // Multi-select dropdown handlers
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
@@ -909,9 +931,9 @@ async function renderList() {
     const searchVal = document.getElementById('search').value;
     const url = new URL(location.href);
     
-    // Update search
-    if (searchVal) url.searchParams.set('q', searchVal);
-    else url.searchParams.delete('q');
+    // Update search with project-specific key
+    if (searchVal) url.searchParams.set('project_q', searchVal);
+    else url.searchParams.delete('project_q');
     
     // Get selected values from each multi-select
     const getSelectedValues = (filterId) => {
@@ -919,11 +941,12 @@ async function renderList() {
       return Array.from(checkboxes).map(cb => cb.value);
     };
     
+    // Use project-specific filter keys
     const filterMap = {
-      'fDepartment': 'departmentId',
-      'fPriority': 'priority',
-      'fStatus': 'status',
-      'fMilestone': 'milestone'
+      'fDepartment': 'project_departmentId',
+      'fPriority': 'project_priority',
+      'fStatus': 'project_status',
+      'fMilestone': 'project_milestone'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -946,6 +969,13 @@ async function renderList() {
   // Enter key on search input
   document.getElementById('search').onkeypress = (e) => {
     if (e.key === 'Enter') {
+      applyFilters();
+    }
+  };
+  
+  // Auto-clear search when input is emptied (no Enter required)
+  document.getElementById('search').oninput = (e) => {
+    if (e.target.value === '') {
       applyFilters();
     }
   };
@@ -981,6 +1011,22 @@ async function renderList() {
     if (modalCr) modalCr.classList.add('hidden');
   };
   
+  window.checkAllColumns = (viewType) => {
+    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
+    checkboxes.forEach(cb => {
+      cb.checked = true;
+    });
+  };
+  
+  window.uncheckAllColumns = (viewType) => {
+    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
+    checkboxes.forEach(cb => {
+      cb.checked = false;
+    });
+  };
+  
   // Close modal when clicking backdrop
   setTimeout(() => {
     const modals = document.querySelectorAll('.modal');
@@ -993,7 +1039,7 @@ async function renderList() {
     });
   }, 100);
   
-  // Sorting
+  // Sorting - 3-state cycle: ascending → descending → default (no sort)
   document.querySelectorAll('thead th.sortable').forEach(th => {
     const resizer = document.createElement('span');
     resizer.className = 'col-resize';
@@ -1002,10 +1048,30 @@ async function renderList() {
       if (e.target === resizer) return; // ignore when resizing
       const key = th.dataset.key;
       const url = new URL(location.href);
-      const current = url.searchParams.get('sort') || '';
+      const current = url.searchParams.get('project_sort') || '';
       const [curKey, curDir] = current.split(':');
-      const nextDir = curKey === key && curDir === 'asc' ? 'desc' : 'asc';
-      url.searchParams.set('sort', `${key}:${nextDir}`);
+      
+      // 3-state cycle: none → asc → desc → none (default)
+      let nextSort = '';
+      if (curKey !== key) {
+        // Different column clicked, start with ascending
+        nextSort = `${key}:asc`;
+      } else if (curDir === 'asc') {
+        // Same column, currently ascending → go to descending
+        nextSort = `${key}:desc`;
+      } else if (curDir === 'desc') {
+        // Same column, currently descending → remove sort (default)
+        nextSort = '';
+      } else {
+        // No current sort on this column → start ascending
+        nextSort = `${key}:asc`;
+      }
+      
+      if (nextSort) {
+        url.searchParams.set('project_sort', nextSort);
+      } else {
+        url.searchParams.delete('project_sort');
+      }
       history.pushState({}, '', url);
       renderList();
     };
@@ -1040,7 +1106,34 @@ function formRow(label, inputHtml) {
   return `<div class="form-row"><label>${label}</label><div>${inputHtml}</div></div>`;
 }
 
-// Helper function to create multi-select dropdown for forms
+// Helper function to create searchable single-select dropdown
+function createSearchableSelect(name, options, selectedValue = '', placeholder = 'Select...', allowNone = false) {
+  const selectedOption = options.find(opt => opt.id === selectedValue);
+  const displayText = selectedOption ? selectedOption.name : placeholder;
+  
+  return `
+    <div class="searchable-select-wrapper">
+      <button type="button" class="searchable-select-btn" data-field="${name}">
+        <span class="searchable-select-text">${displayText}</span>
+        <span class="searchable-select-arrow">▼</span>
+      </button>
+      <div class="searchable-select-dropdown" id="searchable-dropdown-${name}">
+        <div class="searchable-select-search">
+          <input type="text" class="searchable-select-input" placeholder="Search..." data-field="${name}">
+        </div>
+        <div class="searchable-select-options">
+          ${allowNone ? `<div class="searchable-select-option ${!selectedValue ? 'selected' : ''}" data-value="" data-field="${name}">None</div>` : ''}
+          ${options.map(opt => `
+            <div class="searchable-select-option ${selectedValue === opt.id ? 'selected' : ''}" data-value="${opt.id}" data-field="${name}">${opt.name}</div>
+          `).join('')}
+        </div>
+      </div>
+      <input type="hidden" name="${name}" value="${selectedValue || ''}">
+    </div>
+  `;
+}
+
+// Helper function to create multi-select dropdown for forms with search
 function createMultiSelect(name, options, selectedValues = []) {
   const selectedSet = new Set(Array.isArray(selectedValues) ? selectedValues : [selectedValues].filter(Boolean));
   const selectedIds = Array.from(selectedSet);
@@ -1051,12 +1144,17 @@ function createMultiSelect(name, options, selectedValues = []) {
         ${selectedIds.length > 0 ? `${selectedIds.length} selected` : 'Select...'}
       </button>
       <div class="multi-select-dropdown" id="dropdown-${name}">
-        ${options.map(opt => `
-          <label class="multi-select-option">
-            <input type="checkbox" value="${opt.id}" ${selectedSet.has(opt.id) ? 'checked' : ''} data-field="${name}">
-            ${opt.name}
-          </label>
-        `).join('')}
+        <div class="multi-select-search">
+          <input type="text" class="multi-select-search-input" placeholder="Search..." data-field="${name}">
+        </div>
+        <div class="multi-select-options">
+          ${options.map(opt => `
+            <label class="multi-select-option" data-name="${(opt.name || '').toLowerCase()}">
+              <input type="checkbox" value="${opt.id}" ${selectedSet.has(opt.id) ? 'checked' : ''} data-field="${name}">
+              ${opt.name}
+            </label>
+          `).join('')}
+        </div>
       </div>
       <input type="hidden" name="${name}" value="${selectedIds.join(',')}">
     </div>
@@ -1065,6 +1163,7 @@ function createMultiSelect(name, options, selectedValues = []) {
 
 // Initialize multi-select dropdowns in forms
 function initializeMultiSelects() {
+  // Multi-select button click
   document.querySelectorAll('.multi-select-btn[data-field]').forEach(btn => {
     btn.onclick = (e) => {
       e.stopPropagation();
@@ -1074,11 +1173,29 @@ function initializeMultiSelects() {
       
       // Close all dropdowns
       document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+      document.querySelectorAll('.searchable-select-dropdown').forEach(d => d.classList.remove('open'));
       
       // Toggle current dropdown
       if (!isOpen) {
         dropdown.classList.add('open');
+        // Focus search input
+        const searchInput = dropdown.querySelector('.multi-select-search-input');
+        if (searchInput) setTimeout(() => searchInput.focus(), 10);
       }
+    };
+  });
+  
+  // Multi-select search functionality
+  document.querySelectorAll('.multi-select-search-input').forEach(input => {
+    input.onclick = (e) => e.stopPropagation();
+    input.oninput = (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      const fieldName = input.dataset.field;
+      const options = document.querySelectorAll(`#dropdown-${fieldName} .multi-select-option`);
+      options.forEach(opt => {
+        const name = opt.dataset.name || opt.textContent.toLowerCase();
+        opt.style.display = name.includes(searchTerm) ? 'flex' : 'none';
+      });
     };
   });
   
@@ -1086,6 +1203,9 @@ function initializeMultiSelects() {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.multi-select-wrapper')) {
       document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+    }
+    if (!e.target.closest('.searchable-select-wrapper')) {
+      document.querySelectorAll('.searchable-select-dropdown').forEach(d => d.classList.remove('open'));
     }
   });
   
@@ -1107,23 +1227,131 @@ function initializeMultiSelects() {
       }
     };
   });
+  
+  // Initialize searchable single-select dropdowns
+  document.querySelectorAll('.searchable-select-btn[data-field]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const fieldName = btn.dataset.field;
+      const dropdown = document.getElementById(`searchable-dropdown-${fieldName}`);
+      const isOpen = dropdown.classList.contains('open');
+      
+      // Close all dropdowns
+      document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+      document.querySelectorAll('.searchable-select-dropdown').forEach(d => d.classList.remove('open'));
+      
+      // Toggle current dropdown
+      if (!isOpen) {
+        dropdown.classList.add('open');
+        // Focus search input
+        const searchInput = dropdown.querySelector('.searchable-select-input');
+        if (searchInput) setTimeout(() => searchInput.focus(), 10);
+      }
+    };
+  });
+  
+  // Searchable select search functionality
+  document.querySelectorAll('.searchable-select-input').forEach(input => {
+    input.onclick = (e) => e.stopPropagation();
+    input.oninput = (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      const fieldName = input.dataset.field;
+      const options = document.querySelectorAll(`#searchable-dropdown-${fieldName} .searchable-select-option`);
+      options.forEach(opt => {
+        const name = opt.textContent.toLowerCase();
+        opt.style.display = name.includes(searchTerm) ? 'block' : 'none';
+      });
+    };
+  });
+  
+  // Searchable select option click
+  document.querySelectorAll('.searchable-select-option').forEach(opt => {
+    opt.onclick = (e) => {
+      e.stopPropagation();
+      const fieldName = opt.dataset.field;
+      const value = opt.dataset.value;
+      const text = opt.textContent.trim();
+      
+      // Update hidden input
+      const hiddenInput = document.querySelector(`.searchable-select-wrapper input[type="hidden"][name="${fieldName}"]`);
+      if (hiddenInput) hiddenInput.value = value;
+      
+      // Update button text
+      const btn = document.querySelector(`.searchable-select-btn[data-field="${fieldName}"]`);
+      if (btn) {
+        const textSpan = btn.querySelector('.searchable-select-text');
+        if (textSpan) textSpan.textContent = text;
+      }
+      
+      // Update selected state
+      const allOptions = document.querySelectorAll(`#searchable-dropdown-${fieldName} .searchable-select-option`);
+      allOptions.forEach(o => o.classList.remove('selected'));
+      opt.classList.add('selected');
+      
+      // Close dropdown and clear search
+      const dropdown = document.getElementById(`searchable-dropdown-${fieldName}`);
+      if (dropdown) {
+        dropdown.classList.remove('open');
+        const searchInput = dropdown.querySelector('.searchable-select-input');
+        if (searchInput) {
+          searchInput.value = '';
+          allOptions.forEach(o => o.style.display = 'block');
+        }
+      }
+    };
+  });
 }
 
-function commonFields(initiative = null) {
+// Filter users by role for specific fields
+function filterUsersByRole(users, roleFilter) {
+  return users.filter(u => {
+    const role = (u.role || '').toLowerCase().trim();
+    const type = (u.type || '').toLowerCase().trim();
+    const isAdmin = u.isAdmin === true || u.isAdmin === 1 || role === 'admin';
+    
+    switch (roleFilter) {
+      case 'businessOwner':
+        // Business User and Admin role
+        return role === 'business user' || isAdmin;
+      case 'itPic':
+        // IT, IT - PM, and Admin role
+        return role === 'it' || role === 'it - pm' || role === 'it-pm' || role === 'itpm' || isAdmin;
+      case 'itManager':
+        // Admin role OR IT role with Manager type
+        return isAdmin || (role === 'it' && type === 'manager');
+      case 'itPm':
+        // IT - PM, IT PM, and Admin role
+        return role === 'it - pm' || role === 'it-pm' || role === 'itpm' || role === 'it pm' || isAdmin;
+      default:
+        return true;
+    }
+  });
+}
+
+function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'Initiative Name') {
   const option = (value, label, selected) => `<option value="${value}" ${selected ? 'selected' : ''}>${label}</option>`;
   
+  // Filter users for specific fields
+  const businessOwnerUsers = filterUsersByRole(LOOKUPS.users, 'businessOwner');
+  const itPicUsers = filterUsersByRole(LOOKUPS.users, 'itPic');
+  const itManagerUsers = filterUsersByRole(LOOKUPS.users, 'itManager');
+  const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
+  
+  // Determine selected type: from initiative if exists, otherwise from defaultType
+  const selectedType = initiative ? initiative.type : defaultType;
+  
   return [
-    formRow('Type', `<select name="type" required><option value="Project" ${!initiative || initiative.type === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${initiative && initiative.type === 'CR' ? 'selected' : ''}>CR</option></select>`),
-    formRow('Initiative Name', `<input name="name" value="${initiative ? (initiative.name || '').replace(/"/g, '&quot;') : ''}" required />`),
+    formRow('Type', `<select name="type" id="typeSelect" required><option value="Project" ${selectedType === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${selectedType === 'CR' ? 'selected' : ''}>CR</option></select>`),
+    formRow(`<span id="nameLabelText">${nameLabel}</span>`, `<input name="name" id="nameInput" value="${initiative ? (initiative.name || '').replace(/"/g, '&quot;') : ''}" required />`),
     formRow('Description', `<textarea name="description" class="long-text" required>${initiative ? (initiative.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Business Impact', `<textarea name="businessImpact" class="long-text" required>${initiative ? (initiative.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Priority', `<select name="priority">${option('P0', 'P0', initiative?.priority === 'P0')}${option('P1', 'P1', initiative?.priority === 'P1')}${option('P2', 'P2', !initiative || initiative.priority === 'P2')}</select>`),
-    formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.businessOwnerId === u.id)).join('')}</select>`),
+    formRow('Business Owner / Requestor', createSearchableSelect('businessOwnerId', businessOwnerUsers, initiative?.businessOwnerId || '', 'Select...')),
     formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, initiative?.businessUserIds || [])),
-    formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => option(d.id, d.name, initiative?.departmentId === d.id)).join('')}</select>`),
-    formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, initiative?.itPicIds || (initiative?.itPicId ? [initiative.itPicId] : []))),
-    formRow('IT PM', `<select name="itPmId">${option('', 'None', !initiative?.itPmId)}${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.itPmId === u.id)).join('')}</select>`),
-    formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, initiative?.itManagerIds || [])),
+    formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, initiative?.departmentId || '', 'Select...')),
+    formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, initiative?.itPicIds || (initiative?.itPicId ? [initiative.itPicId] : []))),
+    formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, initiative?.itPmId || '', 'Select...', true)),
+    formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, initiative?.itManagerIds || [])),
     formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => option(s, s, initiative?.status === s)).join('')}</select>`),
     formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, initiative?.milestone === m)).join('')}</select>`),
     formRow('Start Date', `<input type="date" name="startDate" value="${initiative?.startDate?.slice(0,10) || ''}" required />`),
@@ -1134,51 +1362,53 @@ function commonFields(initiative = null) {
 }
 
 function crFields() {
-  return `
-    <div id="crFields">
-      ${formRow('CR Submission Start', `<input type="date" name="cr.crSubmissionStart" />`)}
-      ${formRow('CR Submission End', `<input type="date" name="cr.crSubmissionEnd" />`)}
-      ${formRow('Development Start', `<input type="date" name="cr.developmentStart" />`)}
-      ${formRow('Development End', `<input type="date" name="cr.developmentEnd" />`)}
-      ${formRow('SIT Start', `<input type="date" name="cr.sitStart" />`)}
-      ${formRow('SIT End', `<input type="date" name="cr.sitEnd" />`)}
-      ${formRow('UAT Start', `<input type="date" name="cr.uatStart" />`)}
-      ${formRow('UAT End', `<input type="date" name="cr.uatEnd" />`)}
-      ${formRow('Live Date', `<input type="date" name="cr.liveDate" />`)}
-    </div>`;
+  // CR dates have been removed - no longer used
+  return `<div id="crFields"></div>`;
 }
 
-async function renderNew() {
+async function renderNew(defaultType = 'Project') {
   setActive('#new');
   await ensureLookups();
+  
+  const isCR = defaultType === 'CR';
+  const pageTitle = isCR ? 'New CR' : 'New Initiative';
+  const nameLabel = isCR ? 'CR Name' : 'Initiative Name';
+  const cancelHref = isCR ? '#crlist' : '#list';
+  
   app.innerHTML = `
     <div class="card">
-      <h2>New Initiative</h2>
+      <h2>${pageTitle}</h2>
       <form id="f" class="form">
-        ${commonFields()}
-        <div id="crContainer" class="card" style="display:none">
-          <h3>CR Details</h3>
-          ${crFields()}
-        </div>
-        <div>
-          <button class="primary" type="submit">Create</button>
-          <a href="#list"><button type="button">Cancel</button></a>
+        ${commonFields(null, defaultType, nameLabel)}
+        <div class="form-actions">
+          <button type="button" class="btn-fixed" onclick="location.hash='${cancelHref}'">Cancel</button>
+          <button type="submit" class="btn-fixed primary">Create</button>
         </div>
       </form>
-      <div class="muted">Note: For CR, CR Submission Start is required.</div>
     </div>
   `;
+
+  // Initialize horizontal scroll affordance for the CR table.
+  initScrollableTables();
   
   // Initialize multi-select dropdowns
   initializeMultiSelects();
   
   const f = document.getElementById('f');
   const typeEl = f.querySelector('select[name="type"]');
-  const crBox = document.getElementById('crContainer');
-  typeEl.onchange = () => {
-    crBox.style.display = typeEl.value === 'CR' ? 'block' : 'none';
+  const nameLabelEl = document.getElementById('nameLabelText');
+  const pageTitleEl = document.querySelector('.card h2');
+  
+  // Function to update labels based on type
+  const updateLabelsForType = () => {
+    const isCR = typeEl.value === 'CR';
+    if (nameLabelEl) nameLabelEl.textContent = isCR ? 'CR Name' : 'Initiative Name';
+    if (pageTitleEl) pageTitleEl.textContent = isCR ? 'New CR' : 'New Initiative';
   };
-  typeEl.onchange();
+  
+  typeEl.onchange = updateLabelsForType;
+  updateLabelsForType(); // Apply initial state
+  
   f.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(f);
@@ -1208,23 +1438,20 @@ async function renderNew() {
       remark: obj.remark || null,
       documentationLink: obj.documentationLink || null
     };
+    // CR dates removed - no longer used
     if (obj.type === 'CR') {
-      payload.cr = {
-        crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-        crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
-        developmentStart: obj['cr.developmentStart'] || null,
-        developmentEnd: obj['cr.developmentEnd'] || null,
-        sitStart: obj['cr.sitStart'] || null,
-        sitEnd: obj['cr.sitEnd'] || null,
-        uatStart: obj['cr.uatStart'] || null,
-        uatEnd: obj['cr.uatEnd'] || null,
-        liveDate: obj['cr.liveDate'] || null
-      };
+      payload.cr = {};
     }
     try {
       await fetchJSON('/api/initiatives', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-      location.hash = '#list';
-      renderList();
+      // Redirect to appropriate list based on type
+      if (obj.type === 'CR') {
+        location.hash = '#crlist';
+        renderCRList();
+      } else {
+        location.hash = '#list';
+        renderList();
+      }
     } catch (e) {
       alert(e.message);
     }
@@ -1232,10 +1459,12 @@ async function renderNew() {
 }
 
 async function renderView(id) {
-  setActive('#list');
   await ensureLookups();
   await getCurrentUser();
   const i = await fetchJSON('/api/initiatives/' + id);
+  
+  // Set active nav based on initiative type
+  setActive(i.type === 'CR' ? '#crlist' : '#list');
   const boName = nameById(LOOKUPS.users, i.businessOwnerId);
   const depName = nameById(LOOKUPS.departments, i.departmentId);
   const itPicName = nameById(LOOKUPS.users, i.itPicId);
@@ -1256,6 +1485,13 @@ async function renderView(id) {
 
   // Calculate % Completion based on task statuses (fallback to initiative status when no tasks)
   const statusToPercent = {
+    // Task status enum values
+    'not started': 0,
+    'in progress': 50,
+    'at risk': 25,
+    'cancel': 100,
+    'done': 100,
+    // Initiative status values (for fallback)
     'Not Started': 0,
     'On Hold': 0,
     'On Track': 50,
@@ -1264,10 +1500,14 @@ async function renderView(id) {
     'Live': 100,
     'Cancelled': 100
   };
-  const getPercentForStatus = (status) => statusToPercent[status] ?? 0;
+  const getPercentForStatus = (status) => {
+    // Normalize to lowercase for task statuses
+    const normalized = status?.toLowerCase();
+    return statusToPercent[normalized] ?? statusToPercent[status] ?? 0;
+  };
   const completionPercent = (() => {
     if (Array.isArray(tasks) && tasks.length > 0) {
-      const total = tasks.reduce((sum, t) => sum + getPercentForStatus(t.status || 'Not Started'), 0);
+      const total = tasks.reduce((sum, t) => sum + getPercentForStatus(t.status || 'not started'), 0);
       return Math.round(total / tasks.length);
     }
     return getPercentForStatus(i.status || 'Not Started');
@@ -1442,111 +1682,111 @@ async function renderView(id) {
         </div>
       </div>
       
-      ${i.type === 'CR' ? `
-        <h3>CR Dates</h3>
-        <div class="grid">
-          <div><div class="muted">Submission</div><div>${i.cr?.crSubmissionStart || ''} → ${i.cr?.crSubmissionEnd || ''}</div></div>
-          <div><div class="muted">Development</div><div>${i.cr?.developmentStart || ''} → ${i.cr?.developmentEnd || ''}</div></div>
-          <div><div class="muted">SIT</div><div>${i.cr?.sitStart || ''} → ${i.cr?.sitEnd || ''}</div></div>
-          <div><div class="muted">UAT</div><div>${i.cr?.uatStart || ''} → ${i.cr?.uatEnd || ''}</div></div>
-          <div><div class="muted">Live</div><div>${i.cr?.liveDate || ''}</div></div>
-        </div>
-      ` : ''}
-      <!-- Activity Log Section -->
-      <div style="grid-column: 1 / -1; margin-top: 24px;">
-        <h3>📋 Activity Log</h3>
-        <div class="card" style="margin-top: 16px; max-height: 600px; overflow-y: auto;">
-          ${i.changeHistory && i.changeHistory.length > 0 ? `
-            ${i.changeHistory.map((history, idx) => {
-              const changedByName = nameById(LOOKUPS.users, history.changedBy) || history.changedBy || 'System';
-              const timestamp = new Date(history.timestamp);
-              const formattedDate = timestamp.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-              const formattedTime = timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-              return `
-                <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: ${idx < i.changeHistory.length - 1 ? '1px solid #e5e7eb' : 'none'};">
-                  <div style="display: flex; align-items: center; margin-bottom: 12px;">
-                    <div style="width: 8px; height: 8px; background: var(--brand); border-radius: 50%; margin-right: 12px;"></div>
-                    <div style="flex: 1;">
-                      <div style="font-weight: 600; color: var(--text); margin-bottom: 4px;">${changedByName}</div>
-                      <div class="muted" style="font-size: 12px;">${formattedDate} at ${formattedTime}</div>
-                    </div>
-                  </div>
-              ${history.changes && history.changes.length > 0 ? `
-                    <div style="margin-left: 20px; padding-left: 16px; border-left: 2px solid var(--border-light);">
-                      ${history.changes.map(change => {
-                        const fieldLabel = formatActivityFieldLabel(change.field);
-                        const oldFormatted = formatActivityValue(change.field, change.oldValue);
-                        const newFormatted = formatActivityValue(change.field, change.newValue);
-                        return `
-                          <div style="margin: 8px 0; padding: 10px; background: #f8fafc; border-radius: 6px; border-left: 3px solid var(--brand);">
-                            <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">${fieldLabel}</div>
-                            <div style="font-size: 13px; line-height: 1.6;">
-                              <span style="color: #ef4444; text-decoration: line-through; padding: 2px 6px; background: #fee2e2; border-radius: 3px;">${oldFormatted}</span>
-                              <span style="margin: 0 8px; color: var(--muted);">→</span>
-                              <span style="color: #10b981; padding: 2px 6px; background: #d1fae5; border-radius: 3px;">${newFormatted}</span>
-                            </div>
-                          </div>
-                        `;
-                      }).join('')}
-                    </div>
-                  ` : `
-                    <div style="margin-left: 20px; padding: 8px; color: var(--muted); font-size: 13px; font-style: italic;">
-                      No specific field changes recorded
-                    </div>
-                  `}
-                </div>
-              `;
-            }).join('')}
-          ` : `
-            <div style="padding: 40px; text-align: center; color: var(--muted);">
-              <div style="font-size: 48px; margin-bottom: 12px;">📝</div>
-              <div style="font-weight: 500; margin-bottom: 4px;">No activity recorded yet</div>
-              <div style="font-size: 13px;">Changes to this initiative will appear here</div>
-            </div>
-          `}
-        </div>
-      </div>
       <div style="margin-top:12px"><a href="#list"><button>Back</button></a></div>
     </div>
     
     
-    <!-- Comments Section -->
+    <!-- Comments & Activity Log Combined Section -->
     <div class="card" style="margin-top: 24px;">
-      <h3>Comments</h3>
-      <div id="comments-list" style="margin-bottom: 16px;">
-        ${comments.length === 0 ? '<p class="muted">No comments yet. Be the first to comment!</p>' : ''}
-        ${comments.map(c => {
-          const author = nameById(LOOKUPS.users, c.authorId) || 'Unknown';
-          const canEdit = currentUser && (c.authorId === currentUser.id || currentUser.isAdmin);
-          return `
-            <div class="comment-item" style="margin-bottom: 16px; padding: 12px; background: var(--gray-50); border-radius: 8px;">
-              <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
-                <div>
-                  <strong>${author}</strong>
-                  <span class="muted" style="font-size: 12px; margin-left: 8px;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</span>
-                  ${c.updatedAt ? `<span class="muted" style="font-size: 11px; margin-left: 8px;">(edited)</span>` : ''}
-                </div>
-                ${canEdit ? `
-                  <div>
-                    <button class="edit-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; margin-right: 4px;">Edit</button>
-                    <button class="delete-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; color: var(--danger);">Delete</button>
-                  </div>
-                ` : ''}
-              </div>
-              <div class="comment-body">${formatCommentBody(c.body || '')}</div>
-            </div>
-          `;
-        }).join('')}
+      <!-- Tabs Header -->
+      <div style="display: flex; border-bottom: 2px solid var(--border); margin-bottom: 16px;">
+        <button id="tab-comments" class="tab-btn active" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid var(--brand); margin-bottom: -2px; color: var(--brand);">
+          💬 Comments <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${comments.length}</span>
+        </button>
+        <button id="tab-activity" class="tab-btn" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--muted);">
+          📋 Activity Log <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${i.changeHistory?.length || 0}</span>
+        </button>
       </div>
-      <div>
-        <div style="position: relative;">
-          <textarea id="new-comment" placeholder="Add a comment... (use @username to mention someone)" rows="3" style="width: 100%; margin-bottom: 8px;"></textarea>
-          <div id="mention-autocomplete" class="mention-autocomplete hidden"></div>
+      
+      <!-- Comments Tab Content -->
+      <div id="tab-content-comments" class="tab-content">
+        <div id="comments-list" style="margin-bottom: 16px;">
+          ${comments.length === 0 ? '<p class="muted">No comments yet. Be the first to comment!</p>' : ''}
+          ${comments.map(c => {
+            const author = nameById(LOOKUPS.users, c.authorId) || 'Unknown';
+            const canEdit = currentUser && (c.authorId === currentUser.id || currentUser.isAdmin);
+            return `
+              <div class="comment-item" style="margin-bottom: 16px; padding: 12px; background: var(--gray-50); border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                  <div>
+                    <strong>${author}</strong>
+                    <span class="muted" style="font-size: 12px; margin-left: 8px;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</span>
+                    ${c.updatedAt ? `<span class="muted" style="font-size: 11px; margin-left: 8px;">(edited)</span>` : ''}
+                  </div>
+                  ${canEdit ? `
+                    <div>
+                      <button class="edit-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; margin-right: 4px;">Edit</button>
+                      <button class="delete-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; color: var(--danger);">Delete</button>
+                    </div>
+                  ` : ''}
+                </div>
+                <div class="comment-body">${formatCommentBody(c.body || '')}</div>
+              </div>
+            `;
+          }).join('')}
         </div>
-        <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
-          💡 Tip: Type @ followed by a username to mention someone
+        <div>
+          <div style="position: relative;">
+            <textarea id="new-comment" placeholder="Add a comment... (use @username to mention someone)" rows="3" style="width: 100%; margin-bottom: 8px;"></textarea>
+            <div id="mention-autocomplete" class="mention-autocomplete hidden"></div>
+          </div>
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
+            💡 Tip: Type @ followed by a username to mention someone
+          </div>
+          <button id="add-comment-btn" class="primary">Add Comment</button>
         </div>
-        <button id="add-comment-btn" class="primary">Add Comment</button>
+      </div>
+      
+      <!-- Activity Log Tab Content -->
+      <div id="tab-content-activity" class="tab-content" style="display: none; max-height: 600px; overflow-y: auto;">
+        ${i.changeHistory && i.changeHistory.length > 0 ? `
+          ${i.changeHistory.map((history, idx) => {
+            const changedByName = nameById(LOOKUPS.users, history.changedBy) || history.changedBy || 'System';
+            const timestamp = new Date(history.timestamp);
+            const formattedDate = timestamp.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+            const formattedTime = timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            return `
+              <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: ${idx < i.changeHistory.length - 1 ? '1px solid #e5e7eb' : 'none'};">
+                <div style="display: flex; align-items: center; margin-bottom: 12px;">
+                  <div style="width: 8px; height: 8px; background: var(--brand); border-radius: 50%; margin-right: 12px;"></div>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; color: var(--text); margin-bottom: 4px;">${changedByName}</div>
+                    <div class="muted" style="font-size: 12px;">${formattedDate} at ${formattedTime}</div>
+                  </div>
+                </div>
+            ${history.changes && history.changes.length > 0 ? `
+                  <div style="margin-left: 20px; padding-left: 16px; border-left: 2px solid var(--border-light);">
+                    ${history.changes.map(change => {
+                      const fieldLabel = formatActivityFieldLabel(change.field);
+                      const oldFormatted = formatActivityValue(change.field, change.oldValue);
+                      const newFormatted = formatActivityValue(change.field, change.newValue);
+                      return `
+                        <div style="margin: 8px 0; padding: 10px; background: #f8fafc; border-radius: 6px; border-left: 3px solid var(--brand);">
+                          <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">${fieldLabel}</div>
+                          <div style="font-size: 13px; line-height: 1.6;">
+                            <span style="color: #ef4444; text-decoration: line-through; padding: 2px 6px; background: #fee2e2; border-radius: 3px;">${oldFormatted}</span>
+                            <span style="margin: 0 8px; color: var(--muted);">→</span>
+                            <span style="color: #10b981; padding: 2px 6px; background: #d1fae5; border-radius: 3px;">${newFormatted}</span>
+                          </div>
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+                ` : `
+                  <div style="margin-left: 20px; padding: 8px; color: var(--muted); font-size: 13px; font-style: italic;">
+                    No specific field changes recorded
+                  </div>
+                `}
+              </div>
+            `;
+          }).join('')}
+        ` : `
+          <div style="padding: 40px; text-align: center; color: var(--muted);">
+            <div style="font-size: 48px; margin-bottom: 12px;">📝</div>
+            <div style="font-weight: 500; margin-bottom: 4px;">No activity recorded yet</div>
+            <div style="font-size: 13px;">Changes to this initiative will appear here</div>
+          </div>
+        `}
       </div>
     </div>
     
@@ -1582,12 +1822,15 @@ async function renderView(id) {
             ${tasks.length === 0 ? '<tr><td colspan="7" class="muted" style="text-align: center; padding: 20px;">No tasks yet</td></tr>' : ''}
             ${tasks.map(t => {
               const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
+              const taskStatus = (t.status || 'not started').toLowerCase();
+              const taskStatusLabels = { 'not started': 'Not Started', 'in progress': 'In Progress', 'at risk': 'At Risk', 'cancel': 'Cancelled', 'done': 'Done' };
+              const taskStatusLabel = taskStatusLabels[taskStatus] || t.status || 'Not Started';
               return `
                 <tr>
                   <td><strong>${t.name}</strong>${t.description ? `<br><small class="muted">${t.description}</small>` : ''}</td>
                   <td>${t.milestone || '-'}</td>
                   <td>${assignee}</td>
-                  <td><span class="status-badge status-${(t.status || 'Not Started')?.replace(/\s+/g, '-')}">${t.status || 'Not Started'}</span></td>
+                  <td><span class="status-badge status-${taskStatus.replace(/\s+/g, '-')}">${taskStatusLabel}</span></td>
                   <td>${t.startDate ? t.startDate.slice(0,10) : '-'}</td>
                   <td>${t.endDate ? t.endDate.slice(0,10) : '-'}</td>
                   <td>
@@ -1604,30 +1847,41 @@ async function renderView(id) {
       <!-- Task Kanban View -->
       <div id="tasks-kanban-view" class="task-view hidden">
         <div class="kanban-board" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
-          ${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(status => {
-            const statusTasks = tasks.filter(t => (t.status || 'Not Started') === status);
-            return `
-              <div class="kanban-column" data-status="${status}" style="background: var(--gray-50); border-radius: 8px; padding: 12px; min-height: 200px;">
-                <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600;">${status} (${statusTasks.length})</h4>
-                <div class="kanban-tasks" data-status="${status}">
-                  ${statusTasks.map(t => {
-                    const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
-                    return `
-                      <div class="kanban-task" draggable="true" data-id="${t.id}" data-status="${t.status || 'Not Started'}" style="background: white; padding: 12px; margin-bottom: 8px; border-radius: 6px; cursor: move; box-shadow: var(--shadow);">
-                        <div style="font-weight: 600; margin-bottom: 4px;">${t.name}</div>
-                        ${t.description ? `<div class="muted" style="font-size: 12px; margin-bottom: 4px;">${t.description}</div>` : ''}
-                        <div style="font-size: 11px; color: var(--muted);">
-                          <div>👤 ${assignee}</div>
-                          ${t.milestone ? `<div>📍 ${t.milestone}</div>` : ''}
-                          ${t.startDate || t.endDate ? `<div>📅 ${t.startDate ? t.startDate.slice(0,10) : ''} ${t.endDate ? '→ ' + t.endDate.slice(0,10) : ''}</div>` : ''}
+          ${(() => {
+            // Task status enums with display labels
+            const KANBAN_STATUSES = [
+              { value: 'not started', label: 'Not Started' },
+              { value: 'in progress', label: 'In Progress' },
+              { value: 'at risk', label: 'At Risk' },
+              { value: 'cancel', label: 'Cancelled' },
+              { value: 'done', label: 'Done' }
+            ];
+            return KANBAN_STATUSES.map(({ value: status, label }) => {
+              // Match tasks by normalizing status to lowercase
+              const statusTasks = tasks.filter(t => (t.status || 'not started').toLowerCase() === status);
+              return `
+                <div class="kanban-column" data-status="${status}" style="background: var(--gray-50); border-radius: 8px; padding: 12px; min-height: 200px;">
+                  <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600;">${label} (${statusTasks.length})</h4>
+                  <div class="kanban-tasks" data-status="${status}">
+                    ${statusTasks.map(t => {
+                      const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
+                      return `
+                        <div class="kanban-task" draggable="true" data-id="${t.id}" data-status="${(t.status || 'not started').toLowerCase()}" style="background: white; padding: 12px; margin-bottom: 8px; border-radius: 6px; cursor: move; box-shadow: var(--shadow);">
+                          <div style="font-weight: 600; margin-bottom: 4px;">${t.name}</div>
+                          ${t.description ? `<div class="muted" style="font-size: 12px; margin-bottom: 4px;">${t.description}</div>` : ''}
+                          <div style="font-size: 11px; color: var(--muted);">
+                            <div>👤 ${assignee}</div>
+                            ${t.milestone ? `<div>📍 ${t.milestone}</div>` : ''}
+                            ${t.startDate || t.endDate ? `<div>📅 ${t.startDate ? t.startDate.slice(0,10) : ''} ${t.endDate ? '→ ' + t.endDate.slice(0,10) : ''}</div>` : ''}
+                          </div>
                         </div>
-                      </div>
-                    `;
-                  }).join('')}
+                      `;
+                    }).join('')}
+                  </div>
                 </div>
-              </div>
-            `;
-          }).join('')}
+              `;
+            }).join('');
+          })()}
         </div>
       </div>
       
@@ -1808,9 +2062,46 @@ async function renderView(id) {
   // Setup @mention autocomplete for comment textarea
   setupMentionAutocomplete('new-comment');
   
+  // Tab switching for Comments/Activity Log
+  const tabComments = document.getElementById('tab-comments');
+  const tabActivity = document.getElementById('tab-activity');
+  const contentComments = document.getElementById('tab-content-comments');
+  const contentActivity = document.getElementById('tab-content-activity');
+  
+  const switchTab = (activeTab) => {
+    // Update tab buttons
+    [tabComments, tabActivity].forEach(tab => {
+      tab.style.borderBottomColor = 'transparent';
+      tab.style.color = 'var(--muted)';
+      tab.style.fontWeight = '500';
+    });
+    activeTab.style.borderBottomColor = 'var(--brand)';
+    activeTab.style.color = 'var(--brand)';
+    activeTab.style.fontWeight = '600';
+    
+    // Show/hide content
+    if (activeTab === tabComments) {
+      contentComments.style.display = 'block';
+      contentActivity.style.display = 'none';
+    } else {
+      contentComments.style.display = 'none';
+      contentActivity.style.display = 'block';
+    }
+  };
+  
+  tabComments.onclick = () => switchTab(tabComments);
+  tabActivity.onclick = () => switchTab(tabActivity);
+  
   // Edit mode toggle button - replace view with edit form
   document.getElementById('toggle-edit-btn').onclick = () => {
     const itPicIds = i.itPicIds || (i.itPicId ? [i.itPicId] : []);
+    
+    // Filter users for specific fields
+    const businessOwnerUsers = filterUsersByRole(LOOKUPS.users, 'businessOwner');
+    const itPicUsers = filterUsersByRole(LOOKUPS.users, 'itPic');
+    const itManagerUsers = filterUsersByRole(LOOKUPS.users, 'itManager');
+    const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
+    
     const card = document.querySelector('.card');
     card.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -1828,7 +2119,7 @@ async function renderView(id) {
         ${formRow('Priority', `<select name="priority">${['P0','P1','P2'].map(p => `<option value="${p}" ${i.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
           ${formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => `<option value="${s}" ${i.status && i.status.toLowerCase() === s.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}</select>`)}
         ${formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
-        ${formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => `<option value="${d.id}" ${d.id === i.departmentId ? 'selected' : ''}>${d.name}</option>`).join('')}</select>`)}
+        ${formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, i.departmentId || '', 'Select...'))}
         ${formRow('Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" required />`)}
         ${formRow('End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
         <div class="form-row"><label>Age Since Created</label><div><strong>${daysSinceCreated} days</strong></div></div>
@@ -1840,27 +2131,13 @@ async function renderView(id) {
         <!-- Project Team Section -->
         <div style="margin-top: 24px; padding: 20px; background: var(--gray-50); border-radius: 8px;">
           <h3 style="margin: 0 0 16px 0; color: var(--text);">👥 Project Team</h3>
-          ${formRow('IT PM', `<select name="itPmId">${[''].concat(LOOKUPS.users.map(u => u.id)).map(uid => `<option value="${uid}" ${i.itPmId === uid ? 'selected' : ''}>${uid ? nameById(LOOKUPS.users, uid) : 'None'}</option>`).join('')}</select>`)}
-          ${formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, itPicIds))}
-          ${formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, i.itManagerIds || []))}
-          ${formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => `<option value="${u.id}" ${u.id === i.businessOwnerId ? 'selected' : ''}>${u.name}</option>`).join('')}</select>`)}
+          ${formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, i.itPmId || '', 'Select...', true))}
+          ${formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, itPicIds))}
+          ${formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, i.itManagerIds || []))}
+          ${formRow('Business Owner / Requestor', createSearchableSelect('businessOwnerId', businessOwnerUsers, i.businessOwnerId || '', 'Select...'))}
           ${formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, i.businessUserIds || []))}
         </div>
         
-        ${i.type === 'CR' ? `
-          <div style="margin-top: 24px;">
-            <h3>CR Dates</h3>
-            ${formRow('CR Submission Start', `<input type="date" name="cr.crSubmissionStart" value="${i.cr?.crSubmissionStart?.slice(0,10) || ''}" />`)}
-            ${formRow('CR Submission End', `<input type="date" name="cr.crSubmissionEnd" value="${i.cr?.crSubmissionEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('Development Start', `<input type="date" name="cr.developmentStart" value="${i.cr?.developmentStart?.slice(0,10) || ''}" />`)}
-            ${formRow('Development End', `<input type="date" name="cr.developmentEnd" value="${i.cr?.developmentEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('SIT Start', `<input type="date" name="cr.sitStart" value="${i.cr?.sitStart?.slice(0,10) || ''}" />`)}
-            ${formRow('SIT End', `<input type="date" name="cr.sitEnd" value="${i.cr?.sitEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('UAT Start', `<input type="date" name="cr.uatStart" value="${i.cr?.uatStart?.slice(0,10) || ''}" />`)}
-            ${formRow('UAT End', `<input type="date" name="cr.uatEnd" value="${i.cr?.uatEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('Live Date', `<input type="date" name="cr.liveDate" value="${i.cr?.liveDate?.slice(0,10) || ''}" />`)}
-          </div>
-        ` : ''}
         <div style="margin-top: 20px; display: flex; gap: 12px;">
           <button type="button" id="cancel-edit-btn-2">Cancel</button>
           <button type="button" id="save-btn-2" class="primary">💾 Save</button>
@@ -1909,18 +2186,9 @@ async function renderView(id) {
         changedBy: currentUser?.id || 'Unknown'
       };
       
+      // CR dates removed - no longer used
       if (i.type === 'CR') {
-        payload.cr = {
-          crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-          crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
-          developmentStart: obj['cr.developmentStart'] || null,
-          developmentEnd: obj['cr.developmentEnd'] || null,
-          sitStart: obj['cr.sitStart'] || null,
-          sitEnd: obj['cr.sitEnd'] || null,
-          uatStart: obj['cr.uatStart'] || null,
-          uatEnd: obj['cr.uatEnd'] || null,
-          liveDate: obj['cr.liveDate'] || null
-        };
+        payload.cr = {};
       }
       
       try {
@@ -2133,7 +2401,16 @@ async function renderView(id) {
           const header = col.querySelector('h4');
           if (header) {
             const status = col.dataset.status;
-            header.textContent = `${status} (${count})`;
+            // Map enum value to display label
+            const statusLabels = {
+              'not started': 'Not Started',
+              'in progress': 'In Progress',
+              'at risk': 'At Risk',
+              'cancel': 'Cancelled',
+              'done': 'Done'
+            };
+            const label = statusLabels[status] || status;
+            header.textContent = `${label} (${count})`;
           }
         };
         updateColumnCount(oldColumn);
@@ -2152,14 +2429,14 @@ async function renderView(id) {
 // Download task template function
 function downloadTaskTemplate() {
   const headers = ['name', 'description', 'startDate', 'endDate', 'assigneeId', 'status', 'milestone'];
-  const exampleRow = ['Task Name', 'Task Description', '2025-01-01', '2025-01-15', '', 'Not Started', 'Preparation'];
+  const exampleRow = ['Task Name', 'Task Description', '2025-01-01', '2025-01-15', '', 'not started', 'Development'];
   
   const csvContent = [
     headers.join(','),
     exampleRow.join(','),
     'Note: assigneeId should be a user ID from the system',
-    'Status options: Not Started, On Hold, On Track, At Risk, Delayed, Live, Cancelled',
-    'Milestone options: Preparation, Business Requirement, Tech Assessment, Planning, Development, Testing, Live'
+    'Status options: not started, in progress, at risk, cancel, done',
+    'Milestone options: Business Requirement, Tech Assessment, Planning, Development, Testing, Live Preparation'
   ].join('\n');
   
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -2243,18 +2520,31 @@ function renderGanttChart(tasks, initiativeId) {
     };
   };
   
-  // Status colors
+  // Status colors - supports both new enum values and legacy values
   const statusColors = {
+    // New enum values (lowercase)
+    'not started': '#94a3b8',
+    'in progress': '#10b981',
+    'at risk': '#ef4444',
+    'cancel': '#6b7280',
+    'done': '#3b82f6',
+    // Legacy values for backward compatibility
     'Not Started': '#94a3b8',
     'On Hold': '#f59e0b',
     'On Track': '#10b981',
     'At Risk': '#ef4444',
     'Delayed': '#dc2626',
     'Live': '#3b82f6',
-    'Cancelled': '#6b7280'
+    'Cancelled': '#6b7280',
+    'In Progress': '#10b981',
+    'Done': '#3b82f6'
   };
   
-  const getStatusColor = (status) => statusColors[status] || '#94a3b8';
+  const getStatusColor = (status) => {
+    if (!status) return '#94a3b8';
+    // Try exact match first, then lowercase match
+    return statusColors[status] || statusColors[status.toLowerCase()] || '#94a3b8';
+  };
   
   // Render Gantt chart
   const rowHeight = 50;
@@ -2295,16 +2585,16 @@ function renderGanttChart(tasks, initiativeId) {
       <div style="position: relative;">
         ${tasks.map((task, idx) => {
           const assignee = nameById(LOOKUPS.users, task.assigneeId) || 'Unassigned';
-          const status = task.status || 'Not Started';
+          const status = task.status || 'not started';
           const color = getStatusColor(status);
           const pos = calculateTaskPosition(task);
           
           return `
             <div style="position: relative; height: ${rowHeight}px; border-bottom: 1px solid var(--gray-200); display: flex;">
               <!-- Sidebar -->
-              <div style="width: ${sidebarWidth}px; padding: 8px; border-right: 1px solid var(--border); background: var(--gray-50); display: flex; flex-direction: column; justify-content: center; position: sticky; left: 0; z-index: 5;">
-                <div style="font-weight: 600; font-size: 13px; margin-bottom: 2px;">${task.name}</div>
-                <div style="font-size: 11px; color: var(--muted);">
+              <div style="width: ${sidebarWidth}px; min-width: ${sidebarWidth}px; padding: 8px; border-right: 1px solid var(--border); background: var(--gray-50); display: flex; flex-direction: column; justify-content: center; position: sticky; left: 0; z-index: 5; overflow: hidden;">
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: ${sidebarWidth - 20}px;" title="${task.name}">${task.name}</div>
+                <div style="font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                   <span style="display: inline-block; width: 8px; height: 8px; background: ${color}; border-radius: 50%; margin-right: 4px;"></span>
                   ${status} • ${assignee}
                 </div>
@@ -2330,9 +2620,10 @@ function renderGanttChart(tasks, initiativeId) {
                               font-size: 11px;
                               font-weight: 500;
                               box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                              transition: transform 0.2s, box-shadow 0.2s;"
+                              transition: transform 0.2s, box-shadow 0.2s;
+                              overflow: hidden;"
                        title="${task.name} (${task.startDate ? task.startDate.slice(0,10) : 'No start'} → ${task.endDate ? task.endDate.slice(0,10) : 'No end'})">
-                    ${task.milestone ? `📍 ${task.milestone}` : task.name.length > 15 ? task.name.substring(0, 15) + '...' : task.name}
+                    <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;">${task.milestone ? `📍 ${task.milestone}` : task.name}</span>
                   </div>
                 ` : `
                   <div style="position: absolute; left: 0; top: 8px; padding: 8px; color: var(--muted); font-size: 11px; font-style: italic;">
@@ -2425,8 +2716,14 @@ async function showTaskModal(initiativeId, taskId = null) {
           <div>
             <label>Status</label>
             <select name="status" style="width: 100%;">
-              ${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => 
-                `<option value="${s}" ${(task?.status || 'Not Started') === s ? 'selected' : ''}>${s}</option>`
+              ${[
+                { value: 'not started', label: 'Not Started' },
+                { value: 'in progress', label: 'In Progress' },
+                { value: 'at risk', label: 'At Risk' },
+                { value: 'cancel', label: 'Cancelled' },
+                { value: 'done', label: 'Done' }
+              ].map(s => 
+                `<option value="${s.value}" ${(task?.status || 'not started') === s.value ? 'selected' : ''}>${s.label}</option>`
               ).join('')}
             </select>
           </div>
@@ -2435,8 +2732,15 @@ async function showTaskModal(initiativeId, taskId = null) {
           <label>Milestone</label>
           <select name="milestone" style="width: 100%;">
             <option value="">None</option>
-            ${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => 
-              `<option value="${m}" ${task?.milestone === m ? 'selected' : ''}>${m}</option>`
+            ${[
+              { value: 'Business Requirement', label: 'Business Requirement' },
+              { value: 'Tech Assessment', label: 'Tech Assessment' },
+              { value: 'Planning', label: 'Planning' },
+              { value: 'Development', label: 'Development' },
+              { value: 'Testing', label: 'Testing' },
+              { value: 'Live Preparation', label: 'Live Preparation' }
+            ].map(m => 
+              `<option value="${m.value}" ${task?.milestone === m.value ? 'selected' : ''}>${m.label}</option>`
             ).join('')}
           </select>
         </div>
@@ -2460,7 +2764,7 @@ async function showTaskModal(initiativeId, taskId = null) {
       startDate: formData.get('startDate') || null,
       endDate: formData.get('endDate') || null,
       assigneeId: formData.get('assigneeId') || null,
-      status: formData.get('status') || 'Not Started',
+      status: formData.get('status') || 'not started',
       milestone: formData.get('milestone') || null
     };
     
@@ -2494,11 +2798,16 @@ function showTaskUploadModal(initiativeId) {
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.innerHTML = `
-    <div class="modal-content" style="max-width: 600px;">
+    <div class="modal-content" style="max-width: 700px;">
       <h3>Upload Tasks (CSV)</h3>
-      <p class="muted" style="margin-bottom: 16px;">
-        Upload a CSV file with columns: name, description, startDate, endDate, assigneeId, status, milestone
+      <p class="muted" style="margin-bottom: 12px;">
+        Upload a CSV file with columns: <code>name, description, startDate, endDate, assigneeId, status, milestone</code>
       </p>
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 16px; font-size: 13px;">
+        <strong>Valid Status values:</strong> not started, in progress, at risk, cancel, done<br>
+        <strong>Valid Milestone values:</strong> Business Requirement, Tech Assessment, Planning, Development, Testing, Live Preparation<br>
+        <span class="muted" style="font-size: 12px;">Note: Values are case-insensitive. Invalid values will be normalized automatically.</span>
+      </div>
       <input type="file" id="task-file-input" accept=".csv" style="margin-bottom: 16px;">
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
         <button type="button" onclick="this.closest('.modal').remove()">Cancel</button>
@@ -2560,9 +2869,11 @@ function showTaskUploadModal(initiativeId) {
 }
 
 async function renderEdit(id) {
-  setActive('#list');
   await ensureLookups();
   const i = await fetchJSON('/api/initiatives/' + id);
+  
+  // Set active nav based on initiative type
+  setActive(i.type === 'CR' ? '#crlist' : '#list');
   
   app.innerHTML = `
     <div class="card">
@@ -2615,18 +2926,9 @@ async function renderEdit(id) {
       documentationLink: obj.documentationLink || null,
       changedBy: currentUser?.id || 'Unknown'
     };
+    // CR dates removed - no longer used
     if (i.type === 'CR') {
-      payload.cr = {
-        crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-        crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
-        developmentStart: obj['cr.developmentStart'] || null,
-        developmentEnd: obj['cr.developmentEnd'] || null,
-        sitStart: obj['cr.sitStart'] || null,
-        sitEnd: obj['cr.sitEnd'] || null,
-        uatStart: obj['cr.uatStart'] || null,
-        uatEnd: obj['cr.uatEnd'] || null,
-        liveDate: obj['cr.liveDate'] || null
-      };
+      payload.cr = {};
     }
     try {
       await fetchJSON(`/api/initiatives/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
@@ -2651,19 +2953,20 @@ async function renderCRList() {
     return;
   }
   const urlParams = new URLSearchParams(location.search);
-  const q = urlParams.get('q') || '';
+  // Use CR-specific search key to keep Project and CR searches separate
+  const q = urlParams.get('cr_q') || '';
   // Parse multi-value filters (comma-separated)
   const parseFilter = (key) => {
     const val = urlParams.get(key);
     return val ? val.split(',').filter(v => v) : [];
   };
   const filter = {
-    departmentId: parseFilter('departmentId'),
-    priority: parseFilter('priority'),
-    status: parseFilter('status'),
-    milestone: parseFilter('milestone')
+    departmentId: parseFilter('cr_departmentId'),
+    priority: parseFilter('cr_priority'),
+    status: parseFilter('cr_status'),
+    milestone: parseFilter('cr_milestone')
   };
-  const sortParam = urlParams.get('sort') || '';
+  const sortParam = urlParams.get('cr_sort') || '';
   
   // Build API query string with multi-value filters
   const apiQs = new URLSearchParams();
@@ -2762,7 +3065,6 @@ async function renderCRList() {
     { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
     { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
     { key: 'documentationLink', class: 'col-doc', label: 'CR Doc Link', sortable: true },
-    { key: 'timeline', class: 'col-timeline', label: 'CR Timeline', sortable: false },
     { key: 'actions', class: 'col-actions', label: 'Actions', sortable: false }
   ];
   
@@ -2849,37 +3151,44 @@ async function renderCRList() {
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('crlist')" title="Column Settings" class="icon-btn">⚙️</button>
-          <a href="#new"><button class="primary">+ New CR</button></a>
+          <a href="#new/CR"><button class="primary">+ New CR</button></a>
         </div>
       </div>
     </div>
-    <table id="cr-table">
-      <thead>
-        <tr>
-          ${columns.map(col => {
-            const visible = colVisibility[col.class] !== false;
-            const sortClass = col.sortable ? 'sortable' : '';
-            const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-            return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-          }).join('')}
-        </tr>
-      </thead>
-      <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
-    </table>
+    <div class="table-wrapper">
+      <table id="cr-table">
+        <thead>
+          <tr>
+            ${columns.map(col => {
+              const visible = colVisibility[col.class] !== false;
+              const sortClass = col.sortable ? 'sortable' : '';
+              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+            }).join('')}
+          </tr>
+        </thead>
+        <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
+      </table>
+    </div>
     <div id="column-settings-modal-cr" class="modal hidden">
-      <div class="modal-content">
-        <h3>Column Visibility</h3>
-        <div id="column-checkboxes-cr" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 16px 0;">
+      <div class="modal-content column-settings-modal">
+        <h3 class="modal-title">Column Visibility</h3>
+        <div class="modal-checkbox-controls">
+          <button class="btn-link" onclick="checkAllColumns('crlist')">Check All</button>
+          <span class="control-separator">|</span>
+          <button class="btn-link" onclick="uncheckAllColumns('crlist')">Uncheck All</button>
+        </div>
+        <div id="column-checkboxes-cr" class="column-checkboxes-grid">
           ${columns.filter(c => c.key !== 'actions').map(col => `
-            <label style="display: flex; align-items: center; cursor: pointer;">
-              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} style="margin-right: 8px;">
-              ${col.label}
+            <label class="column-checkbox-label">
+              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} class="column-checkbox">
+              <span class="column-checkbox-text">${col.label}</span>
             </label>
           `).join('')}
         </div>
-        <div>
-          <button class="primary" onclick="saveColumnSettings('crlist')">Save View</button>
-          <button onclick="closeColumnSettings()">Cancel</button>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="closeColumnSettings()">Cancel</button>
+          <button class="btn-primary" onclick="saveColumnSettings('crlist')">Save View</button>
         </div>
       </div>
     </div>
@@ -2913,9 +3222,9 @@ async function renderCRList() {
     const searchVal = document.getElementById('search').value;
     const url = new URL(location.href);
     
-    // Update search
-    if (searchVal) url.searchParams.set('q', searchVal);
-    else url.searchParams.delete('q');
+    // Update search with CR-specific key
+    if (searchVal) url.searchParams.set('cr_q', searchVal);
+    else url.searchParams.delete('cr_q');
     
     // Get selected values from each multi-select
     const getSelectedValues = (filterId) => {
@@ -2923,11 +3232,12 @@ async function renderCRList() {
       return Array.from(checkboxes).map(cb => cb.value);
     };
     
+    // Use CR-specific filter keys
     const filterMap = {
-      'fDepartment': 'departmentId',
-      'fPriority': 'priority',
-      'fStatus': 'status',
-      'fMilestone': 'milestone'
+      'fDepartment': 'cr_departmentId',
+      'fPriority': 'cr_priority',
+      'fStatus': 'cr_status',
+      'fMilestone': 'cr_milestone'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -2953,7 +3263,14 @@ async function renderCRList() {
       applyFiltersCR();
     }
   };
-  // Sorting
+  
+  // Auto-clear search when input is emptied (no Enter required)
+  document.getElementById('search').oninput = (e) => {
+    if (e.target.value === '') {
+      applyFiltersCR();
+    }
+  };
+  // Sorting - 3-state cycle: ascending → descending → default (no sort)
   document.querySelectorAll('thead th.sortable').forEach(th => {
     const resizer = document.createElement('span');
     resizer.className = 'col-resize';
@@ -2962,10 +3279,30 @@ async function renderCRList() {
       if (e.target === resizer) return; // ignore when resizing
       const key = th.dataset.key;
       const url = new URL(location.href);
-      const current = url.searchParams.get('sort') || '';
+      const current = url.searchParams.get('cr_sort') || '';
       const [curKey, curDir] = current.split(':');
-      const nextDir = curKey === key && curDir === 'asc' ? 'desc' : 'asc';
-      url.searchParams.set('sort', `${key}:${nextDir}`);
+      
+      // 3-state cycle: none → asc → desc → none (default)
+      let nextSort = '';
+      if (curKey !== key) {
+        // Different column clicked, start with ascending
+        nextSort = `${key}:asc`;
+      } else if (curDir === 'asc') {
+        // Same column, currently ascending → go to descending
+        nextSort = `${key}:desc`;
+      } else if (curDir === 'desc') {
+        // Same column, currently descending → remove sort (default)
+        nextSort = '';
+      } else {
+        // No current sort on this column → start ascending
+        nextSort = `${key}:asc`;
+      }
+      
+      if (nextSort) {
+        url.searchParams.set('cr_sort', nextSort);
+      } else {
+        url.searchParams.delete('cr_sort');
+      }
       history.pushState({}, '', url);
       renderCRList();
     };
@@ -3039,7 +3376,7 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
             </div>
           ` : ''}
           ${initiatives.map(i => {
-            const statusClass = (i.status || '').replace(/\s+/g, '-');
+            const statusClass = (i.status || '').toLowerCase().replace(/\s+/g, '-');
             return `
               <div class="initiative-card-modal" onclick="location.hash='#view/${i.id}'; this.closest('.modal-backdrop').remove();">
                 <div class="initiative-card-header">
@@ -3121,7 +3458,7 @@ async function renderDashboard() {
         <div style="margin-top: 16px;">
           ${data.map(item => {
             const percentage = (item[valueKey] / max) * 100;
-            const statusClass = item[labelKey]?.replace(/\s+/g, '-') || '';
+            const statusClass = item[labelKey]?.toLowerCase().replace(/\s+/g, '-') || '';
             const filterValue = item[labelKey] || '';
             const clickableStyle = clickable ? 'cursor: pointer;' : '';
             const clickableClass = clickable ? 'clickable-chart-item' : '';
@@ -3131,7 +3468,7 @@ async function renderDashboard() {
                 <div style="width: 120px; font-size: 12px; color: var(--muted);">${item[labelKey]}</div>
                 <div style="flex: 1; margin: 0 12px;">
                   <div style="background: #f1f5f9; height: 20px; border-radius: 10px; overflow: hidden;">
-                    <div style="background: ${statusClass.includes('Live') ? '#3b82f6' : statusClass.includes('At-Risk') ? '#f59e0b' : statusClass.includes('Delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
+                    <div style="background: ${statusClass.includes('live') ? '#3b82f6' : statusClass.includes('at-risk') ? '#f59e0b' : statusClass.includes('delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
                   </div>
                 </div>
                 <div style="width: 40px; text-align: right; font-weight: 600; font-size: 14px;">${item[valueKey]}</div>
@@ -3160,12 +3497,12 @@ async function renderDashboard() {
   const departmentOptions = LOOKUPS.departments.map(d => ({ value: d.id, label: d.name }));
   const itPmOptions = LOOKUPS.users
     .filter(u => {
-      // Only include active users with roles: IT Manager, IT PM, or Admin
+      // Only include active users with roles: IT Manager, IT PM, IT - PM, or Admin
       if (u.active === false) return false;
       const role = (u.role || '').toLowerCase().trim();
       const isAdmin = u.isAdmin === true || u.isAdmin === 1 || role === 'admin' || role === 'administrator';
-      // Check for IT Manager, IT PM, or Admin roles (case-insensitive)
-      return role === 'it manager' || role === 'it pm' || role === 'itpm' || isAdmin;
+      // Check for IT Manager, IT PM, IT - PM, or Admin roles (case-insensitive)
+      return role === 'it manager' || role === 'it pm' || role === 'it - pm' || role === 'itpm' || isAdmin;
     })
     .map(u => ({ value: u.id, label: u.name || u.email }))
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -3737,12 +4074,73 @@ async function renderAdminUsers() {
     await ensureLookups();
     const users = await fetchJSON('/api/admin/users');
     
+    // Get unique roles and types from users
+    const roles = [...new Set(users.map(u => u.role).filter(Boolean))].sort();
+    const types = [...new Set(users.map(u => u.type).filter(Boolean))].sort();
+    
+    // Function to render user rows
+    const renderUserRows = (filteredUsers) => {
+      return filteredUsers.map(user => `
+        <tr data-name="${(user.name || '').toLowerCase()}" data-email="${(user.email || '').toLowerCase()}" data-role="${(user.role || '').toLowerCase()}" data-type="${(user.type || '').toLowerCase()}" data-department="${user.departmentId || ''}">
+          <td>${user.name}</td>
+          <td>${user.email}</td>
+          <td>${user.role || 'N/A'}</td>
+          <td>${user.type || 'N/A'}</td>
+          <td>${nameById(LOOKUPS.departments, user.departmentId) || 'N/A'}</td>
+          <td>${user.active ? '✓' : '✗'}</td>
+          <td>${user.isAdmin ? '✓' : '✗'}</td>
+          <td>${user.emailActivated ? '✓' : '✗'}</td>
+          <td>
+            <button onclick="editUser('${user.id}')" style="margin-right: 8px;">Edit</button>
+            <button onclick="resetUserPassword('${user.id}', '${user.email}')" style="margin-right: 8px;" title="Reset Password">🔑</button>
+            ${user.id !== currentUser?.id ? `<button onclick="deleteUser('${user.id}')" style="color: var(--danger);">Delete</button>` : ''}
+          </td>
+        </tr>
+      `).join('');
+    };
+    
     app.innerHTML = `
       <div class="card">
         <h2>User Management</h2>
-        <div style="margin-bottom: 16px;">
+        
+        <!-- Search and Create Button Row -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 16px; flex-wrap: wrap;">
           <button class="primary" onclick="showCreateUserForm()">+ Create User</button>
+          <div style="position: relative; flex: 1; max-width: 400px;">
+            <input type="text" id="user-search" placeholder="Search by name or email..." style="width: 100%; padding: 10px 16px 10px 40px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; box-sizing: border-box;" />
+            <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted);">🔍</span>
+          </div>
+          <div style="color: var(--muted); font-size: 14px;">
+            Total: <strong id="user-count" style="color: var(--text);">${users.length}</strong> users
+          </div>
         </div>
+        
+        <!-- Filter Row -->
+        <div style="display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 14px; color: var(--muted); white-space: nowrap;">Role:</label>
+            <select id="filter-role" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 140px;">
+              <option value="">All Roles</option>
+              ${roles.map(r => `<option value="${r.toLowerCase()}">${r}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 14px; color: var(--muted); white-space: nowrap;">Type:</label>
+            <select id="filter-type" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 140px;">
+              <option value="">All Types</option>
+              ${types.map(t => `<option value="${t.toLowerCase()}">${t}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 14px; color: var(--muted); white-space: nowrap;">Department:</label>
+            <select id="filter-department" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 160px;">
+              <option value="">All Departments</option>
+              ${LOOKUPS.departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
+            </select>
+          </div>
+          <button id="clear-filters-btn" style="padding: 8px 16px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: var(--surface); cursor: pointer; display: none;">Clear Filters</button>
+        </div>
+        
         <table>
           <thead>
             <tr>
@@ -3757,24 +4155,8 @@ async function renderAdminUsers() {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody>
-            ${users.map(user => `
-              <tr>
-                <td>${user.name}</td>
-                <td>${user.email}</td>
-                <td>${user.role || 'N/A'}</td>
-                <td>${user.type || 'N/A'}</td>
-                <td>${nameById(LOOKUPS.departments, user.departmentId) || 'N/A'}</td>
-                <td>${user.active ? '✓' : '✗'}</td>
-                <td>${user.isAdmin ? '✓' : '✗'}</td>
-                <td>${user.emailActivated ? '✓' : '✗'}</td>
-                <td>
-                  <button onclick="editUser('${user.id}')" style="margin-right: 8px;">Edit</button>
-                  <button onclick="resetUserPassword('${user.id}', '${user.email}')" style="margin-right: 8px;" title="Reset Password">🔑</button>
-                  ${user.id !== currentUser?.id ? `<button onclick="deleteUser('${user.id}')" style="color: var(--danger);">Delete</button>` : ''}
-                </td>
-              </tr>
-            `).join('')}
+          <tbody id="users-tbody">
+            ${renderUserRows(users)}
           </tbody>
         </table>
       </div>
@@ -3802,6 +4184,7 @@ async function renderAdminUsers() {
               <select name="role">
                 <option value="">None</option>
                 <option value="IT">IT</option>
+                <option value="IT - PM">IT - PM</option>
                 <option value="Business User">Business User</option>
                 <option value="Admin">Admin</option>
               </select>
@@ -3821,29 +4204,85 @@ async function renderAdminUsers() {
                 ${LOOKUPS.departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
               </select>
             </div>
-            <div class="form-row">
-              <label>
-                <input type="checkbox" name="active" checked /> Active
-              </label>
+            <div class="form-row" style="flex-direction: row; align-items: center; gap: 8px;">
+              <label style="margin: 0;">Active</label>
+              <input type="checkbox" name="active" checked style="width: auto; margin: 0;" />
             </div>
-            <div class="form-row">
-              <label>
-                <input type="checkbox" name="isAdmin" /> Admin
-              </label>
+            <div class="form-row" style="flex-direction: row; align-items: center; gap: 8px;">
+              <label style="margin: 0;">Admin</label>
+              <input type="checkbox" name="isAdmin" style="width: auto; margin: 0;" />
             </div>
-            <div class="form-row">
-              <label>
-                <input type="checkbox" name="emailActivated" checked /> Email Activated
-              </label>
+            <div class="form-row" style="flex-direction: row; align-items: center; gap: 8px;">
+              <label style="margin: 0;">Email Activated</label>
+              <input type="checkbox" name="emailActivated" checked style="width: auto; margin: 0;" />
             </div>
-            <div>
-              <button type="submit" class="primary">Save</button>
-              <button type="button" onclick="closeUserForm()">Cancel</button>
+            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 16px;">
+              <button type="button" onclick="closeUserForm()" style="padding: 8px 24px; font-size: 14px; line-height: 1; margin: 0;">Cancel</button>
+              <button type="submit" style="padding: 8px 24px; font-size: 14px; line-height: 1; margin: 0; background: var(--color-primary-default); color: white; border-color: var(--color-primary-default);">Save</button>
             </div>
           </form>
         </div>
       </div>
     `;
+    
+    // Search and Filter functionality
+    const searchInput = document.getElementById('user-search');
+    const filterRole = document.getElementById('filter-role');
+    const filterType = document.getElementById('filter-type');
+    const filterDepartment = document.getElementById('filter-department');
+    const clearFiltersBtn = document.getElementById('clear-filters-btn');
+    const usersTbody = document.getElementById('users-tbody');
+    const userCount = document.getElementById('user-count');
+    
+    const applyFilters = () => {
+      const searchTerm = searchInput.value.toLowerCase().trim();
+      const roleFilter = filterRole.value.toLowerCase();
+      const typeFilter = filterType.value.toLowerCase();
+      const deptFilter = filterDepartment.value;
+      
+      const rows = usersTbody.querySelectorAll('tr');
+      let visibleCount = 0;
+      
+      rows.forEach(row => {
+        const name = row.dataset.name || '';
+        const email = row.dataset.email || '';
+        const role = row.dataset.role || '';
+        const type = row.dataset.type || '';
+        const dept = row.dataset.department || '';
+        
+        // Check search match
+        const searchMatch = !searchTerm || name.includes(searchTerm) || email.includes(searchTerm);
+        
+        // Check filter matches
+        const roleMatch = !roleFilter || role === roleFilter;
+        const typeMatch = !typeFilter || type === typeFilter;
+        const deptMatch = !deptFilter || dept === deptFilter;
+        
+        const matches = searchMatch && roleMatch && typeMatch && deptMatch;
+        row.style.display = matches ? '' : 'none';
+        if (matches) visibleCount++;
+      });
+      
+      userCount.textContent = visibleCount;
+      
+      // Show/hide clear filters button
+      const hasFilters = searchTerm || roleFilter || typeFilter || deptFilter;
+      clearFiltersBtn.style.display = hasFilters ? 'block' : 'none';
+    };
+    
+    // Add event listeners
+    searchInput.addEventListener('input', applyFilters);
+    filterRole.addEventListener('change', applyFilters);
+    filterType.addEventListener('change', applyFilters);
+    filterDepartment.addEventListener('change', applyFilters);
+    
+    clearFiltersBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      filterRole.value = '';
+      filterType.value = '';
+      filterDepartment.value = '';
+      applyFilters();
+    });
     
     window.showCreateUserForm = () => {
       document.getElementById('user-form-title').textContent = 'Create User';
@@ -3981,7 +4420,7 @@ async function renderAdminRoles() {
     });
     
     // Sort roles by predefined order, then by user count (descending)
-    const predefinedRoleOrder = ['Admin', 'SeniorManagement', 'PMO', 'IT Manager', 'IT PM', 'ITPIC', 'BusinessOwner', 'User'];
+    const predefinedRoleOrder = ['Admin', 'SeniorManagement', 'PMO', 'IT Manager', 'IT PM', 'IT - PM', 'ITPIC', 'BusinessOwner', 'User'];
     const sortedRoles = Object.entries(usersByRole).sort(([roleA, usersA], [roleB, usersB]) => {
       const indexA = predefinedRoleOrder.indexOf(roleA);
       const indexB = predefinedRoleOrder.indexOf(roleB);
@@ -4077,7 +4516,7 @@ async function renderCRDashboard() {
         <div style="margin-top: 16px;">
           ${data.map(item => {
             const percentage = ((item[valueKey] || 0) / max) * 100;
-            const statusClass = item[labelKey]?.replace(/\s+/g, '-') || '';
+            const statusClass = item[labelKey]?.toLowerCase().replace(/\s+/g, '-') || '';
             const filterValue = item[labelKey] || '';
             const clickableStyle = clickable ? 'cursor: pointer;' : '';
             const clickableClass = clickable ? 'clickable-chart-item' : '';
@@ -4087,7 +4526,7 @@ async function renderCRDashboard() {
                 <div style="width: 120px; font-size: 12px; color: var(--muted);">${item[labelKey] || 'N/A'}</div>
                 <div style="flex: 1; margin: 0 12px;">
                   <div style="background: #f1f5f9; height: 20px; border-radius: 10px; overflow: hidden;">
-                    <div style="background: ${statusClass.includes('Live') ? '#3b82f6' : statusClass.includes('At-Risk') ? '#f59e0b' : statusClass.includes('Delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
+                    <div style="background: ${statusClass.includes('live') ? '#3b82f6' : statusClass.includes('at-risk') ? '#f59e0b' : statusClass.includes('delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
                   </div>
                 </div>
                 <div style="width: 40px; text-align: right; font-weight: 600; font-size: 14px;">${item[valueKey] || 0}</div>
@@ -4116,10 +4555,12 @@ async function renderCRDashboard() {
   const departmentOptions = LOOKUPS.departments.map(d => ({ value: d.id, label: d.name }));
   const itManagerOptions = LOOKUPS.users
     .filter(u => {
-      // Only include active users with role: IT Manager
+      // Only include active users with (Role: IT AND Type: Manager) OR Admin
       if (u.active === false) return false;
       const role = (u.role || '').toLowerCase().trim();
-      return role === 'it manager';
+      const type = (u.type || '').toLowerCase().trim();
+      const isAdmin = u.isAdmin === true || u.isAdmin === 1 || role === 'admin' || role === 'administrator';
+      return isAdmin || (role === 'it' && type === 'manager');
     })
     .map(u => ({ value: u.id, label: u.name || u.email }))
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -4628,7 +5069,11 @@ async function router() {
     if (h.startsWith('#admin-users')) return renderAdminUsers();
     if (h.startsWith('#admin-roles')) return renderAdminRoles();
     if (h.startsWith('#profile')) return renderProfile();
-    if (h.startsWith('#new')) return renderNew();
+    if (h.startsWith('#new')) {
+      const parts = h.split('/');
+      const defaultType = parts[1] || 'Project'; // Default to Project if no type specified
+      return renderNew(defaultType);
+    }
     if (h.startsWith('#edit/')) return renderEdit(h.split('/')[1]);
     if (h.startsWith('#view/')) return renderView(h.split('/')[1]);
     if (h.startsWith('#crdashboard')) return renderCRDashboard();

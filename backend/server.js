@@ -56,6 +56,27 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  console.error('Error message:', err.message);
+  console.error('Error stack:', err.stack);
+  if (!res.headersSent) {
+    const errorDetails = process.env.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production'
+      ? { message: err.message, stack: err.stack }
+      : undefined;
+    res.status(500).json({
+      error: 'Internal server error',
+      ...(errorDetails && { details: errorDetails })
+    });
+  }
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 // Note: Frontend SPA routing is now handled by the frontend container (nginx)
 // This backend only serves API endpoints and /docs static assets
 

@@ -7,6 +7,16 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>Project & CR Management v2.0</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=20260112" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=20260112" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260112" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png?v=20260112" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/android-chrome-512x512.png?v=20260112" />
+    <link rel="manifest" href="/site.webmanifest?v=20260112" />
+    <link rel="shortcut icon" href="/favicon.ico?v=20260112" />
+    
     <link rel="stylesheet" href="/styles.css?v=20251226151700" />
   </head>
   <body>
@@ -16,36 +26,40 @@
         <img src="/docs/KPN Corp .png" alt="KPN Corp" class="company-logo" onerror="this.style.display='none'">
       </div>
       <nav>
-        <a href="#user-dashboard" id="nav-user-dashboard" class="protected-link hidden">🏠 Dashboard</a>
-        <a href="#list" id="nav-list" class="protected-link hidden">📋 Project List</a>
-        <a href="#crlist" id="nav-crlist" class="protected-link hidden">📝 CR List</a>
-        <a href="#dashboard" id="nav-dashboard" class="protected-link hidden">📊 Project Dashboard</a>
-        <a href="#crdashboard" id="nav-crdashboard" class="protected-link hidden">📈 CR Dashboard</a>
-        <a href="#admin-users" id="nav-admin-users" class="admin-link hidden">👥 Users</a>
-        <a href="#admin-roles" id="nav-admin-roles" class="admin-link hidden">🔐 Roles</a>
-        <div id="nav-notifications" class="notifications-menu hidden">
-          <button id="notifications-btn" class="notifications-btn" title="Notifications">
-            🔔
-            <span id="notifications-badge" class="notifications-badge hidden">0</span>
-          </button>
-          <div id="notifications-dropdown" class="notifications-dropdown hidden">
-            <div class="notifications-header">
-              <h3>Notifications</h3>
-              <button id="mark-all-read-btn" class="mark-all-read-btn">Mark all as read</button>
-            </div>
-            <div id="notifications-list" class="notifications-list">
-              <p class="muted" style="text-align: center; padding: 20px;">Loading notifications...</p>
+        <div class="nav-left">
+          <a href="#user-dashboard" id="nav-user-dashboard" class="protected-link hidden">🏠 Dashboard</a>
+          <a href="#list" id="nav-list" class="protected-link hidden">📋 Project List</a>
+          <a href="#crlist" id="nav-crlist" class="protected-link hidden">📝 CR List</a>
+          <a href="#dashboard" id="nav-dashboard" class="protected-link hidden">📊 Project Dashboard</a>
+          <a href="#crdashboard" id="nav-crdashboard" class="protected-link hidden">📈 CR Dashboard</a>
+          <a href="#admin-users" id="nav-admin-users" class="admin-link hidden">👥 Users</a>
+          <a href="#admin-roles" id="nav-admin-roles" class="admin-link hidden">🔐 Roles</a>
+        </div>
+        <div class="nav-right">
+          <div id="nav-notifications" class="notifications-menu hidden">
+            <button id="notifications-btn" class="notifications-btn" title="Notifications">
+              🔔
+              <span id="notifications-badge" class="notifications-badge hidden">0</span>
+            </button>
+            <div id="notifications-dropdown" class="notifications-dropdown hidden">
+              <div class="notifications-header">
+                <h3>Notifications</h3>
+                <button id="mark-all-read-btn" class="mark-all-read-btn">Mark all as read</button>
+              </div>
+              <div id="notifications-list" class="notifications-list">
+                <p class="muted" style="text-align: center; padding: 20px;">Loading notifications...</p>
+              </div>
             </div>
           </div>
-        </div>
-        <div id="nav-profile-menu" class="profile-menu hidden">
-          <button id="profile-menu-btn" class="profile-menu-btn">👤 <span id="profile-menu-name"></span> ▼</button>
-          <div id="profile-dropdown" class="profile-dropdown hidden">
-            <a href="#profile">📝 My Profile</a>
-            <a href="#" onclick="logout(); return false;">🚪 Logout</a>
+          <div id="nav-profile-menu" class="profile-menu hidden">
+            <button id="profile-menu-btn" class="profile-menu-btn">👤 <span id="profile-menu-name"></span> ▼</button>
+            <div id="profile-dropdown" class="profile-dropdown hidden">
+              <a href="#profile">📝 My Profile</a>
+              <a href="#" onclick="logout(); return false;">🚪 Logout</a>
+            </div>
           </div>
+          <a href="#auth" id="nav-auth" class="auth-link">🔐 Login</a>
         </div>
-        <a href="#auth" id="nav-auth" class="auth-link">🔐 Login</a>
       </nav>
     </header>
     <main id="app"></main>
