@@ -72,7 +72,10 @@ function getDefaultColumns(viewType) {
       'col-department': true,
       'col-owner': true,
       'col-pic': true,
-      'col-date': true,
+      'col-start-date': true,
+      'col-create-date': true,
+      'col-end-date': true,
+      'col-description': false,
       'col-impact': true,
       'col-remark': true,
       'col-doc': true,
@@ -88,7 +91,10 @@ function getDefaultColumns(viewType) {
     'col-department': true,
     'col-owner': true,
     'col-pic': true,
-    'col-date': true,
+    'col-start-date': true,
+    'col-create-date': true,
+    'col-end-date': true,
+    'col-description': false,
     'col-impact': true,
     'col-remark': true,
     'col-doc': true,
@@ -525,9 +531,10 @@ function initiativeRow(i, crData = null, colVisibility = null) {
     <td class="col-department" style="display: ${colVisibility['col-department'] !== false ? 'table-cell' : 'none'}">${dep}</td>
     <td class="col-owner" style="display: ${colVisibility['col-owner'] !== false ? 'table-cell' : 'none'}">${bo}</td>
     <td class="col-pic" style="display: ${colVisibility['col-pic'] !== false ? 'table-cell' : 'none'}">${itpic}</td>
-    <td class="col-date" style="display: ${colVisibility['col-date'] !== false ? 'table-cell' : 'none'}">${i.startDate?.slice(0,10) || ''}</td>
-    <td class="col-date" style="display: ${colVisibility['col-date'] !== false ? 'table-cell' : 'none'}">${i.createdAt?.slice(0,10) || ''}</td>
-    <td class="col-date" style="display: ${colVisibility['col-date'] !== false ? 'table-cell' : 'none'}">${i.endDate?.slice(0,10) || ''}</td>
+    <td class="col-start-date" style="display: ${colVisibility['col-start-date'] !== false ? 'table-cell' : 'none'}">${i.startDate?.slice(0,10) || ''}</td>
+    <td class="col-create-date" style="display: ${colVisibility['col-create-date'] !== false ? 'table-cell' : 'none'}">${i.createdAt?.slice(0,10) || ''}</td>
+    <td class="col-end-date" style="display: ${colVisibility['col-end-date'] !== false ? 'table-cell' : 'none'}">${i.endDate?.slice(0,10) || ''}</td>
+    <td class="col-description" style="display: ${colVisibility['col-description'] !== false ? 'table-cell' : 'none'}" title="${i.description || ''}">${(i.description || '').toString().slice(0,60)}${(i.description || '').length > 60 ? '...' : ''}</td>
     <td class="col-impact" style="display: ${colVisibility['col-impact'] !== false ? 'table-cell' : 'none'}" title="${i.businessImpact || ''}">${(i.businessImpact || '').toString().slice(0,100)}${(i.businessImpact || '').length > 100 ? '...' : ''}</td>
     <td class="col-remark" style="display: ${colVisibility['col-remark'] !== false ? 'table-cell' : 'none'}" title="${i.remark || ''}">${(i.remark || '').toString().slice(0,60)}${(i.remark || '').length > 60 ? '...' : ''}</td>
     <td class="col-doc" style="display: ${colVisibility['col-doc'] !== false ? 'table-cell' : 'none'}" title="${doc}">${doc.slice(0, 40)}${doc.length > 40 ? '...' : ''}</td>
@@ -594,11 +601,29 @@ async function renderList() {
     const val = urlParams.get(key);
     return val ? val.split(',').filter(v => v) : [];
   };
+  
+  // Parse date filters (format: operator:date, e.g., "gte:2024-01-01")
+  const parseDateFilter = (key) => {
+    const val = urlParams.get(key);
+    if (!val) return null;
+    const parts = val.split(':');
+    if (parts.length === 2) {
+      return { operator: parts[0], date: parts[1] };
+    }
+    return null;
+  };
+  
   const filter = {
     departmentId: parseFilter('project_departmentId'),
     priority: parseFilter('project_priority'),
     status: parseFilter('project_status'),
-    milestone: parseFilter('project_milestone')
+    milestone: parseFilter('project_milestone'),
+    itPicId: parseFilter('project_itPicId'),
+    itPmId: parseFilter('project_itPmId'),
+    itManagerId: parseFilter('project_itManagerId'),
+    createdAt: parseDateFilter('project_createdAt'),
+    startDate: parseDateFilter('project_startDate'),
+    endDate: parseDateFilter('project_endDate')
   };
   const sortParam = urlParams.get('project_sort') || '';
   
@@ -610,6 +635,8 @@ async function renderList() {
   if (filter.priority.length) apiQs.set('priority', filter.priority.join(','));
   if (filter.status.length) apiQs.set('status', filter.status.join(','));
   if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
+  if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
+  if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
   
   console.log('Fetching data from API...');
   let data;
@@ -651,6 +678,89 @@ async function renderList() {
       milestoneCounts[i.milestone]++;
     }
   });
+  // Apply client-side filtering for date filters
+  if (filter.createdAt) {
+    const filterDate = new Date(filter.createdAt.date);
+    data = data.filter(i => {
+      if (!i.createdAt) return false;
+      const itemDate = new Date(i.createdAt);
+      if (filter.createdAt.operator === 'eq') {
+        return itemDate.toDateString() === filterDate.toDateString();
+      } else if (filter.createdAt.operator === 'gte') {
+        return itemDate >= filterDate;
+      } else if (filter.createdAt.operator === 'lte') {
+        return itemDate <= filterDate;
+      }
+      return true;
+    });
+  }
+  if (filter.startDate) {
+    const filterDate = new Date(filter.startDate.date);
+    data = data.filter(i => {
+      if (!i.startDate) return false;
+      const itemDate = new Date(i.startDate);
+      if (filter.startDate.operator === 'eq') {
+        return itemDate.toDateString() === filterDate.toDateString();
+      } else if (filter.startDate.operator === 'gte') {
+        return itemDate >= filterDate;
+      } else if (filter.startDate.operator === 'lte') {
+        return itemDate <= filterDate;
+      }
+      return true;
+    });
+  }
+  if (filter.endDate) {
+    const filterDate = new Date(filter.endDate.date);
+    data = data.filter(i => {
+      if (!i.endDate) return false;
+      const itemDate = new Date(i.endDate);
+      if (filter.endDate.operator === 'eq') {
+        return itemDate.toDateString() === filterDate.toDateString();
+      } else if (filter.endDate.operator === 'gte') {
+        return itemDate >= filterDate;
+      } else if (filter.endDate.operator === 'lte') {
+        return itemDate <= filterDate;
+      }
+      return true;
+    });
+  }
+
+  // Apply client-side filtering for IT Manager (initiative has itManagerIds)
+  if (filter.itManagerId.length > 0) {
+    data = data.filter(i => {
+      const raw = i.itManagerIds || i.itManagerId || [];
+      const ids = Array.isArray(raw)
+        ? raw
+        : String(raw).split(',').map(v => v.trim()).filter(Boolean);
+      return filter.itManagerId.some(sel => ids.includes(sel));
+    });
+  }
+
+  // Build user subsets for filters (role/type based)
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const roleNorm = (u) => norm(u?.role).replace(/\s+/g, '');
+  const typeNorm = (u) => norm(u?.type).replace(/\s+/g, '');
+
+  const isITRole = (u) => roleNorm(u) === 'it';
+  const isManagerType = (u) => typeNorm(u) === 'manager';
+
+  // 1) IT Manager: ROLE = IT and TYPE = Manager
+  const itManagerFilterUsers = (LOOKUPS.users || []).filter(u => isITRole(u) && isManagerType(u));
+
+  // 2) IT PIC: ROLE = IT
+  const itPicFilterUsers = (LOOKUPS.users || []).filter(u => isITRole(u));
+
+  // 3) IT PM: (ROLE = IT and TYPE = Manager) OR ROLE = Admin OR ROLE = IT - PM
+  const itPmFilterUsers = (LOOKUPS.users || []).filter(u => {
+    const r = roleNorm(u);
+    const rRaw = norm(u?.role);
+    if (r === 'admin') return true;
+    if (r === 'itpm') return true;
+    if (rRaw === 'it - pm' || rRaw === 'it pm' || rRaw === 'it-pm') return true;
+    if (isITRole(u) && isManagerType(u)) return true;
+    return false;
+  });
+  
   console.log('Data fetched, count:', data.length);
   console.log('Sample data item:', data[0]);
   if (sortParam) {
@@ -690,9 +800,10 @@ async function renderList() {
     { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
     { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
     { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
-    { key: 'startDate', class: 'col-date', label: 'Start Date', sortable: true },
-    { key: 'createdAt', class: 'col-date', label: 'Create Date', sortable: true },
-    { key: 'endDate', class: 'col-date', label: 'End Date', sortable: true },
+    { key: 'startDate', class: 'col-start-date', label: 'Start Date', sortable: true },
+    { key: 'createdAt', class: 'col-create-date', label: 'Create Date', sortable: true },
+    { key: 'endDate', class: 'col-end-date', label: 'End Date', sortable: true },
+    { key: 'description', class: 'col-description', label: 'Description', sortable: true },
     { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
     { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
     { key: 'documentationLink', class: 'col-doc', label: 'Project Doc Link', sortable: true },
@@ -792,7 +903,6 @@ async function renderList() {
       <div class="toolbar-row">
         <div class="search-group">
           <input id="search" placeholder="Search by name, ticket..." value="${q}">
-          <button id="doSearch">Search</button>
         </div>
         <div class="filter-group">
           <div class="multi-select-wrapper">
@@ -847,9 +957,96 @@ async function renderList() {
               `).join('')}
             </div>
           </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItPic">
+              IT PIC ${filter.itPicId.length > 0 ? `(${filter.itPicId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItPic">
+              ${itPicFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itPicId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItPm">
+              IT PM ${filter.itPmId.length > 0 ? `(${filter.itPmId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItPm">
+              ${itPmFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itPmId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItManager">
+              IT Manager ${filter.itManagerId.length > 0 ? `(${filter.itManagerId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItManager">
+              ${itManagerFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itManagerId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        <div class="date-filters-group" id="date-filters">
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fCreateDate">
+              <span class="filter-label">Create Date</span> ${filter.createdAt ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fCreateDate">
+              <div class="date-filter-content">
+                <select id="createDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.createdAt?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.createdAt?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.createdAt?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="createDate-value" value="${filter.createdAt?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fStartDate">
+              <span class="filter-label">Start Date</span> ${filter.startDate ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fStartDate">
+              <div class="date-filter-content">
+                <select id="startDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.startDate?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.startDate?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.startDate?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="startDate-value" value="${filter.startDate?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fEndDate">
+              <span class="filter-label">End Date</span> ${filter.endDate ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fEndDate">
+              <div class="date-filter-content">
+                <select id="endDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.endDate?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.endDate?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.endDate?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="endDate-value" value="${filter.endDate?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('list')" title="Column Settings" class="icon-btn">⚙️</button>
+          <button id="apply-filters-btn" class="primary" onclick="applyFilters()">Apply Filters</button>
           <a href="#new/Project"><button class="primary">+ New Initiative</button></a>
         </div>
       </div>
@@ -895,16 +1092,18 @@ async function renderList() {
 
   // Initialize horizontal scroll affordance for the main initiatives table.
   initScrollableTables();
-  // Multi-select dropdown handlers
+  
+  // Multi-select dropdown handlers (for checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
       e.stopPropagation();
       const filterId = btn.dataset.filter;
       const dropdown = document.getElementById(`dropdown-${filterId}`);
+      if (!dropdown) return;
       const isOpen = dropdown.classList.contains('open');
       
       // Close all dropdowns
-      document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
       
       // Toggle current dropdown
       if (!isOpen) {
@@ -913,21 +1112,44 @@ async function renderList() {
     };
   });
   
-  // Close dropdowns when clicking outside
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.multi-select-wrapper')) {
-      document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
-    }
-  });
-  
-  // Checkbox change handlers
-  document.querySelectorAll('.multi-select-option input[type="checkbox"]').forEach(cb => {
-    cb.onchange = () => {
-      applyFilters();
+  // Date filter dropdown handlers
+  document.querySelectorAll('.date-filter-wrapper .multi-select-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const filterId = btn.dataset.filter;
+      const dropdown = document.getElementById(`dropdown-${filterId}`);
+      if (!dropdown) return;
+      const isOpen = dropdown.classList.contains('open');
+      
+      // Close all dropdowns
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+      
+      // Toggle current dropdown
+      if (!isOpen) {
+        dropdown.classList.add('open');
+        document.body.classList.add('dropdown-open');
+      }
     };
   });
   
-  function applyFilters() {
+  // Close dropdowns when clicking outside or on overlay
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.multi-select-wrapper') && !e.target.closest('.date-filter-wrapper') && !e.target.closest('.multi-select-dropdown') && !e.target.closest('.date-filter-dropdown')) {
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+    }
+  });
+  
+  // Close dropdowns on escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+    }
+  });
+  
+  window.applyFilters = function() {
     const searchVal = document.getElementById('search').value;
     const url = new URL(location.href);
     
@@ -946,7 +1168,10 @@ async function renderList() {
       'fDepartment': 'project_departmentId',
       'fPriority': 'project_priority',
       'fStatus': 'project_status',
-      'fMilestone': 'project_milestone'
+      'fMilestone': 'project_milestone',
+      'fItPic': 'project_itPicId',
+      'fItPm': 'project_itPmId',
+      'fItManager': 'project_itManagerId'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -958,27 +1183,55 @@ async function renderList() {
       }
     });
     
+    // Handle date filters
+    const createDateOp = document.getElementById('createDate-operator')?.value;
+    const createDateVal = document.getElementById('createDate-value')?.value;
+    if (createDateOp && createDateVal) {
+      url.searchParams.set('project_createdAt', `${createDateOp}:${createDateVal}`);
+    } else {
+      url.searchParams.delete('project_createdAt');
+    }
+    
+    const startDateOp = document.getElementById('startDate-operator')?.value;
+    const startDateVal = document.getElementById('startDate-value')?.value;
+    if (startDateOp && startDateVal) {
+      url.searchParams.set('project_startDate', `${startDateOp}:${startDateVal}`);
+    } else {
+      url.searchParams.delete('project_startDate');
+    }
+    
+    const endDateOp = document.getElementById('endDate-operator')?.value;
+    const endDateVal = document.getElementById('endDate-value')?.value;
+    if (endDateOp && endDateVal) {
+      url.searchParams.set('project_endDate', `${endDateOp}:${endDateVal}`);
+    } else {
+      url.searchParams.delete('project_endDate');
+    }
+    
     history.pushState({}, '', url);
     renderList();
+  };
+  
+  // Search auto-apply while typing (debounced)
+  let searchDebounceTimer = null;
+  const searchEl = document.getElementById('search');
+  if (searchEl) {
+    searchEl.addEventListener('input', () => {
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        // Auto-apply search changes; other filters still require Apply Filters button.
+        window.applyFilters();
+      }, 350);
+    });
+
+    // Enter key forces immediate apply
+    searchEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+        window.applyFilters();
+      }
+    });
   }
-  
-  document.getElementById('doSearch').onclick = () => {
-    applyFilters();
-  };
-  
-  // Enter key on search input
-  document.getElementById('search').onkeypress = (e) => {
-    if (e.key === 'Enter') {
-      applyFilters();
-    }
-  };
-  
-  // Auto-clear search when input is emptied (no Enter required)
-  document.getElementById('search').oninput = (e) => {
-    if (e.target.value === '') {
-      applyFilters();
-    }
-  };
   // Column settings functions
   window.showColumnSettings = (viewType) => {
     const modalId = viewType === 'crlist' ? 'column-settings-modal-cr' : 'column-settings-modal';
@@ -1482,6 +1735,38 @@ async function renderView(id) {
   } catch (e) {
     console.error('Error fetching comments/tasks:', e);
   }
+  
+  // Sort tasks by Milestone and Start Date (Ascending)
+  // Milestone order: None -> Business Requirement -> Tech Assessment -> Planning -> Development -> Testing -> Live Preparation
+  const milestoneOrder = {
+    '': 0,
+    'none': 0,
+    'business requirement': 1,
+    'tech assessment': 2,
+    'planning': 3,
+    'development': 4,
+    'testing': 5,
+    'live preparation': 6,
+    'live': 6,
+    'preparation': 0
+  };
+  
+  tasks.sort((a, b) => {
+    // First sort by milestone
+    const aMilestone = (a.milestone || '').toLowerCase();
+    const bMilestone = (b.milestone || '').toLowerCase();
+    const aMilestoneOrder = milestoneOrder[aMilestone] !== undefined ? milestoneOrder[aMilestone] : 999;
+    const bMilestoneOrder = milestoneOrder[bMilestone] !== undefined ? milestoneOrder[bMilestone] : 999;
+    
+    if (aMilestoneOrder !== bMilestoneOrder) {
+      return aMilestoneOrder - bMilestoneOrder;
+    }
+    
+    // Then sort by Start Date (Ascending)
+    const aStartDate = a.startDate ? new Date(a.startDate) : new Date('9999-12-31'); // Put tasks without dates at the end
+    const bStartDate = b.startDate ? new Date(b.startDate) : new Date('9999-12-31');
+    return aStartDate - bStartDate;
+  });
 
   // Calculate % Completion based on task statuses (fallback to initiative status when no tasks)
   const statusToPercent = {
@@ -1513,10 +1798,45 @@ async function renderView(id) {
     return getPercentForStatus(i.status || 'Not Started');
   })();
   
-  // Calculate aging
-  const createDate = new Date(i.createdAt || i.startDate);
+  // Calculate aging metrics
+  const createDate = i.createdAt ? new Date(i.createdAt) : null;
+  const startDate = i.startDate ? new Date(i.startDate) : null;
+  const endDate = i.endDate ? new Date(i.endDate) : null;
+  
+  // Age Created to Start: Calculate from Create Date to Start Date
+  let ageCreatedToStart = null;
+  if (createDate && startDate) {
+    ageCreatedToStart = Math.floor((startDate - createDate) / (1000 * 60 * 60 * 24));
+  }
+  
+  // Cycle Time (Age Start to End): Calculate from Start Date to End Date (or Current Date if End Date is empty)
+  let cycleTime = null;
+  if (startDate) {
+    if (endDate) {
+      // If End Date exists, calculate from Start Date to End Date
+      cycleTime = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+    } else {
+      // If End Date is empty, calculate from Start Date to Current Date
+      const now = new Date();
+      cycleTime = Math.floor((now - startDate) / (1000 * 60 * 60 * 24));
+    }
+  }
+  
+  // Total Age: Age Created to Start + Cycle Time
+  let totalAge = null;
+  if (ageCreatedToStart !== null && cycleTime !== null) {
+    totalAge = ageCreatedToStart + cycleTime;
+  } else if (ageCreatedToStart !== null) {
+    // If cycle time not available (no start date), just show age created to start
+    totalAge = ageCreatedToStart;
+  } else if (cycleTime !== null) {
+    // If only cycle time is available (no create date), show cycle time
+    totalAge = cycleTime;
+  }
+  
+  // Keep daysSinceCreated for backward compatibility (used in dashboard)
   const now = new Date();
-  const daysSinceCreated = Math.floor((now - createDate) / (1000 * 60 * 60 * 24));
+  const daysSinceCreated = createDate ? Math.floor((now - createDate) / (1000 * 60 * 60 * 24)) : 0;
   
   // Helper to format activity log field labels
   const formatActivityFieldLabel = (field) => {
@@ -1630,7 +1950,9 @@ async function renderView(id) {
         <div><div class="muted">Department</div><div>${depName}</div></div>
         <div><div class="muted">Start Date</div><div>${i.startDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">End Date</div><div>${i.endDate?.slice(0,10) || ''}</div></div>
-        <div><div class="muted">Age Since Created</div><div><strong>${daysSinceCreated} days</strong></div></div>
+        <div><div class="muted">Age Created to Start</div><div><strong>${ageCreatedToStart !== null ? ageCreatedToStart + ' days' : 'N/A'}</strong></div></div>
+        <div><div class="muted">Cycle Time (Age Start to End)</div><div><strong>${cycleTime !== null ? cycleTime + ' days' : 'N/A'}</strong></div></div>
+        <div><div class="muted">Total Age</div><div><strong>${totalAge !== null ? totalAge + ' days' : 'N/A'}</strong></div></div>
         <div style="grid-column: 1 / -1"><div class="muted">Description</div><div style="white-space: pre-wrap; line-height: 1.6;">${i.description || ''}</div></div>
         <div style="grid-column: 1 / -1"><div class="muted">Business Impact</div><div style="white-space: pre-wrap; line-height: 1.6;">${i.businessImpact || ''}</div></div>
         <div style="grid-column: 1 / -1"><div class="muted">Remark</div><div style="white-space: pre-wrap; line-height: 1.6;">${i.remark || ''}</div></div>
@@ -1846,15 +2168,15 @@ async function renderView(id) {
       
       <!-- Task Kanban View -->
       <div id="tasks-kanban-view" class="task-view hidden">
-        <div class="kanban-board" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+        <div class="kanban-board" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; overflow-x: auto;">
           ${(() => {
-            // Task status enums with display labels
+            // Task status enums with display labels - ordered: Not Started -> In Progress -> Done -> At Risk -> Cancelled
             const KANBAN_STATUSES = [
               { value: 'not started', label: 'Not Started' },
               { value: 'in progress', label: 'In Progress' },
+              { value: 'done', label: 'Done' },
               { value: 'at risk', label: 'At Risk' },
-              { value: 'cancel', label: 'Cancelled' },
-              { value: 'done', label: 'Done' }
+              { value: 'cancel', label: 'Cancelled' }
             ];
             return KANBAN_STATUSES.map(({ value: status, label }) => {
               // Match tasks by normalizing status to lowercase
@@ -1868,7 +2190,6 @@ async function renderView(id) {
                       return `
                         <div class="kanban-task" draggable="true" data-id="${t.id}" data-status="${(t.status || 'not started').toLowerCase()}" style="background: white; padding: 12px; margin-bottom: 8px; border-radius: 6px; cursor: move; box-shadow: var(--shadow);">
                           <div style="font-weight: 600; margin-bottom: 4px;">${t.name}</div>
-                          ${t.description ? `<div class="muted" style="font-size: 12px; margin-bottom: 4px;">${t.description}</div>` : ''}
                           <div style="font-size: 11px; color: var(--muted);">
                             <div>👤 ${assignee}</div>
                             ${t.milestone ? `<div>📍 ${t.milestone}</div>` : ''}
@@ -1888,7 +2209,7 @@ async function renderView(id) {
       <!-- Task Gantt Chart View -->
       <div id="tasks-gantt-view" class="task-view hidden">
         <div id="gantt-container" style="overflow-x: auto; overflow-y: auto; max-height: 70vh; border: 1px solid var(--border); border-radius: 8px; background: white;">
-          <div id="gantt-chart" style="min-width: 100%; padding: 16px;">
+          <div id="gantt-chart" style="min-width: 100%;">
             <!-- Gantt chart will be rendered here -->
           </div>
         </div>
@@ -2122,7 +2443,9 @@ async function renderView(id) {
         ${formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, i.departmentId || '', 'Select...'))}
         ${formRow('Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" required />`)}
         ${formRow('End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
-        <div class="form-row"><label>Age Since Created</label><div><strong>${daysSinceCreated} days</strong></div></div>
+        <div class="form-row"><label>Age Created to Start</label><div><strong>${ageCreatedToStart !== null ? ageCreatedToStart + ' days' : 'N/A'}</strong></div></div>
+        <div class="form-row"><label>Cycle Time (Age Start to End)</label><div><strong>${cycleTime !== null ? cycleTime + ' days' : 'N/A'}</strong></div></div>
+        <div class="form-row"><label>Total Age</label><div><strong>${totalAge !== null ? totalAge + ' days' : 'N/A'}</strong></div></div>
         ${formRow('Description', `<textarea name="description" class="long-text" required style="min-height: 100px;">${(i.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
         ${formRow('Business Impact', `<textarea name="businessImpact" class="long-text" required style="min-height: 100px;">${(i.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
         ${formRow('Remark', `<textarea name="remark" class="long-text" style="min-height: 80px;">${(i.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
@@ -2552,15 +2875,15 @@ function renderGanttChart(tasks, initiativeId) {
   const sidebarWidth = 250;
   
   let html = `
-    <div style="position: relative;">
+    <div style="position: relative; min-width: ${totalDays * dayWidth + sidebarWidth}px;">
       <!-- Header with dates -->
       <div style="position: sticky; top: 0; z-index: 10; background: white; border-bottom: 2px solid var(--border);">
         <div style="display: flex; height: ${headerHeight}px;">
-          <div style="width: ${sidebarWidth}px; padding: 8px; font-weight: 600; border-right: 1px solid var(--border); display: flex; align-items: center;">
+          <div style="width: ${sidebarWidth}px; padding: 8px; font-weight: 600; border-right: 1px solid var(--border); display: flex; align-items: center; position: sticky; left: 0; background: white; z-index: 11;">
             Task Name
           </div>
-          <div style="flex: 1; position: relative; overflow-x: auto;">
-            <div style="display: flex; min-width: ${totalDays * dayWidth}px;">
+          <div style="flex: 1; position: relative; min-width: ${totalDays * dayWidth}px;">
+            <div style="display: flex; width: ${totalDays * dayWidth}px;">
               ${weekHeaders.map((week, idx) => {
                 const weekStart = new Date(week);
                 const weekEnd = new Date(week);
@@ -2601,7 +2924,7 @@ function renderGanttChart(tasks, initiativeId) {
               </div>
               
               <!-- Timeline area -->
-              <div style="flex: 1; position: relative; min-width: ${totalDays * dayWidth}px;">
+              <div style="flex: 1; position: relative; min-width: ${totalDays * dayWidth}px; width: ${totalDays * dayWidth}px;">
                 ${task.startDate || task.endDate ? `
                   <div class="gantt-task-bar" 
                        data-task-id="${task.id}"
@@ -2960,11 +3283,29 @@ async function renderCRList() {
     const val = urlParams.get(key);
     return val ? val.split(',').filter(v => v) : [];
   };
+
+  // Parse date filters (format: operator:date, e.g., "gte:2024-01-01")
+  const parseDateFilter = (key) => {
+    const val = urlParams.get(key);
+    if (!val) return null;
+    const parts = val.split(':');
+    if (parts.length === 2) {
+      return { operator: parts[0], date: parts[1] };
+    }
+    return null;
+  };
+
   const filter = {
     departmentId: parseFilter('cr_departmentId'),
     priority: parseFilter('cr_priority'),
     status: parseFilter('cr_status'),
-    milestone: parseFilter('cr_milestone')
+    milestone: parseFilter('cr_milestone'),
+    itPicId: parseFilter('cr_itPicId'),
+    itPmId: parseFilter('cr_itPmId'),
+    itManagerId: parseFilter('cr_itManagerId'),
+    createdAt: parseDateFilter('cr_createdAt'),
+    startDate: parseDateFilter('cr_startDate'),
+    endDate: parseDateFilter('cr_endDate')
   };
   const sortParam = urlParams.get('cr_sort') || '';
   
@@ -2976,6 +3317,8 @@ async function renderCRList() {
   if (filter.priority.length) apiQs.set('priority', filter.priority.join(','));
   if (filter.status.length) apiQs.set('status', filter.status.join(','));
   if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
+  if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
+  if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
   
   let data;
   try {
@@ -2985,6 +3328,71 @@ async function renderCRList() {
     app.innerHTML = `<div class="error">Failed to load CR initiatives: ${e.message}</div>`;
     return;
   }
+
+  // Apply client-side filtering for date filters (CR list)
+  if (filter.createdAt) {
+    const filterDate = new Date(filter.createdAt.date);
+    data = data.filter(i => {
+      if (!i.createdAt) return false;
+      const itemDate = new Date(i.createdAt);
+      if (filter.createdAt.operator === 'eq') return itemDate.toDateString() === filterDate.toDateString();
+      if (filter.createdAt.operator === 'gte') return itemDate >= filterDate;
+      if (filter.createdAt.operator === 'lte') return itemDate <= filterDate;
+      return true;
+    });
+  }
+  if (filter.startDate) {
+    const filterDate = new Date(filter.startDate.date);
+    data = data.filter(i => {
+      if (!i.startDate) return false;
+      const itemDate = new Date(i.startDate);
+      if (filter.startDate.operator === 'eq') return itemDate.toDateString() === filterDate.toDateString();
+      if (filter.startDate.operator === 'gte') return itemDate >= filterDate;
+      if (filter.startDate.operator === 'lte') return itemDate <= filterDate;
+      return true;
+    });
+  }
+  if (filter.endDate) {
+    const filterDate = new Date(filter.endDate.date);
+    data = data.filter(i => {
+      if (!i.endDate) return false;
+      const itemDate = new Date(i.endDate);
+      if (filter.endDate.operator === 'eq') return itemDate.toDateString() === filterDate.toDateString();
+      if (filter.endDate.operator === 'gte') return itemDate >= filterDate;
+      if (filter.endDate.operator === 'lte') return itemDate <= filterDate;
+      return true;
+    });
+  }
+
+  // Apply client-side filtering for IT Manager (initiative has itManagerIds)
+  if (filter.itManagerId.length > 0) {
+    data = data.filter(i => {
+      const raw = i.itManagerIds || i.itManagerId || [];
+      const ids = Array.isArray(raw)
+        ? raw
+        : String(raw).split(',').map(v => v.trim()).filter(Boolean);
+      return filter.itManagerId.some(sel => ids.includes(sel));
+    });
+  }
+
+  // Build user subsets for filters (role/type based) - same rules as Project List
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const roleNorm = (u) => norm(u?.role).replace(/\s+/g, '');
+  const typeNorm = (u) => norm(u?.type).replace(/\s+/g, '');
+  const isITRole = (u) => roleNorm(u) === 'it';
+  const isManagerType = (u) => typeNorm(u) === 'manager';
+
+  const itManagerFilterUsers = (LOOKUPS.users || []).filter(u => isITRole(u) && isManagerType(u));
+  const itPicFilterUsers = (LOOKUPS.users || []).filter(u => isITRole(u));
+  const itPmFilterUsers = (LOOKUPS.users || []).filter(u => {
+    const r = roleNorm(u);
+    const rRaw = norm(u?.role);
+    if (r === 'admin') return true;
+    if (r === 'itpm') return true;
+    if (rRaw === 'it - pm' || rRaw === 'it pm' || rRaw === 'it-pm') return true;
+    if (isITRole(u) && isManagerType(u)) return true;
+    return false;
+  });
   
   // Calculate milestone counts from filtered data
   // Database stores: "Preparation", "Business Requirement", "Tech Assessment", "Planning", "Development", "Testing", "Live"
@@ -3093,9 +3501,8 @@ async function renderCRList() {
       <div class="toolbar-row">
         <div class="search-group">
           <input id="search" placeholder="Search by name, ticket..." value="${q}">
-          <button id="doSearch">Search</button>
         </div>
-        <div class="filter-group">
+        <div class="filter-group" id="basic-filters">
           <div class="multi-select-wrapper">
             <button class="multi-select-btn" data-filter="fDepartment">
               Department ${filter.departmentId.length > 0 ? `(${filter.departmentId.length})` : ''}
@@ -3148,9 +3555,96 @@ async function renderCRList() {
               `).join('')}
             </div>
           </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItPic">
+              IT PIC ${filter.itPicId.length > 0 ? `(${filter.itPicId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItPic">
+              ${itPicFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itPicId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItPm">
+              IT PM ${filter.itPmId.length > 0 ? `(${filter.itPmId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItPm">
+              ${itPmFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itPmId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItManager">
+              IT Manager ${filter.itManagerId.length > 0 ? `(${filter.itManagerId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItManager">
+              ${itManagerFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itManagerId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        <div class="date-filters-group" id="date-filters">
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fCreateDate">
+              <span class="filter-label">Create Date</span> ${filter.createdAt ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fCreateDate">
+              <div class="date-filter-content">
+                <select id="createDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.createdAt?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.createdAt?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.createdAt?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="createDate-value" value="${filter.createdAt?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fStartDate">
+              <span class="filter-label">Start Date</span> ${filter.startDate ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fStartDate">
+              <div class="date-filter-content">
+                <select id="startDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.startDate?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.startDate?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.startDate?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="startDate-value" value="${filter.startDate?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fEndDate">
+              <span class="filter-label">End Date</span> ${filter.endDate ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fEndDate">
+              <div class="date-filter-content">
+                <select id="endDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.endDate?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.endDate?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.endDate?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="endDate-value" value="${filter.endDate?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('crlist')" title="Column Settings" class="icon-btn">⚙️</button>
+          <button id="apply-filters-btn" class="primary" onclick="applyFiltersCR()">Apply Filters</button>
           <a href="#new/CR"><button class="primary">+ New CR</button></a>
         </div>
       </div>
@@ -3193,32 +3687,57 @@ async function renderCRList() {
       </div>
     </div>
   `;
-  // Multi-select dropdown handlers (same as renderList)
+  // Multi-select dropdown handlers (checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
       e.stopPropagation();
       const filterId = btn.dataset.filter;
       const dropdown = document.getElementById(`dropdown-${filterId}`);
+      if (!dropdown) return;
       const isOpen = dropdown.classList.contains('open');
-      
       // Close all dropdowns
-      document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
-      
-      // Toggle current dropdown
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
       if (!isOpen) {
         dropdown.classList.add('open');
+        document.body.classList.add('dropdown-open');
       }
     };
   });
-  
-  // Checkbox change handlers
-  document.querySelectorAll('.multi-select-option input[type="checkbox"]').forEach(cb => {
-    cb.onchange = () => {
-      applyFiltersCR();
+
+  // Date filter dropdown handlers
+  document.querySelectorAll('.date-filter-wrapper .multi-select-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const filterId = btn.dataset.filter;
+      const dropdown = document.getElementById(`dropdown-${filterId}`);
+      if (!dropdown) return;
+      const isOpen = dropdown.classList.contains('open');
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+      if (!isOpen) {
+        dropdown.classList.add('open');
+        document.body.classList.add('dropdown-open');
+      }
     };
   });
+
+  // Close dropdowns when clicking outside or on overlay
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.multi-select-wrapper') && !e.target.closest('.date-filter-wrapper') && !e.target.closest('.multi-select-dropdown') && !e.target.closest('.date-filter-dropdown')) {
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+    }
+  });
+  // Close dropdowns on escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+    }
+  });
   
-  function applyFiltersCR() {
+  window.applyFiltersCR = function() {
     const searchVal = document.getElementById('search').value;
     const url = new URL(location.href);
     
@@ -3237,7 +3756,10 @@ async function renderCRList() {
       'fDepartment': 'cr_departmentId',
       'fPriority': 'cr_priority',
       'fStatus': 'cr_status',
-      'fMilestone': 'cr_milestone'
+      'fMilestone': 'cr_milestone',
+      'fItPic': 'cr_itPicId',
+      'fItPm': 'cr_itPmId',
+      'fItManager': 'cr_itManagerId'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -3249,27 +3771,43 @@ async function renderCRList() {
       }
     });
     
+    // Handle date filters (CR)
+    const createDateOp = document.getElementById('createDate-operator')?.value;
+    const createDateVal = document.getElementById('createDate-value')?.value;
+    if (createDateOp && createDateVal) url.searchParams.set('cr_createdAt', `${createDateOp}:${createDateVal}`);
+    else url.searchParams.delete('cr_createdAt');
+
+    const startDateOp = document.getElementById('startDate-operator')?.value;
+    const startDateVal = document.getElementById('startDate-value')?.value;
+    if (startDateOp && startDateVal) url.searchParams.set('cr_startDate', `${startDateOp}:${startDateVal}`);
+    else url.searchParams.delete('cr_startDate');
+
+    const endDateOp = document.getElementById('endDate-operator')?.value;
+    const endDateVal = document.getElementById('endDate-value')?.value;
+    if (endDateOp && endDateVal) url.searchParams.set('cr_endDate', `${endDateOp}:${endDateVal}`);
+    else url.searchParams.delete('cr_endDate');
+
     history.pushState({}, '', url);
     renderCRList();
+  };
+
+  // Search auto-apply while typing (debounced) for CR list
+  let crSearchDebounceTimer = null;
+  const crSearchEl = document.getElementById('search');
+  if (crSearchEl) {
+    crSearchEl.addEventListener('input', () => {
+      if (crSearchDebounceTimer) clearTimeout(crSearchDebounceTimer);
+      crSearchDebounceTimer = setTimeout(() => {
+        window.applyFiltersCR();
+      }, 350);
+    });
+    crSearchEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (crSearchDebounceTimer) clearTimeout(crSearchDebounceTimer);
+        window.applyFiltersCR();
+      }
+    });
   }
-  
-  document.getElementById('doSearch').onclick = () => {
-    applyFiltersCR();
-  };
-  
-  // Enter key on search input
-  document.getElementById('search').onkeypress = (e) => {
-    if (e.key === 'Enter') {
-      applyFiltersCR();
-    }
-  };
-  
-  // Auto-clear search when input is emptied (no Enter required)
-  document.getElementById('search').oninput = (e) => {
-    if (e.target.value === '') {
-      applyFiltersCR();
-    }
-  };
   // Sorting - 3-state cycle: ascending → descending → default (no sort)
   document.querySelectorAll('thead th.sortable').forEach(th => {
     const resizer = document.createElement('span');
@@ -3448,6 +3986,89 @@ async function renderDashboard() {
   if (selectedTeamMemberId) apiQs.set('teamMemberId', selectedTeamMemberId);
   
   const d = await fetchJSON('/api/dashboard?' + apiQs.toString());
+
+  // --- Project aging metrics (Avg Total Age / Avg Age Created→Start / Avg Cycle Time) ---
+  // We compute from initiatives dates so the metrics match the Initiative page definitions.
+  let projectAgingMetrics = {
+    avgTotalAge: 0,
+    avgAgeCreatedToStart: 0,
+    avgCycleTime: 0,
+    counts: { totalAge: 0, createdToStart: 0, cycleTime: 0 },
+    byId: {} // { [initiativeId]: { ageCreatedToStart, cycleTime, totalAge } }
+  };
+
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const floorDays = (ms) => Math.floor(ms / msPerDay);
+  const safeDate = (v) => (v ? new Date(v) : null);
+  const today = new Date();
+
+  try {
+    // Fetch projects with dates so we can compute all age metrics.
+    // Use the same filters the dashboard uses (departmentId / itPmId / teamMemberId).
+    const projQs = new URLSearchParams();
+    projQs.set('type', 'Project');
+    if (selectedDepartmentId) projQs.set('departmentId', selectedDepartmentId);
+    if (selectedItPmId) projQs.set('itPmId', selectedItPmId);
+    if (selectedTeamMemberId) projQs.set('teamMemberId', selectedTeamMemberId);
+
+    const projects = await fetchJSON('/api/initiatives?' + projQs.toString());
+
+    let sumTotalAge = 0;
+    let sumCreatedToStart = 0;
+    let sumCycleTime = 0;
+    let countTotalAge = 0;
+    let countCreatedToStart = 0;
+    let countCycleTime = 0;
+
+    (projects || []).forEach(p => {
+      const createDate = safeDate(p.createdAt);
+      const startDate = safeDate(p.startDate);
+      const endDate = safeDate(p.endDate);
+
+      let ageCreatedToStart = null;
+      if (createDate && startDate) {
+        ageCreatedToStart = floorDays(startDate - createDate);
+      }
+
+      let cycleTime = null;
+      if (startDate) {
+        const endOrNow = endDate || today;
+        cycleTime = floorDays(endOrNow - startDate);
+      }
+
+      // Total Age = Age Created→Start + Cycle Time.
+      // If Create Date is missing, treat Age Created→Start as 0 (so Total Age = Cycle Time).
+      let totalAge = null;
+      if (cycleTime !== null) {
+        totalAge = (ageCreatedToStart !== null ? ageCreatedToStart : 0) + cycleTime;
+      }
+
+      projectAgingMetrics.byId[p.id] = { ageCreatedToStart, cycleTime, totalAge };
+
+      if (totalAge !== null) {
+        sumTotalAge += totalAge;
+        countTotalAge++;
+      }
+      if (ageCreatedToStart !== null) {
+        sumCreatedToStart += ageCreatedToStart;
+        countCreatedToStart++;
+      }
+      if (cycleTime !== null) {
+        sumCycleTime += cycleTime;
+        countCycleTime++;
+      }
+    });
+
+    projectAgingMetrics = {
+      avgTotalAge: countTotalAge ? Math.round(sumTotalAge / countTotalAge) : 0,
+      avgAgeCreatedToStart: countCreatedToStart ? Math.round(sumCreatedToStart / countCreatedToStart) : 0,
+      avgCycleTime: countCycleTime ? Math.round(sumCycleTime / countCycleTime) : 0,
+      counts: { totalAge: countTotalAge, createdToStart: countCreatedToStart, cycleTime: countCycleTime },
+      byId: projectAgingMetrics.byId
+    };
+  } catch (e) {
+    console.warn('Failed to compute project aging metrics from initiatives:', e);
+  }
   
   // Create simple bar charts
   const createBarChart = (data, labelKey, valueKey, title, clickable = false) => {
@@ -3534,18 +4155,38 @@ async function renderDashboard() {
         <div class="muted">Live Projects</div>
         <div style="font-size:32px;font-weight:700;color: var(--success)">${d.liveCount || 0}</div>
       </div>
-      <div class="card">
-        <div class="muted">Avg Age (Days)</div>
-        <div style="font-size:32px;font-weight:700;color: var(--warning)">${d.avgAgeSinceCreated}</div>
+      <div class="card" style="border-left: 4px solid var(--warning);">
+        <div class="muted">Average Project Aging (Days)</div>
+        <div style="display:flex; align-items:baseline; justify-content: space-between; gap: 12px; margin-top: 6px;">
+          <div>
+            <div style="font-size:12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
+            <div style="font-size:34px;font-weight:800;color: var(--warning); line-height: 1;">${projectAgingMetrics.avgTotalAge}</div>
+          </div>
+          <div style="font-size: 12px; color: var(--muted); text-align: right;">
+            <div><strong>${projectAgingMetrics.avgAgeCreatedToStart}</strong> Avg Age Created→Start</div>
+            <div><strong>${projectAgingMetrics.avgCycleTime}</strong> Avg Cycle Time (Start→End)</div>
+          </div>
+        </div>
+        <div class="muted" style="margin-top: 10px; font-size: 12px;">
+          Total Age = (Create→Start) + (Start→End/Now). For ongoing projects, End uses today.
+        </div>
       </div>
     </div>
     <div class="grid" style="margin-top:24px">
       ${createBarChart(d.byStatus, 'status', 'c', 'Status Distribution', true)}
       ${createBarChart(d.byPriority, 'priority', 'c', 'Priority Distribution', true)}
       <div class="card">
-        <h3>Project Aging (Days Since Created)</h3>
+        <h3>Project Aging (Total Age)</h3>
         <div style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
-          ${d.projectAging.map(project => `
+          ${d.projectAging.map(project => {
+            const m = projectAgingMetrics.byId[project.id] || {};
+            const total = (m.totalAge ?? project.daysSinceCreated ?? 0);
+            const aCS = m.ageCreatedToStart;
+            const cT = m.cycleTime;
+            const breakdown = (aCS !== null && aCS !== undefined && cT !== null && cT !== undefined)
+              ? `Create→Start: ${aCS}d • Start→End/Now: ${cT}d`
+              : 'Breakdown not available';
+            return `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px; background: #f8fafc; border-radius: 6px;">
               <div style="flex: 1;">
                 <div style="font-weight: 500; margin-bottom: 4px;">${project.name}</div>
@@ -3553,12 +4194,14 @@ async function renderDashboard() {
                   <span class="status-badge status-${project.status?.replace(/\s+/g, '-')}">${project.status}</span>
                   <span style="margin-left: 8px;">${project.milestone}</span>
                 </div>
+                <div class="muted" style="font-size: 11px; margin-top: 4px;">${breakdown}</div>
               </div>
               <div style="text-align: right;">
-                <span style="font-weight: 600; color: var(--warning);">${project.daysSinceCreated} days</span>
+                <span style="font-weight: 700; color: var(--warning);" title="${breakdown}">${total} days</span>
               </div>
             </div>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       </div>
     </div>
@@ -4503,6 +5146,94 @@ async function renderCRDashboard() {
   if (selectedItManagerId) apiQs.set('itManagerId', selectedItManagerId);
   
   const d = await fetchJSON('/api/cr-dashboard?' + apiQs.toString());
+
+  // --- CR aging metrics (Avg Total Age / Avg Age Created→Start / Avg Cycle Time) ---
+  // Computed from CR initiatives dates so it matches Initiative page definitions.
+  let crAgingMetrics = {
+    avgTotalAge: 0,
+    avgAgeCreatedToStart: 0,
+    avgCycleTime: 0,
+    counts: { totalAge: 0, createdToStart: 0, cycleTime: 0 },
+    byId: {}
+  };
+
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const floorDays = (ms) => Math.floor(ms / msPerDay);
+  const safeDate = (v) => (v ? new Date(v) : null);
+  const today = new Date();
+
+  try {
+    // Fetch CR initiatives with dates so we can compute all age metrics.
+    // Apply the same dashboard filters (departmentId and itManagerId).
+    const crQs = new URLSearchParams();
+    crQs.set('type', 'CR');
+    if (selectedDepartmentId) crQs.set('departmentId', selectedDepartmentId);
+    const crInitiatives = await fetchJSON('/api/initiatives?' + crQs.toString());
+
+    // Role/type based IT Manager filter is stored on initiative.itManagerIds (array or CSV)
+    let filteredCRs = crInitiatives || [];
+    if (selectedItManagerId) {
+      filteredCRs = filteredCRs.filter(i => {
+        const raw = i.itManagerIds || i.itManagerId || [];
+        const ids = Array.isArray(raw) ? raw : String(raw).split(',').map(v => v.trim()).filter(Boolean);
+        return ids.includes(selectedItManagerId);
+      });
+    }
+
+    let sumTotalAge = 0;
+    let sumCreatedToStart = 0;
+    let sumCycleTime = 0;
+    let countTotalAge = 0;
+    let countCreatedToStart = 0;
+    let countCycleTime = 0;
+
+    (filteredCRs || []).forEach(cr => {
+      const createDate = safeDate(cr.createdAt);
+      const startDate = safeDate(cr.startDate);
+      const endDate = safeDate(cr.endDate);
+
+      let ageCreatedToStart = null;
+      if (createDate && startDate) {
+        ageCreatedToStart = floorDays(startDate - createDate);
+      }
+
+      let cycleTime = null;
+      if (startDate) {
+        const endOrNow = endDate || today;
+        cycleTime = floorDays(endOrNow - startDate);
+      }
+
+      let totalAge = null;
+      if (cycleTime !== null) {
+        totalAge = (ageCreatedToStart !== null ? ageCreatedToStart : 0) + cycleTime;
+      }
+
+      crAgingMetrics.byId[cr.id] = { ageCreatedToStart, cycleTime, totalAge };
+
+      if (totalAge !== null) {
+        sumTotalAge += totalAge;
+        countTotalAge++;
+      }
+      if (ageCreatedToStart !== null) {
+        sumCreatedToStart += ageCreatedToStart;
+        countCreatedToStart++;
+      }
+      if (cycleTime !== null) {
+        sumCycleTime += cycleTime;
+        countCycleTime++;
+      }
+    });
+
+    crAgingMetrics = {
+      avgTotalAge: countTotalAge ? Math.round(sumTotalAge / countTotalAge) : 0,
+      avgAgeCreatedToStart: countCreatedToStart ? Math.round(sumCreatedToStart / countCreatedToStart) : 0,
+      avgCycleTime: countCycleTime ? Math.round(sumCycleTime / countCycleTime) : 0,
+      counts: { totalAge: countTotalAge, createdToStart: countCreatedToStart, cycleTime: countCycleTime },
+      byId: crAgingMetrics.byId
+    };
+  } catch (e) {
+    console.warn('Failed to compute CR aging metrics from initiatives:', e);
+  }
   
   // Create simple bar charts
   const createBarChart = (data, labelKey, valueKey, title, clickable = false) => {
@@ -4586,9 +5317,21 @@ async function renderCRDashboard() {
         <div class="muted">Live CRs</div>
         <div style="font-size:32px;font-weight:700;color: var(--success)">${d.liveCount || 0}</div>
       </div>
-      <div class="card">
-        <div class="muted">Avg Age (Days)</div>
-        <div style="font-size:32px;font-weight:700;color: var(--warning)">${d.avgAgeSinceCreated || 0}</div>
+      <div class="card" style="border-left: 4px solid var(--warning);">
+        <div class="muted">Average CR Aging (Days)</div>
+        <div style="display:flex; align-items:baseline; justify-content: space-between; gap: 12px; margin-top: 6px;">
+          <div>
+            <div style="font-size:12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
+            <div style="font-size:34px;font-weight:800;color: var(--warning); line-height: 1;">${crAgingMetrics.avgTotalAge}</div>
+          </div>
+          <div style="font-size: 12px; color: var(--muted); text-align: right;">
+            <div><strong>${crAgingMetrics.avgAgeCreatedToStart}</strong> Avg Age Created→Start</div>
+            <div><strong>${crAgingMetrics.avgCycleTime}</strong> Avg Cycle Time (Start→End)</div>
+          </div>
+        </div>
+        <div class="muted" style="margin-top: 10px; font-size: 12px;">
+          Total Age = (Create→Start) + (Start→End/Now). For ongoing CRs, End uses today.
+        </div>
       </div>
     </div>
     <div class="grid" style="margin-top:24px">
@@ -4598,9 +5341,17 @@ async function renderCRDashboard() {
     </div>
     <div class="grid" style="margin-top:24px">
       <div class="card">
-        <h3>CR Aging (Days Since Created)</h3>
+        <h3>CR Aging (Total Age)</h3>
         <div style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
-          ${(d.crAging || []).slice(0, 20).map(cr => `
+          ${(d.crAging || []).slice(0, 20).map(cr => {
+            const m = crAgingMetrics.byId[cr.id] || {};
+            const total = (m.totalAge ?? cr.daysSinceCreated ?? 0);
+            const aCS = m.ageCreatedToStart;
+            const cT = m.cycleTime;
+            const breakdown = (aCS !== null && aCS !== undefined && cT !== null && cT !== undefined)
+              ? `Create→Start: ${aCS}d • Start→End/Now: ${cT}d`
+              : 'Breakdown not available';
+            return `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px; background: #f8fafc; border-radius: 6px;">
               <div style="flex: 1;">
                 <div style="font-weight: 500; margin-bottom: 4px;">${cr.name || 'Unnamed CR'}</div>
@@ -4608,12 +5359,14 @@ async function renderCRDashboard() {
                   <span class="status-badge status-${(cr.status || '').replace(/\s+/g, '-')}">${cr.status || 'N/A'}</span>
                   <span style="margin-left: 8px;">${cr.milestone || 'N/A'}</span>
                 </div>
+                <div class="muted" style="font-size: 11px; margin-top: 4px;">${breakdown}</div>
               </div>
               <div style="text-align: right;">
-                <span style="font-weight: 600; color: var(--warning);">${cr.daysSinceCreated || 0} days</span>
+                <span style="font-weight: 700; color: var(--warning);" title="${breakdown}">${total} days</span>
               </div>
             </div>
-          `).join('')}
+          `;
+          }).join('')}
           ${(!d.crAging || d.crAging.length === 0) ? '<p class="muted">No CR aging data available</p>' : ''}
         </div>
       </div>
