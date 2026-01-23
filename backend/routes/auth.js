@@ -97,8 +97,26 @@ router.post('/register', async (req, res) => {
     }
 
     console.log(`[REGISTER] Saving user ${email} with activationToken: ${activationToken ? activationToken.substring(0, 8) + '...' : 'null'}, expiry: ${activationTokenExpiry}`);
-    await store.write(data);
-    console.log(`[REGISTER] User saved successfully`);
+    console.log(`[REGISTER] Total users before write: ${data.users.length}`);
+    console.log(`[REGISTER] New user data:`, JSON.stringify(data.users.find(u => u.email === email), null, 2));
+    try {
+      await store.write(data);
+      console.log(`[REGISTER] User saved successfully to database`);
+      
+      // Verify the user was saved
+      const verifyData = await store.read();
+      const savedUser = verifyData.users.find(u => u.email && u.email.toLowerCase() === email.toLowerCase());
+      if (savedUser) {
+        console.log(`[REGISTER] Verification SUCCESS: User found in database - ID: ${savedUser.id}, Email: ${savedUser.email}`);
+      } else {
+        console.error(`[REGISTER] Verification FAILED: User NOT found in database after write!`);
+        console.error(`[REGISTER] Total users in database: ${verifyData.users.length}`);
+      }
+    } catch (writeError) {
+      console.error(`[REGISTER] Error writing to database:`, writeError);
+      console.error(`[REGISTER] Error stack:`, writeError.stack);
+      throw writeError;
+    }
 
     // Send activation email only for allowed domains
     if (isAllowedDomain && activationToken) {
@@ -128,32 +146,63 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
+    console.log('[LOGIN] Request received');
     const { email, password } = req.body || {};
+    
     if (!email || !password) {
+      console.log('[LOGIN] Missing email or password');
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const user = await findUserByEmail(email);
+    console.log('[LOGIN] Looking up user:', email);
+    let user;
+    try {
+      user = await findUserByEmail(email);
+    } catch (dbError) {
+      console.error('[LOGIN] Database error:', dbError);
+      return res.status(500).json({ error: 'Database error', details: dbError.message });
+    }
+    
     if (!user) {
+      console.log('[LOGIN] User not found');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    console.log('[LOGIN] User found:', user.email, 'isAdmin:', user.isAdmin);
+
     // If user exists but has no password, they need to register first
     if (!user.passwordHash) {
+      console.log('[LOGIN] User has no password hash');
       return res.status(401).json({ 
         error: 'No password set for this account. Please register to set a password, or contact an administrator.',
         needsRegistration: true
       });
     }
 
-    const ok = await bcrypt.compare(password, user.passwordHash);
+    console.log('[LOGIN] Comparing password');
+    let ok;
+    try {
+      ok = await bcrypt.compare(password, user.passwordHash);
+    } catch (bcryptError) {
+      console.error('[LOGIN] Bcrypt error:', bcryptError);
+      return res.status(500).json({ error: 'Password verification error' });
+    }
+    
     if (!ok) {
+      console.log('[LOGIN] Password mismatch');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     // Check email activation for non-admin users
-    if (!user.isAdmin && !user.emailActivated) {
-      const isAllowedDomain = isEmailDomainAllowed(user.email);
+    // Ensure isAdmin is properly converted to boolean
+    const userIsAdmin = !!user.isAdmin;
+    const userEmailActivated = !!user.emailActivated;
+    
+    console.log('[LOGIN] User isAdmin:', userIsAdmin, 'emailActivated:', userEmailActivated);
+    
+    if (!userIsAdmin && !userEmailActivated) {
+      console.log('[LOGIN] User not activated');
+      const isAllowedDomain = isEmailDomainAllowed(user.email || '');
       const errorMessage = isAllowedDomain 
         ? 'Email not activated. Please check your email for the activation link.'
         : 'Account pending admin approval. Please contact an administrator to activate your account.';
@@ -164,18 +213,45 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const token = jwt.sign(
-      { sub: user.id, email: user.email, name: user.name, isAdmin: !!user.isAdmin },
-      JWT_SECRET,
-      { expiresIn: '8h' }
-    );
+    // Ensure JWT_SECRET is set
+    if (!JWT_SECRET) {
+      console.error('[LOGIN] JWT_SECRET is not configured');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+
+    console.log('[LOGIN] Creating JWT token');
+    let token;
+    try {
+      token = jwt.sign(
+        { sub: user.id, email: user.email || '', name: user.name || '', isAdmin: userIsAdmin },
+        JWT_SECRET,
+        { expiresIn: '8h' }
+      );
+    } catch (jwtError) {
+      console.error('[LOGIN] JWT signing error:', jwtError);
+      return res.status(500).json({ error: 'Token generation error', details: jwtError.message });
+    }
+    
+    console.log('[LOGIN] Login successful');
     return res.json({
       token,
-      user: { id: user.id, email: user.email, name: user.name, isAdmin: !!user.isAdmin },
+      user: { id: user.id, email: user.email || '', name: user.name || '', isAdmin: userIsAdmin },
     });
   } catch (e) {
-    console.error('Login error', e);
-    return res.status(500).json({ error: 'Internal error' });
+    console.error('[LOGIN] Unexpected error:', e);
+    console.error('[LOGIN] Error message:', e.message);
+    console.error('[LOGIN] Error stack:', e.stack);
+    
+    // Ensure response is sent even if there's an error
+    if (!res.headersSent) {
+      const errorDetails = process.env.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production' 
+        ? { message: e.message, stack: e.stack } 
+        : undefined;
+      return res.status(500).json({ 
+        error: 'Internal error', 
+        ...(errorDetails && { details: errorDetails })
+      });
+    }
   }
 });
 
@@ -326,10 +402,22 @@ Please do not reply to this email.
 
     if (transporter) {
       try {
-        await transporter.sendMail(emailContent);
+        const info = await transporter.sendMail(emailContent);
         console.log(`[EMAIL SENT] Password reset email sent to ${email}`);
+        console.log(`[EMAIL INFO] Message ID: ${info.messageId}`);
+        console.log(`[EMAIL INFO] Response: ${info.response || 'N/A'}`);
+        console.log(`[EMAIL INFO] From: ${fromEmail}`);
+        console.log(`[EMAIL INFO] To: ${email}`);
+        console.log(`[EMAIL INFO] Reset Link: ${resetLink}`);
       } catch (emailError) {
         console.error('[EMAIL ERROR] Failed to send password reset email:', emailError);
+        console.error('[EMAIL ERROR] Error details:', {
+          message: emailError.message,
+          code: emailError.code,
+          command: emailError.command,
+          response: emailError.response,
+          responseCode: emailError.responseCode
+        });
         // Fallback to console logging
         console.log('='.repeat(60));
         console.log('[PASSWORD RESET EMAIL - FALLBACK MODE]');

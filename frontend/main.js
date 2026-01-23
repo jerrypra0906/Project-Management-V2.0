@@ -72,11 +72,13 @@ function getDefaultColumns(viewType) {
       'col-department': true,
       'col-owner': true,
       'col-pic': true,
-      'col-date': true,
+      'col-start-date': true,
+      'col-create-date': true,
+      'col-end-date': true,
+      'col-description': false,
       'col-impact': true,
       'col-remark': true,
       'col-doc': true,
-      'col-timeline': true,
       'col-actions': true
     };
   }
@@ -89,7 +91,10 @@ function getDefaultColumns(viewType) {
     'col-department': true,
     'col-owner': true,
     'col-pic': true,
-    'col-date': true,
+    'col-start-date': true,
+    'col-create-date': true,
+    'col-end-date': true,
+    'col-description': false,
     'col-impact': true,
     'col-remark': true,
     'col-doc': true,
@@ -507,38 +512,15 @@ function initiativeRow(i, crData = null, colVisibility = null) {
   const itpic = nameById(LOOKUPS.users, i.itPicId);
   const bo = nameById(LOOKUPS.users, i.businessOwnerId);
   const doc = i.documentationLink || '';
-  const statusClass = i.status?.replace(/\s+/g, '-') || '';
+  // Normalize status to lowercase for case-insensitive CSS matching
+  const statusClass = i.status?.toLowerCase().replace(/\s+/g, '-') || '';
   const priorityClass = i.priority || '';
   
   // Default visibility if not provided
   if (!colVisibility) colVisibility = getDefaultColumns('list');
   
-  // CR Timeline display
-  let crTimeline = '';
-  if (i.type === 'CR' && crData) {
-    const phases = [
-      { name: 'CR Sec 1', start: crData.crSection1Start, end: crData.crSection1End },
-      { name: 'CR Sec 2', start: crData.crSection2Start, end: crData.crSection2End },
-      { name: 'CR Sec 3', start: crData.crSection3Start, end: crData.crSection3End },
-      { name: 'Dev', start: crData.developmentStart, end: crData.developmentEnd },
-      { name: 'SIT', start: crData.sitStart, end: crData.sitEnd },
-      { name: 'UAT', start: crData.uatStart, end: crData.uatEnd },
-      { name: 'Live', start: crData.liveStart, end: crData.liveEnd }
-    ];
-    
-    const activePhases = phases.filter(p => p.start || p.end);
-    if (activePhases.length > 0) {
-      crTimeline = `<div style="font-size: 10px; line-height: 1.2;">
-        ${activePhases.map(p => 
-          `<div style="margin-bottom: 2px;">
-            <strong>${p.name}:</strong> ${p.start || ''} - ${p.end || 'Ongoing'}
-          </div>`
-        ).join('')}
-      </div>`;
-    }
-  }
-  
-  const timelineCell = i.type === 'CR' ? `<td class="col-timeline" style="display: ${colVisibility['col-timeline'] !== false ? 'table-cell' : 'none'}">${crTimeline}</td>` : '';
+  // CR Timeline display - removed (CR dates no longer used)
+  const timelineCell = '';
   
   return `<tr class="status-${statusClass}">
     <td class="col-ticket" style="display: ${colVisibility['col-ticket'] !== false ? 'table-cell' : 'none'}">${i.ticket || ''}</td>
@@ -549,9 +531,10 @@ function initiativeRow(i, crData = null, colVisibility = null) {
     <td class="col-department" style="display: ${colVisibility['col-department'] !== false ? 'table-cell' : 'none'}">${dep}</td>
     <td class="col-owner" style="display: ${colVisibility['col-owner'] !== false ? 'table-cell' : 'none'}">${bo}</td>
     <td class="col-pic" style="display: ${colVisibility['col-pic'] !== false ? 'table-cell' : 'none'}">${itpic}</td>
-    <td class="col-date" style="display: ${colVisibility['col-date'] !== false ? 'table-cell' : 'none'}">${i.startDate?.slice(0,10) || ''}</td>
-    <td class="col-date" style="display: ${colVisibility['col-date'] !== false ? 'table-cell' : 'none'}">${i.createdAt?.slice(0,10) || ''}</td>
-    <td class="col-date" style="display: ${colVisibility['col-date'] !== false ? 'table-cell' : 'none'}">${i.endDate?.slice(0,10) || ''}</td>
+    <td class="col-start-date" style="display: ${colVisibility['col-start-date'] !== false ? 'table-cell' : 'none'}">${i.startDate?.slice(0,10) || ''}</td>
+    <td class="col-create-date" style="display: ${colVisibility['col-create-date'] !== false ? 'table-cell' : 'none'}">${i.createdAt?.slice(0,10) || ''}</td>
+    <td class="col-end-date" style="display: ${colVisibility['col-end-date'] !== false ? 'table-cell' : 'none'}">${i.endDate?.slice(0,10) || ''}</td>
+    <td class="col-description" style="display: ${colVisibility['col-description'] !== false ? 'table-cell' : 'none'}" title="${i.description || ''}">${(i.description || '').toString().slice(0,60)}${(i.description || '').length > 60 ? '...' : ''}</td>
     <td class="col-impact" style="display: ${colVisibility['col-impact'] !== false ? 'table-cell' : 'none'}" title="${i.businessImpact || ''}">${(i.businessImpact || '').toString().slice(0,100)}${(i.businessImpact || '').length > 100 ? '...' : ''}</td>
     <td class="col-remark" style="display: ${colVisibility['col-remark'] !== false ? 'table-cell' : 'none'}" title="${i.remark || ''}">${(i.remark || '').toString().slice(0,60)}${(i.remark || '').length > 60 ? '...' : ''}</td>
     <td class="col-doc" style="display: ${colVisibility['col-doc'] !== false ? 'table-cell' : 'none'}" title="${doc}">${doc.slice(0, 40)}${doc.length > 40 ? '...' : ''}</td>
@@ -562,6 +545,41 @@ function initiativeRow(i, crData = null, colVisibility = null) {
       ${currentUser?.isAdmin ? `<button data-id="${i.id}" class="delete" style="color: var(--danger);">Delete</button>` : ''}
     </td>
   </tr>`;
+}
+
+// Keep a CSS variable in sync with the actual header height so sticky table headers
+// sit just below the main page header and never collide with it.
+function updateHeaderHeightVar() {
+  const headerEl = document.querySelector('header');
+  if (!headerEl) return;
+  const height = headerEl.offsetHeight || 0;
+  document.documentElement.style.setProperty('--app-header-height', `${height}px`);
+}
+
+// Initialize once on load and keep in sync on resize.
+window.addEventListener('load', updateHeaderHeightVar);
+window.addEventListener('resize', () => {
+  // Use rAF to avoid layout thrash during continuous resize
+  window.requestAnimationFrame(updateHeaderHeightVar);
+});
+
+// Enhance wide table UX: add subtle left/right shadows on horizontal overflow so
+// users can immediately tell the table is scrollable.
+function initScrollableTables() {
+  document.querySelectorAll('.table-wrapper').forEach(wrapper => {
+    const el = wrapper;
+    const updateShadows = () => {
+      const { scrollLeft, scrollWidth, clientWidth } = el;
+      const canScrollRight = scrollWidth - clientWidth - scrollLeft > 1;
+      const canScrollLeft = scrollLeft > 1;
+      wrapper.classList.toggle('has-left-shadow', canScrollLeft);
+      wrapper.classList.toggle('has-right-shadow', canScrollRight);
+    };
+
+    el.addEventListener('scroll', updateShadows);
+    // Run once on init in case the table overflows immediately
+    updateShadows();
+  });
 }
 
 async function renderList() {
@@ -576,19 +594,38 @@ async function renderList() {
     return;
   }
   const urlParams = new URLSearchParams(location.search);
-  const q = urlParams.get('q') || '';
+  // Use project-specific search key to keep Project and CR searches separate
+  const q = urlParams.get('project_q') || '';
   // Parse multi-value filters (comma-separated)
   const parseFilter = (key) => {
     const val = urlParams.get(key);
     return val ? val.split(',').filter(v => v) : [];
   };
-  const filter = {
-    departmentId: parseFilter('departmentId'),
-    priority: parseFilter('priority'),
-    status: parseFilter('status'),
-    milestone: parseFilter('milestone')
+  
+  // Parse date filters (format: operator:date, e.g., "gte:2024-01-01")
+  const parseDateFilter = (key) => {
+    const val = urlParams.get(key);
+    if (!val) return null;
+    const parts = val.split(':');
+    if (parts.length === 2) {
+      return { operator: parts[0], date: parts[1] };
+    }
+    return null;
   };
-  const sortParam = urlParams.get('sort') || '';
+  
+  const filter = {
+    departmentId: parseFilter('project_departmentId'),
+    priority: parseFilter('project_priority'),
+    status: parseFilter('project_status'),
+    milestone: parseFilter('project_milestone'),
+    itPicId: parseFilter('project_itPicId'),
+    itPmId: parseFilter('project_itPmId'),
+    itManagerId: parseFilter('project_itManagerId'),
+    createdAt: parseDateFilter('project_createdAt'),
+    startDate: parseDateFilter('project_startDate'),
+    endDate: parseDateFilter('project_endDate')
+  };
+  const sortParam = urlParams.get('project_sort') || '';
   
   // Build API query string with multi-value filters
   const apiQs = new URLSearchParams();
@@ -598,6 +635,8 @@ async function renderList() {
   if (filter.priority.length) apiQs.set('priority', filter.priority.join(','));
   if (filter.status.length) apiQs.set('status', filter.status.join(','));
   if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
+  if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
+  if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
   
   console.log('Fetching data from API...');
   let data;
@@ -639,6 +678,89 @@ async function renderList() {
       milestoneCounts[i.milestone]++;
     }
   });
+  // Apply client-side filtering for date filters
+  if (filter.createdAt) {
+    const filterDate = new Date(filter.createdAt.date);
+    data = data.filter(i => {
+      if (!i.createdAt) return false;
+      const itemDate = new Date(i.createdAt);
+      if (filter.createdAt.operator === 'eq') {
+        return itemDate.toDateString() === filterDate.toDateString();
+      } else if (filter.createdAt.operator === 'gte') {
+        return itemDate >= filterDate;
+      } else if (filter.createdAt.operator === 'lte') {
+        return itemDate <= filterDate;
+      }
+      return true;
+    });
+  }
+  if (filter.startDate) {
+    const filterDate = new Date(filter.startDate.date);
+    data = data.filter(i => {
+      if (!i.startDate) return false;
+      const itemDate = new Date(i.startDate);
+      if (filter.startDate.operator === 'eq') {
+        return itemDate.toDateString() === filterDate.toDateString();
+      } else if (filter.startDate.operator === 'gte') {
+        return itemDate >= filterDate;
+      } else if (filter.startDate.operator === 'lte') {
+        return itemDate <= filterDate;
+      }
+      return true;
+    });
+  }
+  if (filter.endDate) {
+    const filterDate = new Date(filter.endDate.date);
+    data = data.filter(i => {
+      if (!i.endDate) return false;
+      const itemDate = new Date(i.endDate);
+      if (filter.endDate.operator === 'eq') {
+        return itemDate.toDateString() === filterDate.toDateString();
+      } else if (filter.endDate.operator === 'gte') {
+        return itemDate >= filterDate;
+      } else if (filter.endDate.operator === 'lte') {
+        return itemDate <= filterDate;
+      }
+      return true;
+    });
+  }
+
+  // Apply client-side filtering for IT Manager (initiative has itManagerIds)
+  if (filter.itManagerId.length > 0) {
+    data = data.filter(i => {
+      const raw = i.itManagerIds || i.itManagerId || [];
+      const ids = Array.isArray(raw)
+        ? raw
+        : String(raw).split(',').map(v => v.trim()).filter(Boolean);
+      return filter.itManagerId.some(sel => ids.includes(sel));
+    });
+  }
+
+  // Build user subsets for filters (role/type based)
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const roleNorm = (u) => norm(u?.role).replace(/\s+/g, '');
+  const typeNorm = (u) => norm(u?.type).replace(/\s+/g, '');
+
+  const isITRole = (u) => roleNorm(u) === 'it';
+  const isManagerType = (u) => typeNorm(u) === 'manager';
+
+  // 1) IT Manager: ROLE = IT and TYPE = Manager
+  const itManagerFilterUsers = (LOOKUPS.users || []).filter(u => isITRole(u) && isManagerType(u));
+
+  // 2) IT PIC: ROLE = IT
+  const itPicFilterUsers = (LOOKUPS.users || []).filter(u => isITRole(u));
+
+  // 3) IT PM: (ROLE = IT and TYPE = Manager) OR ROLE = Admin OR ROLE = IT - PM
+  const itPmFilterUsers = (LOOKUPS.users || []).filter(u => {
+    const r = roleNorm(u);
+    const rRaw = norm(u?.role);
+    if (r === 'admin') return true;
+    if (r === 'itpm') return true;
+    if (rRaw === 'it - pm' || rRaw === 'it pm' || rRaw === 'it-pm') return true;
+    if (isITRole(u) && isManagerType(u)) return true;
+    return false;
+  });
+  
   console.log('Data fetched, count:', data.length);
   console.log('Sample data item:', data[0]);
   if (sortParam) {
@@ -678,9 +800,10 @@ async function renderList() {
     { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
     { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
     { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
-    { key: 'startDate', class: 'col-date', label: 'Start Date', sortable: true },
-    { key: 'createdAt', class: 'col-date', label: 'Create Date', sortable: true },
-    { key: 'endDate', class: 'col-date', label: 'End Date', sortable: true },
+    { key: 'startDate', class: 'col-start-date', label: 'Start Date', sortable: true },
+    { key: 'createdAt', class: 'col-create-date', label: 'Create Date', sortable: true },
+    { key: 'endDate', class: 'col-end-date', label: 'End Date', sortable: true },
+    { key: 'description', class: 'col-description', label: 'Description', sortable: true },
     { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
     { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
     { key: 'documentationLink', class: 'col-doc', label: 'Project Doc Link', sortable: true },
@@ -780,7 +903,6 @@ async function renderList() {
       <div class="toolbar-row">
         <div class="search-group">
           <input id="search" placeholder="Search by name, ticket..." value="${q}">
-          <button id="doSearch">Search</button>
         </div>
         <div class="filter-group">
           <div class="multi-select-wrapper">
@@ -835,54 +957,153 @@ async function renderList() {
               `).join('')}
             </div>
           </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItPic">
+              IT PIC ${filter.itPicId.length > 0 ? `(${filter.itPicId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItPic">
+              ${itPicFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itPicId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItPm">
+              IT PM ${filter.itPmId.length > 0 ? `(${filter.itPmId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItPm">
+              ${itPmFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itPmId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItManager">
+              IT Manager ${filter.itManagerId.length > 0 ? `(${filter.itManagerId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItManager">
+              ${itManagerFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itManagerId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        <div class="date-filters-group" id="date-filters">
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fCreateDate">
+              <span class="filter-label">Create Date</span> ${filter.createdAt ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fCreateDate">
+              <div class="date-filter-content">
+                <select id="createDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.createdAt?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.createdAt?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.createdAt?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="createDate-value" value="${filter.createdAt?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fStartDate">
+              <span class="filter-label">Start Date</span> ${filter.startDate ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fStartDate">
+              <div class="date-filter-content">
+                <select id="startDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.startDate?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.startDate?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.startDate?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="startDate-value" value="${filter.startDate?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fEndDate">
+              <span class="filter-label">End Date</span> ${filter.endDate ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fEndDate">
+              <div class="date-filter-content">
+                <select id="endDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.endDate?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.endDate?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.endDate?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="endDate-value" value="${filter.endDate?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('list')" title="Column Settings" class="icon-btn">⚙️</button>
-          <a href="#new"><button class="primary">+ New Initiative</button></a>
+          <button id="apply-filters-btn" class="primary" onclick="applyFilters()">Apply Filters</button>
+          <a href="#new/Project"><button class="primary">+ New Initiative</button></a>
         </div>
       </div>
     </div>
-    <table id="initiatives-table">
-      <thead>
-        <tr>
-          ${columns.map(col => {
-            const visible = colVisibility[col.class] !== false;
-            const sortClass = col.sortable ? 'sortable' : '';
-            const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-            return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-          }).join('')}
-        </tr>
-      </thead>
-      <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
-    </table>
+    <div class="table-wrapper">
+      <table id="initiatives-table">
+        <thead>
+          <tr>
+            ${columns.map(col => {
+              const visible = colVisibility[col.class] !== false;
+              const sortClass = col.sortable ? 'sortable' : '';
+              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+            }).join('')}
+          </tr>
+        </thead>
+        <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
+      </table>
+    </div>
     <div id="column-settings-modal" class="modal hidden">
-      <div class="modal-content">
-        <h3>Column Visibility</h3>
-        <div id="column-checkboxes" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 16px 0;">
+      <div class="modal-content column-settings-modal">
+        <h3 class="modal-title">Column Visibility</h3>
+        <div class="modal-checkbox-controls">
+          <button class="btn-link" onclick="checkAllColumns('list')">Check All</button>
+          <span class="control-separator">|</span>
+          <button class="btn-link" onclick="uncheckAllColumns('list')">Uncheck All</button>
+        </div>
+        <div id="column-checkboxes" class="column-checkboxes-grid">
           ${columns.filter(c => c.key !== 'actions').map(col => `
-            <label style="display: flex; align-items: center; cursor: pointer;">
-              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} style="margin-right: 8px;">
-              ${col.label}
+            <label class="column-checkbox-label">
+              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} class="column-checkbox">
+              <span class="column-checkbox-text">${col.label}</span>
             </label>
           `).join('')}
         </div>
-        <div>
-          <button class="primary" onclick="saveColumnSettings('list')">Save View</button>
-          <button onclick="closeColumnSettings()">Cancel</button>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="closeColumnSettings()">Cancel</button>
+          <button class="btn-primary" onclick="saveColumnSettings('list')">Save View</button>
         </div>
       </div>
     </div>
   `;
-  // Multi-select dropdown handlers
+
+  // Initialize horizontal scroll affordance for the main initiatives table.
+  initScrollableTables();
+  
+  // Multi-select dropdown handlers (for checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
       e.stopPropagation();
       const filterId = btn.dataset.filter;
       const dropdown = document.getElementById(`dropdown-${filterId}`);
+      if (!dropdown) return;
       const isOpen = dropdown.classList.contains('open');
       
       // Close all dropdowns
-      document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
       
       // Toggle current dropdown
       if (!isOpen) {
@@ -891,27 +1112,50 @@ async function renderList() {
     };
   });
   
-  // Close dropdowns when clicking outside
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.multi-select-wrapper')) {
-      document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
-    }
-  });
-  
-  // Checkbox change handlers
-  document.querySelectorAll('.multi-select-option input[type="checkbox"]').forEach(cb => {
-    cb.onchange = () => {
-      applyFilters();
+  // Date filter dropdown handlers
+  document.querySelectorAll('.date-filter-wrapper .multi-select-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const filterId = btn.dataset.filter;
+      const dropdown = document.getElementById(`dropdown-${filterId}`);
+      if (!dropdown) return;
+      const isOpen = dropdown.classList.contains('open');
+      
+      // Close all dropdowns
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+      
+      // Toggle current dropdown
+      if (!isOpen) {
+        dropdown.classList.add('open');
+        document.body.classList.add('dropdown-open');
+      }
     };
   });
   
-  function applyFilters() {
+  // Close dropdowns when clicking outside or on overlay
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.multi-select-wrapper') && !e.target.closest('.date-filter-wrapper') && !e.target.closest('.multi-select-dropdown') && !e.target.closest('.date-filter-dropdown')) {
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+    }
+  });
+  
+  // Close dropdowns on escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+    }
+  });
+  
+  window.applyFilters = function() {
     const searchVal = document.getElementById('search').value;
     const url = new URL(location.href);
     
-    // Update search
-    if (searchVal) url.searchParams.set('q', searchVal);
-    else url.searchParams.delete('q');
+    // Update search with project-specific key
+    if (searchVal) url.searchParams.set('project_q', searchVal);
+    else url.searchParams.delete('project_q');
     
     // Get selected values from each multi-select
     const getSelectedValues = (filterId) => {
@@ -919,11 +1163,15 @@ async function renderList() {
       return Array.from(checkboxes).map(cb => cb.value);
     };
     
+    // Use project-specific filter keys
     const filterMap = {
-      'fDepartment': 'departmentId',
-      'fPriority': 'priority',
-      'fStatus': 'status',
-      'fMilestone': 'milestone'
+      'fDepartment': 'project_departmentId',
+      'fPriority': 'project_priority',
+      'fStatus': 'project_status',
+      'fMilestone': 'project_milestone',
+      'fItPic': 'project_itPicId',
+      'fItPm': 'project_itPmId',
+      'fItManager': 'project_itManagerId'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -935,20 +1183,55 @@ async function renderList() {
       }
     });
     
+    // Handle date filters
+    const createDateOp = document.getElementById('createDate-operator')?.value;
+    const createDateVal = document.getElementById('createDate-value')?.value;
+    if (createDateOp && createDateVal) {
+      url.searchParams.set('project_createdAt', `${createDateOp}:${createDateVal}`);
+    } else {
+      url.searchParams.delete('project_createdAt');
+    }
+    
+    const startDateOp = document.getElementById('startDate-operator')?.value;
+    const startDateVal = document.getElementById('startDate-value')?.value;
+    if (startDateOp && startDateVal) {
+      url.searchParams.set('project_startDate', `${startDateOp}:${startDateVal}`);
+    } else {
+      url.searchParams.delete('project_startDate');
+    }
+    
+    const endDateOp = document.getElementById('endDate-operator')?.value;
+    const endDateVal = document.getElementById('endDate-value')?.value;
+    if (endDateOp && endDateVal) {
+      url.searchParams.set('project_endDate', `${endDateOp}:${endDateVal}`);
+    } else {
+      url.searchParams.delete('project_endDate');
+    }
+    
     history.pushState({}, '', url);
     renderList();
+  };
+  
+  // Search auto-apply while typing (debounced)
+  let searchDebounceTimer = null;
+  const searchEl = document.getElementById('search');
+  if (searchEl) {
+    searchEl.addEventListener('input', () => {
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        // Auto-apply search changes; other filters still require Apply Filters button.
+        window.applyFilters();
+      }, 350);
+    });
+
+    // Enter key forces immediate apply
+    searchEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+        window.applyFilters();
+      }
+    });
   }
-  
-  document.getElementById('doSearch').onclick = () => {
-    applyFilters();
-  };
-  
-  // Enter key on search input
-  document.getElementById('search').onkeypress = (e) => {
-    if (e.key === 'Enter') {
-      applyFilters();
-    }
-  };
   // Column settings functions
   window.showColumnSettings = (viewType) => {
     const modalId = viewType === 'crlist' ? 'column-settings-modal-cr' : 'column-settings-modal';
@@ -981,6 +1264,22 @@ async function renderList() {
     if (modalCr) modalCr.classList.add('hidden');
   };
   
+  window.checkAllColumns = (viewType) => {
+    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
+    checkboxes.forEach(cb => {
+      cb.checked = true;
+    });
+  };
+  
+  window.uncheckAllColumns = (viewType) => {
+    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
+    checkboxes.forEach(cb => {
+      cb.checked = false;
+    });
+  };
+  
   // Close modal when clicking backdrop
   setTimeout(() => {
     const modals = document.querySelectorAll('.modal');
@@ -993,7 +1292,7 @@ async function renderList() {
     });
   }, 100);
   
-  // Sorting
+  // Sorting - 3-state cycle: ascending → descending → default (no sort)
   document.querySelectorAll('thead th.sortable').forEach(th => {
     const resizer = document.createElement('span');
     resizer.className = 'col-resize';
@@ -1002,10 +1301,30 @@ async function renderList() {
       if (e.target === resizer) return; // ignore when resizing
       const key = th.dataset.key;
       const url = new URL(location.href);
-      const current = url.searchParams.get('sort') || '';
+      const current = url.searchParams.get('project_sort') || '';
       const [curKey, curDir] = current.split(':');
-      const nextDir = curKey === key && curDir === 'asc' ? 'desc' : 'asc';
-      url.searchParams.set('sort', `${key}:${nextDir}`);
+      
+      // 3-state cycle: none → asc → desc → none (default)
+      let nextSort = '';
+      if (curKey !== key) {
+        // Different column clicked, start with ascending
+        nextSort = `${key}:asc`;
+      } else if (curDir === 'asc') {
+        // Same column, currently ascending → go to descending
+        nextSort = `${key}:desc`;
+      } else if (curDir === 'desc') {
+        // Same column, currently descending → remove sort (default)
+        nextSort = '';
+      } else {
+        // No current sort on this column → start ascending
+        nextSort = `${key}:asc`;
+      }
+      
+      if (nextSort) {
+        url.searchParams.set('project_sort', nextSort);
+      } else {
+        url.searchParams.delete('project_sort');
+      }
       history.pushState({}, '', url);
       renderList();
     };
@@ -1040,7 +1359,34 @@ function formRow(label, inputHtml) {
   return `<div class="form-row"><label>${label}</label><div>${inputHtml}</div></div>`;
 }
 
-// Helper function to create multi-select dropdown for forms
+// Helper function to create searchable single-select dropdown
+function createSearchableSelect(name, options, selectedValue = '', placeholder = 'Select...', allowNone = false) {
+  const selectedOption = options.find(opt => opt.id === selectedValue);
+  const displayText = selectedOption ? selectedOption.name : placeholder;
+  
+  return `
+    <div class="searchable-select-wrapper">
+      <button type="button" class="searchable-select-btn" data-field="${name}">
+        <span class="searchable-select-text">${displayText}</span>
+        <span class="searchable-select-arrow">▼</span>
+      </button>
+      <div class="searchable-select-dropdown" id="searchable-dropdown-${name}">
+        <div class="searchable-select-search">
+          <input type="text" class="searchable-select-input" placeholder="Search..." data-field="${name}">
+        </div>
+        <div class="searchable-select-options">
+          ${allowNone ? `<div class="searchable-select-option ${!selectedValue ? 'selected' : ''}" data-value="" data-field="${name}">None</div>` : ''}
+          ${options.map(opt => `
+            <div class="searchable-select-option ${selectedValue === opt.id ? 'selected' : ''}" data-value="${opt.id}" data-field="${name}">${opt.name}</div>
+          `).join('')}
+        </div>
+      </div>
+      <input type="hidden" name="${name}" value="${selectedValue || ''}">
+    </div>
+  `;
+}
+
+// Helper function to create multi-select dropdown for forms with search
 function createMultiSelect(name, options, selectedValues = []) {
   const selectedSet = new Set(Array.isArray(selectedValues) ? selectedValues : [selectedValues].filter(Boolean));
   const selectedIds = Array.from(selectedSet);
@@ -1051,12 +1397,17 @@ function createMultiSelect(name, options, selectedValues = []) {
         ${selectedIds.length > 0 ? `${selectedIds.length} selected` : 'Select...'}
       </button>
       <div class="multi-select-dropdown" id="dropdown-${name}">
-        ${options.map(opt => `
-          <label class="multi-select-option">
-            <input type="checkbox" value="${opt.id}" ${selectedSet.has(opt.id) ? 'checked' : ''} data-field="${name}">
-            ${opt.name}
-          </label>
-        `).join('')}
+        <div class="multi-select-search">
+          <input type="text" class="multi-select-search-input" placeholder="Search..." data-field="${name}">
+        </div>
+        <div class="multi-select-options">
+          ${options.map(opt => `
+            <label class="multi-select-option" data-name="${(opt.name || '').toLowerCase()}">
+              <input type="checkbox" value="${opt.id}" ${selectedSet.has(opt.id) ? 'checked' : ''} data-field="${name}">
+              ${opt.name}
+            </label>
+          `).join('')}
+        </div>
       </div>
       <input type="hidden" name="${name}" value="${selectedIds.join(',')}">
     </div>
@@ -1065,6 +1416,7 @@ function createMultiSelect(name, options, selectedValues = []) {
 
 // Initialize multi-select dropdowns in forms
 function initializeMultiSelects() {
+  // Multi-select button click
   document.querySelectorAll('.multi-select-btn[data-field]').forEach(btn => {
     btn.onclick = (e) => {
       e.stopPropagation();
@@ -1074,11 +1426,29 @@ function initializeMultiSelects() {
       
       // Close all dropdowns
       document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+      document.querySelectorAll('.searchable-select-dropdown').forEach(d => d.classList.remove('open'));
       
       // Toggle current dropdown
       if (!isOpen) {
         dropdown.classList.add('open');
+        // Focus search input
+        const searchInput = dropdown.querySelector('.multi-select-search-input');
+        if (searchInput) setTimeout(() => searchInput.focus(), 10);
       }
+    };
+  });
+  
+  // Multi-select search functionality
+  document.querySelectorAll('.multi-select-search-input').forEach(input => {
+    input.onclick = (e) => e.stopPropagation();
+    input.oninput = (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      const fieldName = input.dataset.field;
+      const options = document.querySelectorAll(`#dropdown-${fieldName} .multi-select-option`);
+      options.forEach(opt => {
+        const name = opt.dataset.name || opt.textContent.toLowerCase();
+        opt.style.display = name.includes(searchTerm) ? 'flex' : 'none';
+      });
     };
   });
   
@@ -1086,6 +1456,9 @@ function initializeMultiSelects() {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.multi-select-wrapper')) {
       document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+    }
+    if (!e.target.closest('.searchable-select-wrapper')) {
+      document.querySelectorAll('.searchable-select-dropdown').forEach(d => d.classList.remove('open'));
     }
   });
   
@@ -1107,23 +1480,131 @@ function initializeMultiSelects() {
       }
     };
   });
+  
+  // Initialize searchable single-select dropdowns
+  document.querySelectorAll('.searchable-select-btn[data-field]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const fieldName = btn.dataset.field;
+      const dropdown = document.getElementById(`searchable-dropdown-${fieldName}`);
+      const isOpen = dropdown.classList.contains('open');
+      
+      // Close all dropdowns
+      document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
+      document.querySelectorAll('.searchable-select-dropdown').forEach(d => d.classList.remove('open'));
+      
+      // Toggle current dropdown
+      if (!isOpen) {
+        dropdown.classList.add('open');
+        // Focus search input
+        const searchInput = dropdown.querySelector('.searchable-select-input');
+        if (searchInput) setTimeout(() => searchInput.focus(), 10);
+      }
+    };
+  });
+  
+  // Searchable select search functionality
+  document.querySelectorAll('.searchable-select-input').forEach(input => {
+    input.onclick = (e) => e.stopPropagation();
+    input.oninput = (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      const fieldName = input.dataset.field;
+      const options = document.querySelectorAll(`#searchable-dropdown-${fieldName} .searchable-select-option`);
+      options.forEach(opt => {
+        const name = opt.textContent.toLowerCase();
+        opt.style.display = name.includes(searchTerm) ? 'block' : 'none';
+      });
+    };
+  });
+  
+  // Searchable select option click
+  document.querySelectorAll('.searchable-select-option').forEach(opt => {
+    opt.onclick = (e) => {
+      e.stopPropagation();
+      const fieldName = opt.dataset.field;
+      const value = opt.dataset.value;
+      const text = opt.textContent.trim();
+      
+      // Update hidden input
+      const hiddenInput = document.querySelector(`.searchable-select-wrapper input[type="hidden"][name="${fieldName}"]`);
+      if (hiddenInput) hiddenInput.value = value;
+      
+      // Update button text
+      const btn = document.querySelector(`.searchable-select-btn[data-field="${fieldName}"]`);
+      if (btn) {
+        const textSpan = btn.querySelector('.searchable-select-text');
+        if (textSpan) textSpan.textContent = text;
+      }
+      
+      // Update selected state
+      const allOptions = document.querySelectorAll(`#searchable-dropdown-${fieldName} .searchable-select-option`);
+      allOptions.forEach(o => o.classList.remove('selected'));
+      opt.classList.add('selected');
+      
+      // Close dropdown and clear search
+      const dropdown = document.getElementById(`searchable-dropdown-${fieldName}`);
+      if (dropdown) {
+        dropdown.classList.remove('open');
+        const searchInput = dropdown.querySelector('.searchable-select-input');
+        if (searchInput) {
+          searchInput.value = '';
+          allOptions.forEach(o => o.style.display = 'block');
+        }
+      }
+    };
+  });
 }
 
-function commonFields(initiative = null) {
+// Filter users by role for specific fields
+function filterUsersByRole(users, roleFilter) {
+  return users.filter(u => {
+    const role = (u.role || '').toLowerCase().trim();
+    const type = (u.type || '').toLowerCase().trim();
+    const isAdmin = u.isAdmin === true || u.isAdmin === 1 || role === 'admin';
+    
+    switch (roleFilter) {
+      case 'businessOwner':
+        // Business User and Admin role
+        return role === 'business user' || isAdmin;
+      case 'itPic':
+        // IT, IT - PM, and Admin role
+        return role === 'it' || role === 'it - pm' || role === 'it-pm' || role === 'itpm' || isAdmin;
+      case 'itManager':
+        // Admin role OR IT role with Manager type
+        return isAdmin || (role === 'it' && type === 'manager');
+      case 'itPm':
+        // IT - PM, IT PM, and Admin role
+        return role === 'it - pm' || role === 'it-pm' || role === 'itpm' || role === 'it pm' || isAdmin;
+      default:
+        return true;
+    }
+  });
+}
+
+function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'Initiative Name') {
   const option = (value, label, selected) => `<option value="${value}" ${selected ? 'selected' : ''}>${label}</option>`;
   
+  // Filter users for specific fields
+  const businessOwnerUsers = filterUsersByRole(LOOKUPS.users, 'businessOwner');
+  const itPicUsers = filterUsersByRole(LOOKUPS.users, 'itPic');
+  const itManagerUsers = filterUsersByRole(LOOKUPS.users, 'itManager');
+  const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
+  
+  // Determine selected type: from initiative if exists, otherwise from defaultType
+  const selectedType = initiative ? initiative.type : defaultType;
+  
   return [
-    formRow('Type', `<select name="type" required><option value="Project" ${!initiative || initiative.type === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${initiative && initiative.type === 'CR' ? 'selected' : ''}>CR</option></select>`),
-    formRow('Initiative Name', `<input name="name" value="${initiative ? (initiative.name || '').replace(/"/g, '&quot;') : ''}" required />`),
+    formRow('Type', `<select name="type" id="typeSelect" required><option value="Project" ${selectedType === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${selectedType === 'CR' ? 'selected' : ''}>CR</option></select>`),
+    formRow(`<span id="nameLabelText">${nameLabel}</span>`, `<input name="name" id="nameInput" value="${initiative ? (initiative.name || '').replace(/"/g, '&quot;') : ''}" required />`),
     formRow('Description', `<textarea name="description" class="long-text" required>${initiative ? (initiative.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Business Impact', `<textarea name="businessImpact" class="long-text" required>${initiative ? (initiative.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Priority', `<select name="priority">${option('P0', 'P0', initiative?.priority === 'P0')}${option('P1', 'P1', initiative?.priority === 'P1')}${option('P2', 'P2', !initiative || initiative.priority === 'P2')}</select>`),
-    formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.businessOwnerId === u.id)).join('')}</select>`),
+    formRow('Business Owner / Requestor', createSearchableSelect('businessOwnerId', businessOwnerUsers, initiative?.businessOwnerId || '', 'Select...')),
     formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, initiative?.businessUserIds || [])),
-    formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => option(d.id, d.name, initiative?.departmentId === d.id)).join('')}</select>`),
-    formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, initiative?.itPicIds || (initiative?.itPicId ? [initiative.itPicId] : []))),
-    formRow('IT PM', `<select name="itPmId">${option('', 'None', !initiative?.itPmId)}${LOOKUPS.users.map(u => option(u.id, u.name, initiative?.itPmId === u.id)).join('')}</select>`),
-    formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, initiative?.itManagerIds || [])),
+    formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, initiative?.departmentId || '', 'Select...')),
+    formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, initiative?.itPicIds || (initiative?.itPicId ? [initiative.itPicId] : []))),
+    formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, initiative?.itPmId || '', 'Select...', true)),
+    formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, initiative?.itManagerIds || [])),
     formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => option(s, s, initiative?.status === s)).join('')}</select>`),
     formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, initiative?.milestone === m)).join('')}</select>`),
     formRow('Start Date', `<input type="date" name="startDate" value="${initiative?.startDate?.slice(0,10) || ''}" required />`),
@@ -1134,51 +1615,53 @@ function commonFields(initiative = null) {
 }
 
 function crFields() {
-  return `
-    <div id="crFields">
-      ${formRow('CR Submission Start', `<input type="date" name="cr.crSubmissionStart" />`)}
-      ${formRow('CR Submission End', `<input type="date" name="cr.crSubmissionEnd" />`)}
-      ${formRow('Development Start', `<input type="date" name="cr.developmentStart" />`)}
-      ${formRow('Development End', `<input type="date" name="cr.developmentEnd" />`)}
-      ${formRow('SIT Start', `<input type="date" name="cr.sitStart" />`)}
-      ${formRow('SIT End', `<input type="date" name="cr.sitEnd" />`)}
-      ${formRow('UAT Start', `<input type="date" name="cr.uatStart" />`)}
-      ${formRow('UAT End', `<input type="date" name="cr.uatEnd" />`)}
-      ${formRow('Live Date', `<input type="date" name="cr.liveDate" />`)}
-    </div>`;
+  // CR dates have been removed - no longer used
+  return `<div id="crFields"></div>`;
 }
 
-async function renderNew() {
+async function renderNew(defaultType = 'Project') {
   setActive('#new');
   await ensureLookups();
+  
+  const isCR = defaultType === 'CR';
+  const pageTitle = isCR ? 'New CR' : 'New Initiative';
+  const nameLabel = isCR ? 'CR Name' : 'Initiative Name';
+  const cancelHref = isCR ? '#crlist' : '#list';
+  
   app.innerHTML = `
     <div class="card">
-      <h2>New Initiative</h2>
+      <h2>${pageTitle}</h2>
       <form id="f" class="form">
-        ${commonFields()}
-        <div id="crContainer" class="card" style="display:none">
-          <h3>CR Details</h3>
-          ${crFields()}
-        </div>
-        <div>
-          <button class="primary" type="submit">Create</button>
-          <a href="#list"><button type="button">Cancel</button></a>
+        ${commonFields(null, defaultType, nameLabel)}
+        <div class="form-actions">
+          <button type="button" class="btn-fixed" onclick="location.hash='${cancelHref}'">Cancel</button>
+          <button type="submit" class="btn-fixed primary">Create</button>
         </div>
       </form>
-      <div class="muted">Note: For CR, CR Submission Start is required.</div>
     </div>
   `;
+
+  // Initialize horizontal scroll affordance for the CR table.
+  initScrollableTables();
   
   // Initialize multi-select dropdowns
   initializeMultiSelects();
   
   const f = document.getElementById('f');
   const typeEl = f.querySelector('select[name="type"]');
-  const crBox = document.getElementById('crContainer');
-  typeEl.onchange = () => {
-    crBox.style.display = typeEl.value === 'CR' ? 'block' : 'none';
+  const nameLabelEl = document.getElementById('nameLabelText');
+  const pageTitleEl = document.querySelector('.card h2');
+  
+  // Function to update labels based on type
+  const updateLabelsForType = () => {
+    const isCR = typeEl.value === 'CR';
+    if (nameLabelEl) nameLabelEl.textContent = isCR ? 'CR Name' : 'Initiative Name';
+    if (pageTitleEl) pageTitleEl.textContent = isCR ? 'New CR' : 'New Initiative';
   };
-  typeEl.onchange();
+  
+  typeEl.onchange = updateLabelsForType;
+  updateLabelsForType(); // Apply initial state
+  
   f.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(f);
@@ -1208,23 +1691,20 @@ async function renderNew() {
       remark: obj.remark || null,
       documentationLink: obj.documentationLink || null
     };
+    // CR dates removed - no longer used
     if (obj.type === 'CR') {
-      payload.cr = {
-        crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-        crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
-        developmentStart: obj['cr.developmentStart'] || null,
-        developmentEnd: obj['cr.developmentEnd'] || null,
-        sitStart: obj['cr.sitStart'] || null,
-        sitEnd: obj['cr.sitEnd'] || null,
-        uatStart: obj['cr.uatStart'] || null,
-        uatEnd: obj['cr.uatEnd'] || null,
-        liveDate: obj['cr.liveDate'] || null
-      };
+      payload.cr = {};
     }
     try {
       await fetchJSON('/api/initiatives', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-      location.hash = '#list';
-      renderList();
+      // Redirect to appropriate list based on type
+      if (obj.type === 'CR') {
+        location.hash = '#crlist';
+        renderCRList();
+      } else {
+        location.hash = '#list';
+        renderList();
+      }
     } catch (e) {
       alert(e.message);
     }
@@ -1232,10 +1712,12 @@ async function renderNew() {
 }
 
 async function renderView(id) {
-  setActive('#list');
   await ensureLookups();
   await getCurrentUser();
   const i = await fetchJSON('/api/initiatives/' + id);
+  
+  // Set active nav based on initiative type
+  setActive(i.type === 'CR' ? '#crlist' : '#list');
   const boName = nameById(LOOKUPS.users, i.businessOwnerId);
   const depName = nameById(LOOKUPS.departments, i.departmentId);
   const itPicName = nameById(LOOKUPS.users, i.itPicId);
@@ -1253,9 +1735,48 @@ async function renderView(id) {
   } catch (e) {
     console.error('Error fetching comments/tasks:', e);
   }
+  
+  // Sort tasks by Milestone and Start Date (Ascending)
+  // Milestone order: None -> Business Requirement -> Tech Assessment -> Planning -> Development -> Testing -> Live Preparation
+  const milestoneOrder = {
+    '': 0,
+    'none': 0,
+    'business requirement': 1,
+    'tech assessment': 2,
+    'planning': 3,
+    'development': 4,
+    'testing': 5,
+    'live preparation': 6,
+    'live': 6,
+    'preparation': 0
+  };
+  
+  tasks.sort((a, b) => {
+    // First sort by milestone
+    const aMilestone = (a.milestone || '').toLowerCase();
+    const bMilestone = (b.milestone || '').toLowerCase();
+    const aMilestoneOrder = milestoneOrder[aMilestone] !== undefined ? milestoneOrder[aMilestone] : 999;
+    const bMilestoneOrder = milestoneOrder[bMilestone] !== undefined ? milestoneOrder[bMilestone] : 999;
+    
+    if (aMilestoneOrder !== bMilestoneOrder) {
+      return aMilestoneOrder - bMilestoneOrder;
+    }
+    
+    // Then sort by Start Date (Ascending)
+    const aStartDate = a.startDate ? new Date(a.startDate) : new Date('9999-12-31'); // Put tasks without dates at the end
+    const bStartDate = b.startDate ? new Date(b.startDate) : new Date('9999-12-31');
+    return aStartDate - bStartDate;
+  });
 
   // Calculate % Completion based on task statuses (fallback to initiative status when no tasks)
   const statusToPercent = {
+    // Task status enum values
+    'not started': 0,
+    'in progress': 50,
+    'at risk': 25,
+    'cancel': 100,
+    'done': 100,
+    // Initiative status values (for fallback)
     'Not Started': 0,
     'On Hold': 0,
     'On Track': 50,
@@ -1264,19 +1785,58 @@ async function renderView(id) {
     'Live': 100,
     'Cancelled': 100
   };
-  const getPercentForStatus = (status) => statusToPercent[status] ?? 0;
+  const getPercentForStatus = (status) => {
+    // Normalize to lowercase for task statuses
+    const normalized = status?.toLowerCase();
+    return statusToPercent[normalized] ?? statusToPercent[status] ?? 0;
+  };
   const completionPercent = (() => {
     if (Array.isArray(tasks) && tasks.length > 0) {
-      const total = tasks.reduce((sum, t) => sum + getPercentForStatus(t.status || 'Not Started'), 0);
+      const total = tasks.reduce((sum, t) => sum + getPercentForStatus(t.status || 'not started'), 0);
       return Math.round(total / tasks.length);
     }
     return getPercentForStatus(i.status || 'Not Started');
   })();
   
-  // Calculate aging
-  const createDate = new Date(i.createdAt || i.startDate);
+  // Calculate aging metrics
+  const createDate = i.createdAt ? new Date(i.createdAt) : null;
+  const startDate = i.startDate ? new Date(i.startDate) : null;
+  const endDate = i.endDate ? new Date(i.endDate) : null;
+  
+  // Age Created to Start: Calculate from Create Date to Start Date
+  let ageCreatedToStart = null;
+  if (createDate && startDate) {
+    ageCreatedToStart = Math.floor((startDate - createDate) / (1000 * 60 * 60 * 24));
+  }
+  
+  // Cycle Time (Age Start to End): Calculate from Start Date to End Date (or Current Date if End Date is empty)
+  let cycleTime = null;
+  if (startDate) {
+    if (endDate) {
+      // If End Date exists, calculate from Start Date to End Date
+      cycleTime = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+    } else {
+      // If End Date is empty, calculate from Start Date to Current Date
+      const now = new Date();
+      cycleTime = Math.floor((now - startDate) / (1000 * 60 * 60 * 24));
+    }
+  }
+  
+  // Total Age: Age Created to Start + Cycle Time
+  let totalAge = null;
+  if (ageCreatedToStart !== null && cycleTime !== null) {
+    totalAge = ageCreatedToStart + cycleTime;
+  } else if (ageCreatedToStart !== null) {
+    // If cycle time not available (no start date), just show age created to start
+    totalAge = ageCreatedToStart;
+  } else if (cycleTime !== null) {
+    // If only cycle time is available (no create date), show cycle time
+    totalAge = cycleTime;
+  }
+  
+  // Keep daysSinceCreated for backward compatibility (used in dashboard)
   const now = new Date();
-  const daysSinceCreated = Math.floor((now - createDate) / (1000 * 60 * 60 * 24));
+  const daysSinceCreated = createDate ? Math.floor((now - createDate) / (1000 * 60 * 60 * 24)) : 0;
   
   // Helper to format activity log field labels
   const formatActivityFieldLabel = (field) => {
@@ -1390,7 +1950,9 @@ async function renderView(id) {
         <div><div class="muted">Department</div><div>${depName}</div></div>
         <div><div class="muted">Start Date</div><div>${i.startDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">End Date</div><div>${i.endDate?.slice(0,10) || ''}</div></div>
-        <div><div class="muted">Age Since Created</div><div><strong>${daysSinceCreated} days</strong></div></div>
+        <div><div class="muted">Age Created to Start</div><div><strong>${ageCreatedToStart !== null ? ageCreatedToStart + ' days' : 'N/A'}</strong></div></div>
+        <div><div class="muted">Cycle Time (Age Start to End)</div><div><strong>${cycleTime !== null ? cycleTime + ' days' : 'N/A'}</strong></div></div>
+        <div><div class="muted">Total Age</div><div><strong>${totalAge !== null ? totalAge + ' days' : 'N/A'}</strong></div></div>
         <div style="grid-column: 1 / -1"><div class="muted">Description</div><div style="white-space: pre-wrap; line-height: 1.6;">${i.description || ''}</div></div>
         <div style="grid-column: 1 / -1"><div class="muted">Business Impact</div><div style="white-space: pre-wrap; line-height: 1.6;">${i.businessImpact || ''}</div></div>
         <div style="grid-column: 1 / -1"><div class="muted">Remark</div><div style="white-space: pre-wrap; line-height: 1.6;">${i.remark || ''}</div></div>
@@ -1442,111 +2004,111 @@ async function renderView(id) {
         </div>
       </div>
       
-      ${i.type === 'CR' ? `
-        <h3>CR Dates</h3>
-        <div class="grid">
-          <div><div class="muted">Submission</div><div>${i.cr?.crSubmissionStart || ''} → ${i.cr?.crSubmissionEnd || ''}</div></div>
-          <div><div class="muted">Development</div><div>${i.cr?.developmentStart || ''} → ${i.cr?.developmentEnd || ''}</div></div>
-          <div><div class="muted">SIT</div><div>${i.cr?.sitStart || ''} → ${i.cr?.sitEnd || ''}</div></div>
-          <div><div class="muted">UAT</div><div>${i.cr?.uatStart || ''} → ${i.cr?.uatEnd || ''}</div></div>
-          <div><div class="muted">Live</div><div>${i.cr?.liveDate || ''}</div></div>
-        </div>
-      ` : ''}
-      <!-- Activity Log Section -->
-      <div style="grid-column: 1 / -1; margin-top: 24px;">
-        <h3>📋 Activity Log</h3>
-        <div class="card" style="margin-top: 16px; max-height: 600px; overflow-y: auto;">
-          ${i.changeHistory && i.changeHistory.length > 0 ? `
-            ${i.changeHistory.map((history, idx) => {
-              const changedByName = nameById(LOOKUPS.users, history.changedBy) || history.changedBy || 'System';
-              const timestamp = new Date(history.timestamp);
-              const formattedDate = timestamp.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-              const formattedTime = timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-              return `
-                <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: ${idx < i.changeHistory.length - 1 ? '1px solid #e5e7eb' : 'none'};">
-                  <div style="display: flex; align-items: center; margin-bottom: 12px;">
-                    <div style="width: 8px; height: 8px; background: var(--brand); border-radius: 50%; margin-right: 12px;"></div>
-                    <div style="flex: 1;">
-                      <div style="font-weight: 600; color: var(--text); margin-bottom: 4px;">${changedByName}</div>
-                      <div class="muted" style="font-size: 12px;">${formattedDate} at ${formattedTime}</div>
-                    </div>
-                  </div>
-              ${history.changes && history.changes.length > 0 ? `
-                    <div style="margin-left: 20px; padding-left: 16px; border-left: 2px solid var(--border-light);">
-                      ${history.changes.map(change => {
-                        const fieldLabel = formatActivityFieldLabel(change.field);
-                        const oldFormatted = formatActivityValue(change.field, change.oldValue);
-                        const newFormatted = formatActivityValue(change.field, change.newValue);
-                        return `
-                          <div style="margin: 8px 0; padding: 10px; background: #f8fafc; border-radius: 6px; border-left: 3px solid var(--brand);">
-                            <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">${fieldLabel}</div>
-                            <div style="font-size: 13px; line-height: 1.6;">
-                              <span style="color: #ef4444; text-decoration: line-through; padding: 2px 6px; background: #fee2e2; border-radius: 3px;">${oldFormatted}</span>
-                              <span style="margin: 0 8px; color: var(--muted);">→</span>
-                              <span style="color: #10b981; padding: 2px 6px; background: #d1fae5; border-radius: 3px;">${newFormatted}</span>
-                            </div>
-                          </div>
-                        `;
-                      }).join('')}
-                    </div>
-                  ` : `
-                    <div style="margin-left: 20px; padding: 8px; color: var(--muted); font-size: 13px; font-style: italic;">
-                      No specific field changes recorded
-                    </div>
-                  `}
-                </div>
-              `;
-            }).join('')}
-          ` : `
-            <div style="padding: 40px; text-align: center; color: var(--muted);">
-              <div style="font-size: 48px; margin-bottom: 12px;">📝</div>
-              <div style="font-weight: 500; margin-bottom: 4px;">No activity recorded yet</div>
-              <div style="font-size: 13px;">Changes to this initiative will appear here</div>
-            </div>
-          `}
-        </div>
-      </div>
       <div style="margin-top:12px"><a href="#list"><button>Back</button></a></div>
     </div>
     
     
-    <!-- Comments Section -->
+    <!-- Comments & Activity Log Combined Section -->
     <div class="card" style="margin-top: 24px;">
-      <h3>Comments</h3>
-      <div id="comments-list" style="margin-bottom: 16px;">
-        ${comments.length === 0 ? '<p class="muted">No comments yet. Be the first to comment!</p>' : ''}
-        ${comments.map(c => {
-          const author = nameById(LOOKUPS.users, c.authorId) || 'Unknown';
-          const canEdit = currentUser && (c.authorId === currentUser.id || currentUser.isAdmin);
-          return `
-            <div class="comment-item" style="margin-bottom: 16px; padding: 12px; background: var(--gray-50); border-radius: 8px;">
-              <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
-                <div>
-                  <strong>${author}</strong>
-                  <span class="muted" style="font-size: 12px; margin-left: 8px;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</span>
-                  ${c.updatedAt ? `<span class="muted" style="font-size: 11px; margin-left: 8px;">(edited)</span>` : ''}
-                </div>
-                ${canEdit ? `
-                  <div>
-                    <button class="edit-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; margin-right: 4px;">Edit</button>
-                    <button class="delete-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; color: var(--danger);">Delete</button>
-                  </div>
-                ` : ''}
-              </div>
-              <div class="comment-body">${formatCommentBody(c.body || '')}</div>
-            </div>
-          `;
-        }).join('')}
+      <!-- Tabs Header -->
+      <div style="display: flex; border-bottom: 2px solid var(--border); margin-bottom: 16px;">
+        <button id="tab-comments" class="tab-btn active" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid var(--brand); margin-bottom: -2px; color: var(--brand);">
+          💬 Comments <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${comments.length}</span>
+        </button>
+        <button id="tab-activity" class="tab-btn" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--muted);">
+          📋 Activity Log <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${i.changeHistory?.length || 0}</span>
+        </button>
       </div>
-      <div>
-        <div style="position: relative;">
-          <textarea id="new-comment" placeholder="Add a comment... (use @username to mention someone)" rows="3" style="width: 100%; margin-bottom: 8px;"></textarea>
-          <div id="mention-autocomplete" class="mention-autocomplete hidden"></div>
+      
+      <!-- Comments Tab Content -->
+      <div id="tab-content-comments" class="tab-content">
+        <div id="comments-list" style="margin-bottom: 16px;">
+          ${comments.length === 0 ? '<p class="muted">No comments yet. Be the first to comment!</p>' : ''}
+          ${comments.map(c => {
+            const author = nameById(LOOKUPS.users, c.authorId) || 'Unknown';
+            const canEdit = currentUser && (c.authorId === currentUser.id || currentUser.isAdmin);
+            return `
+              <div class="comment-item" style="margin-bottom: 16px; padding: 12px; background: var(--gray-50); border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                  <div>
+                    <strong>${author}</strong>
+                    <span class="muted" style="font-size: 12px; margin-left: 8px;">${c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</span>
+                    ${c.updatedAt ? `<span class="muted" style="font-size: 11px; margin-left: 8px;">(edited)</span>` : ''}
+                  </div>
+                  ${canEdit ? `
+                    <div>
+                      <button class="edit-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; margin-right: 4px;">Edit</button>
+                      <button class="delete-comment-btn" data-id="${c.id}" style="font-size: 12px; padding: 4px 8px; color: var(--danger);">Delete</button>
+                    </div>
+                  ` : ''}
+                </div>
+                <div class="comment-body">${formatCommentBody(c.body || '')}</div>
+              </div>
+            `;
+          }).join('')}
         </div>
-        <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
-          💡 Tip: Type @ followed by a username to mention someone
+        <div>
+          <div style="position: relative;">
+            <textarea id="new-comment" placeholder="Add a comment... (use @username to mention someone)" rows="3" style="width: 100%; margin-bottom: 8px;"></textarea>
+            <div id="mention-autocomplete" class="mention-autocomplete hidden"></div>
+          </div>
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
+            💡 Tip: Type @ followed by a username to mention someone
+          </div>
+          <button id="add-comment-btn" class="primary">Add Comment</button>
         </div>
-        <button id="add-comment-btn" class="primary">Add Comment</button>
+      </div>
+      
+      <!-- Activity Log Tab Content -->
+      <div id="tab-content-activity" class="tab-content" style="display: none; max-height: 600px; overflow-y: auto;">
+        ${i.changeHistory && i.changeHistory.length > 0 ? `
+          ${i.changeHistory.map((history, idx) => {
+            const changedByName = nameById(LOOKUPS.users, history.changedBy) || history.changedBy || 'System';
+            const timestamp = new Date(history.timestamp);
+            const formattedDate = timestamp.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+            const formattedTime = timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            return `
+              <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: ${idx < i.changeHistory.length - 1 ? '1px solid #e5e7eb' : 'none'};">
+                <div style="display: flex; align-items: center; margin-bottom: 12px;">
+                  <div style="width: 8px; height: 8px; background: var(--brand); border-radius: 50%; margin-right: 12px;"></div>
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; color: var(--text); margin-bottom: 4px;">${changedByName}</div>
+                    <div class="muted" style="font-size: 12px;">${formattedDate} at ${formattedTime}</div>
+                  </div>
+                </div>
+            ${history.changes && history.changes.length > 0 ? `
+                  <div style="margin-left: 20px; padding-left: 16px; border-left: 2px solid var(--border-light);">
+                    ${history.changes.map(change => {
+                      const fieldLabel = formatActivityFieldLabel(change.field);
+                      const oldFormatted = formatActivityValue(change.field, change.oldValue);
+                      const newFormatted = formatActivityValue(change.field, change.newValue);
+                      return `
+                        <div style="margin: 8px 0; padding: 10px; background: #f8fafc; border-radius: 6px; border-left: 3px solid var(--brand);">
+                          <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">${fieldLabel}</div>
+                          <div style="font-size: 13px; line-height: 1.6;">
+                            <span style="color: #ef4444; text-decoration: line-through; padding: 2px 6px; background: #fee2e2; border-radius: 3px;">${oldFormatted}</span>
+                            <span style="margin: 0 8px; color: var(--muted);">→</span>
+                            <span style="color: #10b981; padding: 2px 6px; background: #d1fae5; border-radius: 3px;">${newFormatted}</span>
+                          </div>
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+                ` : `
+                  <div style="margin-left: 20px; padding: 8px; color: var(--muted); font-size: 13px; font-style: italic;">
+                    No specific field changes recorded
+                  </div>
+                `}
+              </div>
+            `;
+          }).join('')}
+        ` : `
+          <div style="padding: 40px; text-align: center; color: var(--muted);">
+            <div style="font-size: 48px; margin-bottom: 12px;">📝</div>
+            <div style="font-weight: 500; margin-bottom: 4px;">No activity recorded yet</div>
+            <div style="font-size: 13px;">Changes to this initiative will appear here</div>
+          </div>
+        `}
       </div>
     </div>
     
@@ -1582,12 +2144,15 @@ async function renderView(id) {
             ${tasks.length === 0 ? '<tr><td colspan="7" class="muted" style="text-align: center; padding: 20px;">No tasks yet</td></tr>' : ''}
             ${tasks.map(t => {
               const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
+              const taskStatus = (t.status || 'not started').toLowerCase();
+              const taskStatusLabels = { 'not started': 'Not Started', 'in progress': 'In Progress', 'at risk': 'At Risk', 'cancel': 'Cancelled', 'done': 'Done' };
+              const taskStatusLabel = taskStatusLabels[taskStatus] || t.status || 'Not Started';
               return `
                 <tr>
                   <td><strong>${t.name}</strong>${t.description ? `<br><small class="muted">${t.description}</small>` : ''}</td>
                   <td>${t.milestone || '-'}</td>
                   <td>${assignee}</td>
-                  <td><span class="status-badge status-${(t.status || 'Not Started')?.replace(/\s+/g, '-')}">${t.status || 'Not Started'}</span></td>
+                  <td><span class="status-badge status-${taskStatus.replace(/\s+/g, '-')}">${taskStatusLabel}</span></td>
                   <td>${t.startDate ? t.startDate.slice(0,10) : '-'}</td>
                   <td>${t.endDate ? t.endDate.slice(0,10) : '-'}</td>
                   <td>
@@ -1603,38 +2168,48 @@ async function renderView(id) {
       
       <!-- Task Kanban View -->
       <div id="tasks-kanban-view" class="task-view hidden">
-        <div class="kanban-board" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
-          ${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(status => {
-            const statusTasks = tasks.filter(t => (t.status || 'Not Started') === status);
-            return `
-              <div class="kanban-column" data-status="${status}" style="background: var(--gray-50); border-radius: 8px; padding: 12px; min-height: 200px;">
-                <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600;">${status} (${statusTasks.length})</h4>
-                <div class="kanban-tasks" data-status="${status}">
-                  ${statusTasks.map(t => {
-                    const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
-                    return `
-                      <div class="kanban-task" draggable="true" data-id="${t.id}" data-status="${t.status || 'Not Started'}" style="background: white; padding: 12px; margin-bottom: 8px; border-radius: 6px; cursor: move; box-shadow: var(--shadow);">
-                        <div style="font-weight: 600; margin-bottom: 4px;">${t.name}</div>
-                        ${t.description ? `<div class="muted" style="font-size: 12px; margin-bottom: 4px;">${t.description}</div>` : ''}
-                        <div style="font-size: 11px; color: var(--muted);">
-                          <div>👤 ${assignee}</div>
-                          ${t.milestone ? `<div>📍 ${t.milestone}</div>` : ''}
-                          ${t.startDate || t.endDate ? `<div>📅 ${t.startDate ? t.startDate.slice(0,10) : ''} ${t.endDate ? '→ ' + t.endDate.slice(0,10) : ''}</div>` : ''}
+        <div class="kanban-board" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; overflow-x: auto;">
+          ${(() => {
+            // Task status enums with display labels - ordered: Not Started -> In Progress -> Done -> At Risk -> Cancelled
+            const KANBAN_STATUSES = [
+              { value: 'not started', label: 'Not Started' },
+              { value: 'in progress', label: 'In Progress' },
+              { value: 'done', label: 'Done' },
+              { value: 'at risk', label: 'At Risk' },
+              { value: 'cancel', label: 'Cancelled' }
+            ];
+            return KANBAN_STATUSES.map(({ value: status, label }) => {
+              // Match tasks by normalizing status to lowercase
+              const statusTasks = tasks.filter(t => (t.status || 'not started').toLowerCase() === status);
+              return `
+                <div class="kanban-column" data-status="${status}" style="background: var(--gray-50); border-radius: 8px; padding: 12px; min-height: 200px;">
+                  <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 600;">${label} (${statusTasks.length})</h4>
+                  <div class="kanban-tasks" data-status="${status}">
+                    ${statusTasks.map(t => {
+                      const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
+                      return `
+                        <div class="kanban-task" draggable="true" data-id="${t.id}" data-status="${(t.status || 'not started').toLowerCase()}" style="background: white; padding: 12px; margin-bottom: 8px; border-radius: 6px; cursor: move; box-shadow: var(--shadow);">
+                          <div style="font-weight: 600; margin-bottom: 4px;">${t.name}</div>
+                          <div style="font-size: 11px; color: var(--muted);">
+                            <div>👤 ${assignee}</div>
+                            ${t.milestone ? `<div>📍 ${t.milestone}</div>` : ''}
+                            ${t.startDate || t.endDate ? `<div>📅 ${t.startDate ? t.startDate.slice(0,10) : ''} ${t.endDate ? '→ ' + t.endDate.slice(0,10) : ''}</div>` : ''}
+                          </div>
                         </div>
-                      </div>
-                    `;
-                  }).join('')}
+                      `;
+                    }).join('')}
+                  </div>
                 </div>
-              </div>
-            `;
-          }).join('')}
+              `;
+            }).join('');
+          })()}
         </div>
       </div>
       
       <!-- Task Gantt Chart View -->
       <div id="tasks-gantt-view" class="task-view hidden">
         <div id="gantt-container" style="overflow-x: auto; overflow-y: auto; max-height: 70vh; border: 1px solid var(--border); border-radius: 8px; background: white;">
-          <div id="gantt-chart" style="min-width: 100%; padding: 16px;">
+          <div id="gantt-chart" style="min-width: 100%;">
             <!-- Gantt chart will be rendered here -->
           </div>
         </div>
@@ -1808,9 +2383,46 @@ async function renderView(id) {
   // Setup @mention autocomplete for comment textarea
   setupMentionAutocomplete('new-comment');
   
+  // Tab switching for Comments/Activity Log
+  const tabComments = document.getElementById('tab-comments');
+  const tabActivity = document.getElementById('tab-activity');
+  const contentComments = document.getElementById('tab-content-comments');
+  const contentActivity = document.getElementById('tab-content-activity');
+  
+  const switchTab = (activeTab) => {
+    // Update tab buttons
+    [tabComments, tabActivity].forEach(tab => {
+      tab.style.borderBottomColor = 'transparent';
+      tab.style.color = 'var(--muted)';
+      tab.style.fontWeight = '500';
+    });
+    activeTab.style.borderBottomColor = 'var(--brand)';
+    activeTab.style.color = 'var(--brand)';
+    activeTab.style.fontWeight = '600';
+    
+    // Show/hide content
+    if (activeTab === tabComments) {
+      contentComments.style.display = 'block';
+      contentActivity.style.display = 'none';
+    } else {
+      contentComments.style.display = 'none';
+      contentActivity.style.display = 'block';
+    }
+  };
+  
+  tabComments.onclick = () => switchTab(tabComments);
+  tabActivity.onclick = () => switchTab(tabActivity);
+  
   // Edit mode toggle button - replace view with edit form
   document.getElementById('toggle-edit-btn').onclick = () => {
     const itPicIds = i.itPicIds || (i.itPicId ? [i.itPicId] : []);
+    
+    // Filter users for specific fields
+    const businessOwnerUsers = filterUsersByRole(LOOKUPS.users, 'businessOwner');
+    const itPicUsers = filterUsersByRole(LOOKUPS.users, 'itPic');
+    const itManagerUsers = filterUsersByRole(LOOKUPS.users, 'itManager');
+    const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
+    
     const card = document.querySelector('.card');
     card.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -1828,10 +2440,12 @@ async function renderView(id) {
         ${formRow('Priority', `<select name="priority">${['P0','P1','P2'].map(p => `<option value="${p}" ${i.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
           ${formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => `<option value="${s}" ${i.status && i.status.toLowerCase() === s.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}</select>`)}
         ${formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
-        ${formRow('Department', `<select name="departmentId" required>${LOOKUPS.departments.map(d => `<option value="${d.id}" ${d.id === i.departmentId ? 'selected' : ''}>${d.name}</option>`).join('')}</select>`)}
+        ${formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, i.departmentId || '', 'Select...'))}
         ${formRow('Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" required />`)}
         ${formRow('End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
-        <div class="form-row"><label>Age Since Created</label><div><strong>${daysSinceCreated} days</strong></div></div>
+        <div class="form-row"><label>Age Created to Start</label><div><strong>${ageCreatedToStart !== null ? ageCreatedToStart + ' days' : 'N/A'}</strong></div></div>
+        <div class="form-row"><label>Cycle Time (Age Start to End)</label><div><strong>${cycleTime !== null ? cycleTime + ' days' : 'N/A'}</strong></div></div>
+        <div class="form-row"><label>Total Age</label><div><strong>${totalAge !== null ? totalAge + ' days' : 'N/A'}</strong></div></div>
         ${formRow('Description', `<textarea name="description" class="long-text" required style="min-height: 100px;">${(i.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
         ${formRow('Business Impact', `<textarea name="businessImpact" class="long-text" required style="min-height: 100px;">${(i.businessImpact || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
         ${formRow('Remark', `<textarea name="remark" class="long-text" style="min-height: 80px;">${(i.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>`)}
@@ -1840,27 +2454,13 @@ async function renderView(id) {
         <!-- Project Team Section -->
         <div style="margin-top: 24px; padding: 20px; background: var(--gray-50); border-radius: 8px;">
           <h3 style="margin: 0 0 16px 0; color: var(--text);">👥 Project Team</h3>
-          ${formRow('IT PM', `<select name="itPmId">${[''].concat(LOOKUPS.users.map(u => u.id)).map(uid => `<option value="${uid}" ${i.itPmId === uid ? 'selected' : ''}>${uid ? nameById(LOOKUPS.users, uid) : 'None'}</option>`).join('')}</select>`)}
-          ${formRow('IT PIC', createMultiSelect('itPicIds', LOOKUPS.users, itPicIds))}
-          ${formRow('IT Manager', createMultiSelect('itManagerIds', LOOKUPS.users, i.itManagerIds || []))}
-          ${formRow('Business Owner / Requestor', `<select name="businessOwnerId" required>${LOOKUPS.users.map(u => `<option value="${u.id}" ${u.id === i.businessOwnerId ? 'selected' : ''}>${u.name}</option>`).join('')}</select>`)}
+          ${formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, i.itPmId || '', 'Select...', true))}
+          ${formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, itPicIds))}
+          ${formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, i.itManagerIds || []))}
+          ${formRow('Business Owner / Requestor', createSearchableSelect('businessOwnerId', businessOwnerUsers, i.businessOwnerId || '', 'Select...'))}
           ${formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, i.businessUserIds || []))}
         </div>
         
-        ${i.type === 'CR' ? `
-          <div style="margin-top: 24px;">
-            <h3>CR Dates</h3>
-            ${formRow('CR Submission Start', `<input type="date" name="cr.crSubmissionStart" value="${i.cr?.crSubmissionStart?.slice(0,10) || ''}" />`)}
-            ${formRow('CR Submission End', `<input type="date" name="cr.crSubmissionEnd" value="${i.cr?.crSubmissionEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('Development Start', `<input type="date" name="cr.developmentStart" value="${i.cr?.developmentStart?.slice(0,10) || ''}" />`)}
-            ${formRow('Development End', `<input type="date" name="cr.developmentEnd" value="${i.cr?.developmentEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('SIT Start', `<input type="date" name="cr.sitStart" value="${i.cr?.sitStart?.slice(0,10) || ''}" />`)}
-            ${formRow('SIT End', `<input type="date" name="cr.sitEnd" value="${i.cr?.sitEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('UAT Start', `<input type="date" name="cr.uatStart" value="${i.cr?.uatStart?.slice(0,10) || ''}" />`)}
-            ${formRow('UAT End', `<input type="date" name="cr.uatEnd" value="${i.cr?.uatEnd?.slice(0,10) || ''}" />`)}
-            ${formRow('Live Date', `<input type="date" name="cr.liveDate" value="${i.cr?.liveDate?.slice(0,10) || ''}" />`)}
-          </div>
-        ` : ''}
         <div style="margin-top: 20px; display: flex; gap: 12px;">
           <button type="button" id="cancel-edit-btn-2">Cancel</button>
           <button type="button" id="save-btn-2" class="primary">💾 Save</button>
@@ -1909,18 +2509,9 @@ async function renderView(id) {
         changedBy: currentUser?.id || 'Unknown'
       };
       
+      // CR dates removed - no longer used
       if (i.type === 'CR') {
-        payload.cr = {
-          crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-          crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
-          developmentStart: obj['cr.developmentStart'] || null,
-          developmentEnd: obj['cr.developmentEnd'] || null,
-          sitStart: obj['cr.sitStart'] || null,
-          sitEnd: obj['cr.sitEnd'] || null,
-          uatStart: obj['cr.uatStart'] || null,
-          uatEnd: obj['cr.uatEnd'] || null,
-          liveDate: obj['cr.liveDate'] || null
-        };
+        payload.cr = {};
       }
       
       try {
@@ -2133,7 +2724,16 @@ async function renderView(id) {
           const header = col.querySelector('h4');
           if (header) {
             const status = col.dataset.status;
-            header.textContent = `${status} (${count})`;
+            // Map enum value to display label
+            const statusLabels = {
+              'not started': 'Not Started',
+              'in progress': 'In Progress',
+              'at risk': 'At Risk',
+              'cancel': 'Cancelled',
+              'done': 'Done'
+            };
+            const label = statusLabels[status] || status;
+            header.textContent = `${label} (${count})`;
           }
         };
         updateColumnCount(oldColumn);
@@ -2152,14 +2752,14 @@ async function renderView(id) {
 // Download task template function
 function downloadTaskTemplate() {
   const headers = ['name', 'description', 'startDate', 'endDate', 'assigneeId', 'status', 'milestone'];
-  const exampleRow = ['Task Name', 'Task Description', '2025-01-01', '2025-01-15', '', 'Not Started', 'Preparation'];
+  const exampleRow = ['Task Name', 'Task Description', '2025-01-01', '2025-01-15', '', 'not started', 'Development'];
   
   const csvContent = [
     headers.join(','),
     exampleRow.join(','),
     'Note: assigneeId should be a user ID from the system',
-    'Status options: Not Started, On Hold, On Track, At Risk, Delayed, Live, Cancelled',
-    'Milestone options: Preparation, Business Requirement, Tech Assessment, Planning, Development, Testing, Live'
+    'Status options: not started, in progress, at risk, cancel, done',
+    'Milestone options: Business Requirement, Tech Assessment, Planning, Development, Testing, Live Preparation'
   ].join('\n');
   
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -2243,18 +2843,31 @@ function renderGanttChart(tasks, initiativeId) {
     };
   };
   
-  // Status colors
+  // Status colors - supports both new enum values and legacy values
   const statusColors = {
+    // New enum values (lowercase)
+    'not started': '#94a3b8',
+    'in progress': '#10b981',
+    'at risk': '#ef4444',
+    'cancel': '#6b7280',
+    'done': '#3b82f6',
+    // Legacy values for backward compatibility
     'Not Started': '#94a3b8',
     'On Hold': '#f59e0b',
     'On Track': '#10b981',
     'At Risk': '#ef4444',
     'Delayed': '#dc2626',
     'Live': '#3b82f6',
-    'Cancelled': '#6b7280'
+    'Cancelled': '#6b7280',
+    'In Progress': '#10b981',
+    'Done': '#3b82f6'
   };
   
-  const getStatusColor = (status) => statusColors[status] || '#94a3b8';
+  const getStatusColor = (status) => {
+    if (!status) return '#94a3b8';
+    // Try exact match first, then lowercase match
+    return statusColors[status] || statusColors[status.toLowerCase()] || '#94a3b8';
+  };
   
   // Render Gantt chart
   const rowHeight = 50;
@@ -2262,15 +2875,15 @@ function renderGanttChart(tasks, initiativeId) {
   const sidebarWidth = 250;
   
   let html = `
-    <div style="position: relative;">
+    <div style="position: relative; min-width: ${totalDays * dayWidth + sidebarWidth}px;">
       <!-- Header with dates -->
       <div style="position: sticky; top: 0; z-index: 10; background: white; border-bottom: 2px solid var(--border);">
         <div style="display: flex; height: ${headerHeight}px;">
-          <div style="width: ${sidebarWidth}px; padding: 8px; font-weight: 600; border-right: 1px solid var(--border); display: flex; align-items: center;">
+          <div style="width: ${sidebarWidth}px; padding: 8px; font-weight: 600; border-right: 1px solid var(--border); display: flex; align-items: center; position: sticky; left: 0; background: white; z-index: 11;">
             Task Name
           </div>
-          <div style="flex: 1; position: relative; overflow-x: auto;">
-            <div style="display: flex; min-width: ${totalDays * dayWidth}px;">
+          <div style="flex: 1; position: relative; min-width: ${totalDays * dayWidth}px;">
+            <div style="display: flex; width: ${totalDays * dayWidth}px;">
               ${weekHeaders.map((week, idx) => {
                 const weekStart = new Date(week);
                 const weekEnd = new Date(week);
@@ -2295,23 +2908,23 @@ function renderGanttChart(tasks, initiativeId) {
       <div style="position: relative;">
         ${tasks.map((task, idx) => {
           const assignee = nameById(LOOKUPS.users, task.assigneeId) || 'Unassigned';
-          const status = task.status || 'Not Started';
+          const status = task.status || 'not started';
           const color = getStatusColor(status);
           const pos = calculateTaskPosition(task);
           
           return `
             <div style="position: relative; height: ${rowHeight}px; border-bottom: 1px solid var(--gray-200); display: flex;">
               <!-- Sidebar -->
-              <div style="width: ${sidebarWidth}px; padding: 8px; border-right: 1px solid var(--border); background: var(--gray-50); display: flex; flex-direction: column; justify-content: center; position: sticky; left: 0; z-index: 5;">
-                <div style="font-weight: 600; font-size: 13px; margin-bottom: 2px;">${task.name}</div>
-                <div style="font-size: 11px; color: var(--muted);">
+              <div style="width: ${sidebarWidth}px; min-width: ${sidebarWidth}px; padding: 8px; border-right: 1px solid var(--border); background: var(--gray-50); display: flex; flex-direction: column; justify-content: center; position: sticky; left: 0; z-index: 5; overflow: hidden;">
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: ${sidebarWidth - 20}px;" title="${task.name}">${task.name}</div>
+                <div style="font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                   <span style="display: inline-block; width: 8px; height: 8px; background: ${color}; border-radius: 50%; margin-right: 4px;"></span>
                   ${status} • ${assignee}
                 </div>
               </div>
               
               <!-- Timeline area -->
-              <div style="flex: 1; position: relative; min-width: ${totalDays * dayWidth}px;">
+              <div style="flex: 1; position: relative; min-width: ${totalDays * dayWidth}px; width: ${totalDays * dayWidth}px;">
                 ${task.startDate || task.endDate ? `
                   <div class="gantt-task-bar" 
                        data-task-id="${task.id}"
@@ -2330,9 +2943,10 @@ function renderGanttChart(tasks, initiativeId) {
                               font-size: 11px;
                               font-weight: 500;
                               box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                              transition: transform 0.2s, box-shadow 0.2s;"
+                              transition: transform 0.2s, box-shadow 0.2s;
+                              overflow: hidden;"
                        title="${task.name} (${task.startDate ? task.startDate.slice(0,10) : 'No start'} → ${task.endDate ? task.endDate.slice(0,10) : 'No end'})">
-                    ${task.milestone ? `📍 ${task.milestone}` : task.name.length > 15 ? task.name.substring(0, 15) + '...' : task.name}
+                    <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;">${task.milestone ? `📍 ${task.milestone}` : task.name}</span>
                   </div>
                 ` : `
                   <div style="position: absolute; left: 0; top: 8px; padding: 8px; color: var(--muted); font-size: 11px; font-style: italic;">
@@ -2425,8 +3039,14 @@ async function showTaskModal(initiativeId, taskId = null) {
           <div>
             <label>Status</label>
             <select name="status" style="width: 100%;">
-              ${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => 
-                `<option value="${s}" ${(task?.status || 'Not Started') === s ? 'selected' : ''}>${s}</option>`
+              ${[
+                { value: 'not started', label: 'Not Started' },
+                { value: 'in progress', label: 'In Progress' },
+                { value: 'at risk', label: 'At Risk' },
+                { value: 'cancel', label: 'Cancelled' },
+                { value: 'done', label: 'Done' }
+              ].map(s => 
+                `<option value="${s.value}" ${(task?.status || 'not started') === s.value ? 'selected' : ''}>${s.label}</option>`
               ).join('')}
             </select>
           </div>
@@ -2435,8 +3055,15 @@ async function showTaskModal(initiativeId, taskId = null) {
           <label>Milestone</label>
           <select name="milestone" style="width: 100%;">
             <option value="">None</option>
-            ${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => 
-              `<option value="${m}" ${task?.milestone === m ? 'selected' : ''}>${m}</option>`
+            ${[
+              { value: 'Business Requirement', label: 'Business Requirement' },
+              { value: 'Tech Assessment', label: 'Tech Assessment' },
+              { value: 'Planning', label: 'Planning' },
+              { value: 'Development', label: 'Development' },
+              { value: 'Testing', label: 'Testing' },
+              { value: 'Live Preparation', label: 'Live Preparation' }
+            ].map(m => 
+              `<option value="${m.value}" ${task?.milestone === m.value ? 'selected' : ''}>${m.label}</option>`
             ).join('')}
           </select>
         </div>
@@ -2460,7 +3087,7 @@ async function showTaskModal(initiativeId, taskId = null) {
       startDate: formData.get('startDate') || null,
       endDate: formData.get('endDate') || null,
       assigneeId: formData.get('assigneeId') || null,
-      status: formData.get('status') || 'Not Started',
+      status: formData.get('status') || 'not started',
       milestone: formData.get('milestone') || null
     };
     
@@ -2494,11 +3121,16 @@ function showTaskUploadModal(initiativeId) {
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.innerHTML = `
-    <div class="modal-content" style="max-width: 600px;">
+    <div class="modal-content" style="max-width: 700px;">
       <h3>Upload Tasks (CSV)</h3>
-      <p class="muted" style="margin-bottom: 16px;">
-        Upload a CSV file with columns: name, description, startDate, endDate, assigneeId, status, milestone
+      <p class="muted" style="margin-bottom: 12px;">
+        Upload a CSV file with columns: <code>name, description, startDate, endDate, assigneeId, status, milestone</code>
       </p>
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 16px; font-size: 13px;">
+        <strong>Valid Status values:</strong> not started, in progress, at risk, cancel, done<br>
+        <strong>Valid Milestone values:</strong> Business Requirement, Tech Assessment, Planning, Development, Testing, Live Preparation<br>
+        <span class="muted" style="font-size: 12px;">Note: Values are case-insensitive. Invalid values will be normalized automatically.</span>
+      </div>
       <input type="file" id="task-file-input" accept=".csv" style="margin-bottom: 16px;">
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
         <button type="button" onclick="this.closest('.modal').remove()">Cancel</button>
@@ -2560,9 +3192,11 @@ function showTaskUploadModal(initiativeId) {
 }
 
 async function renderEdit(id) {
-  setActive('#list');
   await ensureLookups();
   const i = await fetchJSON('/api/initiatives/' + id);
+  
+  // Set active nav based on initiative type
+  setActive(i.type === 'CR' ? '#crlist' : '#list');
   
   app.innerHTML = `
     <div class="card">
@@ -2615,18 +3249,9 @@ async function renderEdit(id) {
       documentationLink: obj.documentationLink || null,
       changedBy: currentUser?.id || 'Unknown'
     };
+    // CR dates removed - no longer used
     if (i.type === 'CR') {
-      payload.cr = {
-        crSubmissionStart: obj['cr.crSubmissionStart'] || null,
-        crSubmissionEnd: obj['cr.crSubmissionEnd'] || null,
-        developmentStart: obj['cr.developmentStart'] || null,
-        developmentEnd: obj['cr.developmentEnd'] || null,
-        sitStart: obj['cr.sitStart'] || null,
-        sitEnd: obj['cr.sitEnd'] || null,
-        uatStart: obj['cr.uatStart'] || null,
-        uatEnd: obj['cr.uatEnd'] || null,
-        liveDate: obj['cr.liveDate'] || null
-      };
+      payload.cr = {};
     }
     try {
       await fetchJSON(`/api/initiatives/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
@@ -2651,19 +3276,38 @@ async function renderCRList() {
     return;
   }
   const urlParams = new URLSearchParams(location.search);
-  const q = urlParams.get('q') || '';
+  // Use CR-specific search key to keep Project and CR searches separate
+  const q = urlParams.get('cr_q') || '';
   // Parse multi-value filters (comma-separated)
   const parseFilter = (key) => {
     const val = urlParams.get(key);
     return val ? val.split(',').filter(v => v) : [];
   };
-  const filter = {
-    departmentId: parseFilter('departmentId'),
-    priority: parseFilter('priority'),
-    status: parseFilter('status'),
-    milestone: parseFilter('milestone')
+
+  // Parse date filters (format: operator:date, e.g., "gte:2024-01-01")
+  const parseDateFilter = (key) => {
+    const val = urlParams.get(key);
+    if (!val) return null;
+    const parts = val.split(':');
+    if (parts.length === 2) {
+      return { operator: parts[0], date: parts[1] };
+    }
+    return null;
   };
-  const sortParam = urlParams.get('sort') || '';
+
+  const filter = {
+    departmentId: parseFilter('cr_departmentId'),
+    priority: parseFilter('cr_priority'),
+    status: parseFilter('cr_status'),
+    milestone: parseFilter('cr_milestone'),
+    itPicId: parseFilter('cr_itPicId'),
+    itPmId: parseFilter('cr_itPmId'),
+    itManagerId: parseFilter('cr_itManagerId'),
+    createdAt: parseDateFilter('cr_createdAt'),
+    startDate: parseDateFilter('cr_startDate'),
+    endDate: parseDateFilter('cr_endDate')
+  };
+  const sortParam = urlParams.get('cr_sort') || '';
   
   // Build API query string with multi-value filters
   const apiQs = new URLSearchParams();
@@ -2673,6 +3317,8 @@ async function renderCRList() {
   if (filter.priority.length) apiQs.set('priority', filter.priority.join(','));
   if (filter.status.length) apiQs.set('status', filter.status.join(','));
   if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
+  if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
+  if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
   
   let data;
   try {
@@ -2682,6 +3328,71 @@ async function renderCRList() {
     app.innerHTML = `<div class="error">Failed to load CR initiatives: ${e.message}</div>`;
     return;
   }
+
+  // Apply client-side filtering for date filters (CR list)
+  if (filter.createdAt) {
+    const filterDate = new Date(filter.createdAt.date);
+    data = data.filter(i => {
+      if (!i.createdAt) return false;
+      const itemDate = new Date(i.createdAt);
+      if (filter.createdAt.operator === 'eq') return itemDate.toDateString() === filterDate.toDateString();
+      if (filter.createdAt.operator === 'gte') return itemDate >= filterDate;
+      if (filter.createdAt.operator === 'lte') return itemDate <= filterDate;
+      return true;
+    });
+  }
+  if (filter.startDate) {
+    const filterDate = new Date(filter.startDate.date);
+    data = data.filter(i => {
+      if (!i.startDate) return false;
+      const itemDate = new Date(i.startDate);
+      if (filter.startDate.operator === 'eq') return itemDate.toDateString() === filterDate.toDateString();
+      if (filter.startDate.operator === 'gte') return itemDate >= filterDate;
+      if (filter.startDate.operator === 'lte') return itemDate <= filterDate;
+      return true;
+    });
+  }
+  if (filter.endDate) {
+    const filterDate = new Date(filter.endDate.date);
+    data = data.filter(i => {
+      if (!i.endDate) return false;
+      const itemDate = new Date(i.endDate);
+      if (filter.endDate.operator === 'eq') return itemDate.toDateString() === filterDate.toDateString();
+      if (filter.endDate.operator === 'gte') return itemDate >= filterDate;
+      if (filter.endDate.operator === 'lte') return itemDate <= filterDate;
+      return true;
+    });
+  }
+
+  // Apply client-side filtering for IT Manager (initiative has itManagerIds)
+  if (filter.itManagerId.length > 0) {
+    data = data.filter(i => {
+      const raw = i.itManagerIds || i.itManagerId || [];
+      const ids = Array.isArray(raw)
+        ? raw
+        : String(raw).split(',').map(v => v.trim()).filter(Boolean);
+      return filter.itManagerId.some(sel => ids.includes(sel));
+    });
+  }
+
+  // Build user subsets for filters (role/type based) - same rules as Project List
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const roleNorm = (u) => norm(u?.role).replace(/\s+/g, '');
+  const typeNorm = (u) => norm(u?.type).replace(/\s+/g, '');
+  const isITRole = (u) => roleNorm(u) === 'it';
+  const isManagerType = (u) => typeNorm(u) === 'manager';
+
+  const itManagerFilterUsers = (LOOKUPS.users || []).filter(u => isITRole(u) && isManagerType(u));
+  const itPicFilterUsers = (LOOKUPS.users || []).filter(u => isITRole(u));
+  const itPmFilterUsers = (LOOKUPS.users || []).filter(u => {
+    const r = roleNorm(u);
+    const rRaw = norm(u?.role);
+    if (r === 'admin') return true;
+    if (r === 'itpm') return true;
+    if (rRaw === 'it - pm' || rRaw === 'it pm' || rRaw === 'it-pm') return true;
+    if (isITRole(u) && isManagerType(u)) return true;
+    return false;
+  });
   
   // Calculate milestone counts from filtered data
   // Database stores: "Preparation", "Business Requirement", "Tech Assessment", "Planning", "Development", "Testing", "Live"
@@ -2762,7 +3473,6 @@ async function renderCRList() {
     { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
     { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
     { key: 'documentationLink', class: 'col-doc', label: 'CR Doc Link', sortable: true },
-    { key: 'timeline', class: 'col-timeline', label: 'CR Timeline', sortable: false },
     { key: 'actions', class: 'col-actions', label: 'Actions', sortable: false }
   ];
   
@@ -2791,9 +3501,8 @@ async function renderCRList() {
       <div class="toolbar-row">
         <div class="search-group">
           <input id="search" placeholder="Search by name, ticket..." value="${q}">
-          <button id="doSearch">Search</button>
         </div>
-        <div class="filter-group">
+        <div class="filter-group" id="basic-filters">
           <div class="multi-select-wrapper">
             <button class="multi-select-btn" data-filter="fDepartment">
               Department ${filter.departmentId.length > 0 ? `(${filter.departmentId.length})` : ''}
@@ -2846,76 +3555,195 @@ async function renderCRList() {
               `).join('')}
             </div>
           </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItPic">
+              IT PIC ${filter.itPicId.length > 0 ? `(${filter.itPicId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItPic">
+              ${itPicFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itPicId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItPm">
+              IT PM ${filter.itPmId.length > 0 ? `(${filter.itPmId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItPm">
+              ${itPmFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itPmId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fItManager">
+              IT Manager ${filter.itManagerId.length > 0 ? `(${filter.itManagerId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fItManager">
+              ${itManagerFilterUsers.map(u => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${u.id}" ${filter.itManagerId.includes(u.id) ? 'checked' : ''}>
+                  ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        <div class="date-filters-group" id="date-filters">
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fCreateDate">
+              <span class="filter-label">Create Date</span> ${filter.createdAt ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fCreateDate">
+              <div class="date-filter-content">
+                <select id="createDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.createdAt?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.createdAt?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.createdAt?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="createDate-value" value="${filter.createdAt?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fStartDate">
+              <span class="filter-label">Start Date</span> ${filter.startDate ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fStartDate">
+              <div class="date-filter-content">
+                <select id="startDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.startDate?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.startDate?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.startDate?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="startDate-value" value="${filter.startDate?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
+          <div class="date-filter-wrapper">
+            <button class="multi-select-btn" data-filter="fEndDate">
+              <span class="filter-label">End Date</span> ${filter.endDate ? '<span class="filter-active">✓</span>' : ''}
+            </button>
+            <div class="date-filter-dropdown" id="dropdown-fEndDate">
+              <div class="date-filter-content">
+                <select id="endDate-operator" class="date-operator-select">
+                  <option value="eq" ${filter.endDate?.operator === 'eq' ? 'selected' : ''}>Equal</option>
+                  <option value="gte" ${filter.endDate?.operator === 'gte' ? 'selected' : ''}>≥ Greater or Equal</option>
+                  <option value="lte" ${filter.endDate?.operator === 'lte' ? 'selected' : ''}>≤ Less or Equal</option>
+                </select>
+                <input type="date" id="endDate-value" value="${filter.endDate?.date || ''}" class="date-input">
+              </div>
+            </div>
+          </div>
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('crlist')" title="Column Settings" class="icon-btn">⚙️</button>
-          <a href="#new"><button class="primary">+ New CR</button></a>
+          <button id="apply-filters-btn" class="primary" onclick="applyFiltersCR()">Apply Filters</button>
+          <a href="#new/CR"><button class="primary">+ New CR</button></a>
         </div>
       </div>
     </div>
-    <table id="cr-table">
-      <thead>
-        <tr>
-          ${columns.map(col => {
-            const visible = colVisibility[col.class] !== false;
-            const sortClass = col.sortable ? 'sortable' : '';
-            const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-            return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-          }).join('')}
-        </tr>
-      </thead>
-      <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
-    </table>
+    <div class="table-wrapper">
+      <table id="cr-table">
+        <thead>
+          <tr>
+            ${columns.map(col => {
+              const visible = colVisibility[col.class] !== false;
+              const sortClass = col.sortable ? 'sortable' : '';
+              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+            }).join('')}
+          </tr>
+        </thead>
+        <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
+      </table>
+    </div>
     <div id="column-settings-modal-cr" class="modal hidden">
-      <div class="modal-content">
-        <h3>Column Visibility</h3>
-        <div id="column-checkboxes-cr" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 16px 0;">
+      <div class="modal-content column-settings-modal">
+        <h3 class="modal-title">Column Visibility</h3>
+        <div class="modal-checkbox-controls">
+          <button class="btn-link" onclick="checkAllColumns('crlist')">Check All</button>
+          <span class="control-separator">|</span>
+          <button class="btn-link" onclick="uncheckAllColumns('crlist')">Uncheck All</button>
+        </div>
+        <div id="column-checkboxes-cr" class="column-checkboxes-grid">
           ${columns.filter(c => c.key !== 'actions').map(col => `
-            <label style="display: flex; align-items: center; cursor: pointer;">
-              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} style="margin-right: 8px;">
-              ${col.label}
+            <label class="column-checkbox-label">
+              <input type="checkbox" data-col="${col.class}" ${colVisibility[col.class] !== false ? 'checked' : ''} class="column-checkbox">
+              <span class="column-checkbox-text">${col.label}</span>
             </label>
           `).join('')}
         </div>
-        <div>
-          <button class="primary" onclick="saveColumnSettings('crlist')">Save View</button>
-          <button onclick="closeColumnSettings()">Cancel</button>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="closeColumnSettings()">Cancel</button>
+          <button class="btn-primary" onclick="saveColumnSettings('crlist')">Save View</button>
         </div>
       </div>
     </div>
   `;
-  // Multi-select dropdown handlers (same as renderList)
+  // Multi-select dropdown handlers (checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
       e.stopPropagation();
       const filterId = btn.dataset.filter;
       const dropdown = document.getElementById(`dropdown-${filterId}`);
+      if (!dropdown) return;
       const isOpen = dropdown.classList.contains('open');
-      
       // Close all dropdowns
-      document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
-      
-      // Toggle current dropdown
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
       if (!isOpen) {
         dropdown.classList.add('open');
+        document.body.classList.add('dropdown-open');
       }
     };
   });
-  
-  // Checkbox change handlers
-  document.querySelectorAll('.multi-select-option input[type="checkbox"]').forEach(cb => {
-    cb.onchange = () => {
-      applyFiltersCR();
+
+  // Date filter dropdown handlers
+  document.querySelectorAll('.date-filter-wrapper .multi-select-btn').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const filterId = btn.dataset.filter;
+      const dropdown = document.getElementById(`dropdown-${filterId}`);
+      if (!dropdown) return;
+      const isOpen = dropdown.classList.contains('open');
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+      if (!isOpen) {
+        dropdown.classList.add('open');
+        document.body.classList.add('dropdown-open');
+      }
     };
   });
+
+  // Close dropdowns when clicking outside or on overlay
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.multi-select-wrapper') && !e.target.closest('.date-filter-wrapper') && !e.target.closest('.multi-select-dropdown') && !e.target.closest('.date-filter-dropdown')) {
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+    }
+  });
+  // Close dropdowns on escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach(d => d.classList.remove('open'));
+      document.body.classList.remove('dropdown-open');
+    }
+  });
   
-  function applyFiltersCR() {
+  window.applyFiltersCR = function() {
     const searchVal = document.getElementById('search').value;
     const url = new URL(location.href);
     
-    // Update search
-    if (searchVal) url.searchParams.set('q', searchVal);
-    else url.searchParams.delete('q');
+    // Update search with CR-specific key
+    if (searchVal) url.searchParams.set('cr_q', searchVal);
+    else url.searchParams.delete('cr_q');
     
     // Get selected values from each multi-select
     const getSelectedValues = (filterId) => {
@@ -2923,11 +3751,15 @@ async function renderCRList() {
       return Array.from(checkboxes).map(cb => cb.value);
     };
     
+    // Use CR-specific filter keys
     const filterMap = {
-      'fDepartment': 'departmentId',
-      'fPriority': 'priority',
-      'fStatus': 'status',
-      'fMilestone': 'milestone'
+      'fDepartment': 'cr_departmentId',
+      'fPriority': 'cr_priority',
+      'fStatus': 'cr_status',
+      'fMilestone': 'cr_milestone',
+      'fItPic': 'cr_itPicId',
+      'fItPm': 'cr_itPmId',
+      'fItManager': 'cr_itManagerId'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -2939,21 +3771,44 @@ async function renderCRList() {
       }
     });
     
+    // Handle date filters (CR)
+    const createDateOp = document.getElementById('createDate-operator')?.value;
+    const createDateVal = document.getElementById('createDate-value')?.value;
+    if (createDateOp && createDateVal) url.searchParams.set('cr_createdAt', `${createDateOp}:${createDateVal}`);
+    else url.searchParams.delete('cr_createdAt');
+
+    const startDateOp = document.getElementById('startDate-operator')?.value;
+    const startDateVal = document.getElementById('startDate-value')?.value;
+    if (startDateOp && startDateVal) url.searchParams.set('cr_startDate', `${startDateOp}:${startDateVal}`);
+    else url.searchParams.delete('cr_startDate');
+
+    const endDateOp = document.getElementById('endDate-operator')?.value;
+    const endDateVal = document.getElementById('endDate-value')?.value;
+    if (endDateOp && endDateVal) url.searchParams.set('cr_endDate', `${endDateOp}:${endDateVal}`);
+    else url.searchParams.delete('cr_endDate');
+
     history.pushState({}, '', url);
     renderCRList();
+  };
+
+  // Search auto-apply while typing (debounced) for CR list
+  let crSearchDebounceTimer = null;
+  const crSearchEl = document.getElementById('search');
+  if (crSearchEl) {
+    crSearchEl.addEventListener('input', () => {
+      if (crSearchDebounceTimer) clearTimeout(crSearchDebounceTimer);
+      crSearchDebounceTimer = setTimeout(() => {
+        window.applyFiltersCR();
+      }, 350);
+    });
+    crSearchEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (crSearchDebounceTimer) clearTimeout(crSearchDebounceTimer);
+        window.applyFiltersCR();
+      }
+    });
   }
-  
-  document.getElementById('doSearch').onclick = () => {
-    applyFiltersCR();
-  };
-  
-  // Enter key on search input
-  document.getElementById('search').onkeypress = (e) => {
-    if (e.key === 'Enter') {
-      applyFiltersCR();
-    }
-  };
-  // Sorting
+  // Sorting - 3-state cycle: ascending → descending → default (no sort)
   document.querySelectorAll('thead th.sortable').forEach(th => {
     const resizer = document.createElement('span');
     resizer.className = 'col-resize';
@@ -2962,10 +3817,30 @@ async function renderCRList() {
       if (e.target === resizer) return; // ignore when resizing
       const key = th.dataset.key;
       const url = new URL(location.href);
-      const current = url.searchParams.get('sort') || '';
+      const current = url.searchParams.get('cr_sort') || '';
       const [curKey, curDir] = current.split(':');
-      const nextDir = curKey === key && curDir === 'asc' ? 'desc' : 'asc';
-      url.searchParams.set('sort', `${key}:${nextDir}`);
+      
+      // 3-state cycle: none → asc → desc → none (default)
+      let nextSort = '';
+      if (curKey !== key) {
+        // Different column clicked, start with ascending
+        nextSort = `${key}:asc`;
+      } else if (curDir === 'asc') {
+        // Same column, currently ascending → go to descending
+        nextSort = `${key}:desc`;
+      } else if (curDir === 'desc') {
+        // Same column, currently descending → remove sort (default)
+        nextSort = '';
+      } else {
+        // No current sort on this column → start ascending
+        nextSort = `${key}:asc`;
+      }
+      
+      if (nextSort) {
+        url.searchParams.set('cr_sort', nextSort);
+      } else {
+        url.searchParams.delete('cr_sort');
+      }
       history.pushState({}, '', url);
       renderCRList();
     };
@@ -3039,7 +3914,7 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
             </div>
           ` : ''}
           ${initiatives.map(i => {
-            const statusClass = (i.status || '').replace(/\s+/g, '-');
+            const statusClass = (i.status || '').toLowerCase().replace(/\s+/g, '-');
             return `
               <div class="initiative-card-modal" onclick="location.hash='#view/${i.id}'; this.closest('.modal-backdrop').remove();">
                 <div class="initiative-card-header">
@@ -3111,6 +3986,89 @@ async function renderDashboard() {
   if (selectedTeamMemberId) apiQs.set('teamMemberId', selectedTeamMemberId);
   
   const d = await fetchJSON('/api/dashboard?' + apiQs.toString());
+
+  // --- Project aging metrics (Avg Total Age / Avg Age Created→Start / Avg Cycle Time) ---
+  // We compute from initiatives dates so the metrics match the Initiative page definitions.
+  let projectAgingMetrics = {
+    avgTotalAge: 0,
+    avgAgeCreatedToStart: 0,
+    avgCycleTime: 0,
+    counts: { totalAge: 0, createdToStart: 0, cycleTime: 0 },
+    byId: {} // { [initiativeId]: { ageCreatedToStart, cycleTime, totalAge } }
+  };
+
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const floorDays = (ms) => Math.floor(ms / msPerDay);
+  const safeDate = (v) => (v ? new Date(v) : null);
+  const today = new Date();
+
+  try {
+    // Fetch projects with dates so we can compute all age metrics.
+    // Use the same filters the dashboard uses (departmentId / itPmId / teamMemberId).
+    const projQs = new URLSearchParams();
+    projQs.set('type', 'Project');
+    if (selectedDepartmentId) projQs.set('departmentId', selectedDepartmentId);
+    if (selectedItPmId) projQs.set('itPmId', selectedItPmId);
+    if (selectedTeamMemberId) projQs.set('teamMemberId', selectedTeamMemberId);
+
+    const projects = await fetchJSON('/api/initiatives?' + projQs.toString());
+
+    let sumTotalAge = 0;
+    let sumCreatedToStart = 0;
+    let sumCycleTime = 0;
+    let countTotalAge = 0;
+    let countCreatedToStart = 0;
+    let countCycleTime = 0;
+
+    (projects || []).forEach(p => {
+      const createDate = safeDate(p.createdAt);
+      const startDate = safeDate(p.startDate);
+      const endDate = safeDate(p.endDate);
+
+      let ageCreatedToStart = null;
+      if (createDate && startDate) {
+        ageCreatedToStart = floorDays(startDate - createDate);
+      }
+
+      let cycleTime = null;
+      if (startDate) {
+        const endOrNow = endDate || today;
+        cycleTime = floorDays(endOrNow - startDate);
+      }
+
+      // Total Age = Age Created→Start + Cycle Time.
+      // If Create Date is missing, treat Age Created→Start as 0 (so Total Age = Cycle Time).
+      let totalAge = null;
+      if (cycleTime !== null) {
+        totalAge = (ageCreatedToStart !== null ? ageCreatedToStart : 0) + cycleTime;
+      }
+
+      projectAgingMetrics.byId[p.id] = { ageCreatedToStart, cycleTime, totalAge };
+
+      if (totalAge !== null) {
+        sumTotalAge += totalAge;
+        countTotalAge++;
+      }
+      if (ageCreatedToStart !== null) {
+        sumCreatedToStart += ageCreatedToStart;
+        countCreatedToStart++;
+      }
+      if (cycleTime !== null) {
+        sumCycleTime += cycleTime;
+        countCycleTime++;
+      }
+    });
+
+    projectAgingMetrics = {
+      avgTotalAge: countTotalAge ? Math.round(sumTotalAge / countTotalAge) : 0,
+      avgAgeCreatedToStart: countCreatedToStart ? Math.round(sumCreatedToStart / countCreatedToStart) : 0,
+      avgCycleTime: countCycleTime ? Math.round(sumCycleTime / countCycleTime) : 0,
+      counts: { totalAge: countTotalAge, createdToStart: countCreatedToStart, cycleTime: countCycleTime },
+      byId: projectAgingMetrics.byId
+    };
+  } catch (e) {
+    console.warn('Failed to compute project aging metrics from initiatives:', e);
+  }
   
   // Create simple bar charts
   const createBarChart = (data, labelKey, valueKey, title, clickable = false) => {
@@ -3121,7 +4079,7 @@ async function renderDashboard() {
         <div style="margin-top: 16px;">
           ${data.map(item => {
             const percentage = (item[valueKey] / max) * 100;
-            const statusClass = item[labelKey]?.replace(/\s+/g, '-') || '';
+            const statusClass = item[labelKey]?.toLowerCase().replace(/\s+/g, '-') || '';
             const filterValue = item[labelKey] || '';
             const clickableStyle = clickable ? 'cursor: pointer;' : '';
             const clickableClass = clickable ? 'clickable-chart-item' : '';
@@ -3131,7 +4089,7 @@ async function renderDashboard() {
                 <div style="width: 120px; font-size: 12px; color: var(--muted);">${item[labelKey]}</div>
                 <div style="flex: 1; margin: 0 12px;">
                   <div style="background: #f1f5f9; height: 20px; border-radius: 10px; overflow: hidden;">
-                    <div style="background: ${statusClass.includes('Live') ? '#3b82f6' : statusClass.includes('At-Risk') ? '#f59e0b' : statusClass.includes('Delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
+                    <div style="background: ${statusClass.includes('live') ? '#3b82f6' : statusClass.includes('at-risk') ? '#f59e0b' : statusClass.includes('delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
                   </div>
                 </div>
                 <div style="width: 40px; text-align: right; font-weight: 600; font-size: 14px;">${item[valueKey]}</div>
@@ -3160,12 +4118,12 @@ async function renderDashboard() {
   const departmentOptions = LOOKUPS.departments.map(d => ({ value: d.id, label: d.name }));
   const itPmOptions = LOOKUPS.users
     .filter(u => {
-      // Only include active users with roles: IT Manager, IT PM, or Admin
+      // Only include active users with roles: IT Manager, IT PM, IT - PM, or Admin
       if (u.active === false) return false;
       const role = (u.role || '').toLowerCase().trim();
       const isAdmin = u.isAdmin === true || u.isAdmin === 1 || role === 'admin' || role === 'administrator';
-      // Check for IT Manager, IT PM, or Admin roles (case-insensitive)
-      return role === 'it manager' || role === 'it pm' || role === 'itpm' || isAdmin;
+      // Check for IT Manager, IT PM, IT - PM, or Admin roles (case-insensitive)
+      return role === 'it manager' || role === 'it pm' || role === 'it - pm' || role === 'itpm' || isAdmin;
     })
     .map(u => ({ value: u.id, label: u.name || u.email }))
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -3197,18 +4155,38 @@ async function renderDashboard() {
         <div class="muted">Live Projects</div>
         <div style="font-size:32px;font-weight:700;color: var(--success)">${d.liveCount || 0}</div>
       </div>
-      <div class="card">
-        <div class="muted">Avg Age (Days)</div>
-        <div style="font-size:32px;font-weight:700;color: var(--warning)">${d.avgAgeSinceCreated}</div>
+      <div class="card" style="border-left: 4px solid var(--warning);">
+        <div class="muted">Average Project Aging (Days)</div>
+        <div style="display:flex; align-items:baseline; justify-content: space-between; gap: 12px; margin-top: 6px;">
+          <div>
+            <div style="font-size:12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
+            <div style="font-size:34px;font-weight:800;color: var(--warning); line-height: 1;">${projectAgingMetrics.avgTotalAge}</div>
+          </div>
+          <div style="font-size: 12px; color: var(--muted); text-align: right;">
+            <div><strong>${projectAgingMetrics.avgAgeCreatedToStart}</strong> Avg Age Created→Start</div>
+            <div><strong>${projectAgingMetrics.avgCycleTime}</strong> Avg Cycle Time (Start→End)</div>
+          </div>
+        </div>
+        <div class="muted" style="margin-top: 10px; font-size: 12px;">
+          Total Age = (Create→Start) + (Start→End/Now). For ongoing projects, End uses today.
+        </div>
       </div>
     </div>
     <div class="grid" style="margin-top:24px">
       ${createBarChart(d.byStatus, 'status', 'c', 'Status Distribution', true)}
       ${createBarChart(d.byPriority, 'priority', 'c', 'Priority Distribution', true)}
       <div class="card">
-        <h3>Project Aging (Days Since Created)</h3>
+        <h3>Project Aging (Total Age)</h3>
         <div style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
-          ${d.projectAging.map(project => `
+          ${d.projectAging.map(project => {
+            const m = projectAgingMetrics.byId[project.id] || {};
+            const total = (m.totalAge ?? project.daysSinceCreated ?? 0);
+            const aCS = m.ageCreatedToStart;
+            const cT = m.cycleTime;
+            const breakdown = (aCS !== null && aCS !== undefined && cT !== null && cT !== undefined)
+              ? `Create→Start: ${aCS}d • Start→End/Now: ${cT}d`
+              : 'Breakdown not available';
+            return `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px; background: #f8fafc; border-radius: 6px;">
               <div style="flex: 1;">
                 <div style="font-weight: 500; margin-bottom: 4px;">${project.name}</div>
@@ -3216,12 +4194,14 @@ async function renderDashboard() {
                   <span class="status-badge status-${project.status?.replace(/\s+/g, '-')}">${project.status}</span>
                   <span style="margin-left: 8px;">${project.milestone}</span>
                 </div>
+                <div class="muted" style="font-size: 11px; margin-top: 4px;">${breakdown}</div>
               </div>
               <div style="text-align: right;">
-                <span style="font-weight: 600; color: var(--warning);">${project.daysSinceCreated} days</span>
+                <span style="font-weight: 700; color: var(--warning);" title="${breakdown}">${total} days</span>
               </div>
             </div>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       </div>
     </div>
@@ -3737,12 +4717,73 @@ async function renderAdminUsers() {
     await ensureLookups();
     const users = await fetchJSON('/api/admin/users');
     
+    // Get unique roles and types from users
+    const roles = [...new Set(users.map(u => u.role).filter(Boolean))].sort();
+    const types = [...new Set(users.map(u => u.type).filter(Boolean))].sort();
+    
+    // Function to render user rows
+    const renderUserRows = (filteredUsers) => {
+      return filteredUsers.map(user => `
+        <tr data-name="${(user.name || '').toLowerCase()}" data-email="${(user.email || '').toLowerCase()}" data-role="${(user.role || '').toLowerCase()}" data-type="${(user.type || '').toLowerCase()}" data-department="${user.departmentId || ''}">
+          <td>${user.name}</td>
+          <td>${user.email}</td>
+          <td>${user.role || 'N/A'}</td>
+          <td>${user.type || 'N/A'}</td>
+          <td>${nameById(LOOKUPS.departments, user.departmentId) || 'N/A'}</td>
+          <td>${user.active ? '✓' : '✗'}</td>
+          <td>${user.isAdmin ? '✓' : '✗'}</td>
+          <td>${user.emailActivated ? '✓' : '✗'}</td>
+          <td>
+            <button onclick="editUser('${user.id}')" style="margin-right: 8px;">Edit</button>
+            <button onclick="resetUserPassword('${user.id}', '${user.email}')" style="margin-right: 8px;" title="Reset Password">🔑</button>
+            ${user.id !== currentUser?.id ? `<button onclick="deleteUser('${user.id}')" style="color: var(--danger);">Delete</button>` : ''}
+          </td>
+        </tr>
+      `).join('');
+    };
+    
     app.innerHTML = `
       <div class="card">
         <h2>User Management</h2>
-        <div style="margin-bottom: 16px;">
+        
+        <!-- Search and Create Button Row -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 16px; flex-wrap: wrap;">
           <button class="primary" onclick="showCreateUserForm()">+ Create User</button>
+          <div style="position: relative; flex: 1; max-width: 400px;">
+            <input type="text" id="user-search" placeholder="Search by name or email..." style="width: 100%; padding: 10px 16px 10px 40px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; box-sizing: border-box;" />
+            <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted);">🔍</span>
+          </div>
+          <div style="color: var(--muted); font-size: 14px;">
+            Total: <strong id="user-count" style="color: var(--text);">${users.length}</strong> users
+          </div>
         </div>
+        
+        <!-- Filter Row -->
+        <div style="display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 14px; color: var(--muted); white-space: nowrap;">Role:</label>
+            <select id="filter-role" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 140px;">
+              <option value="">All Roles</option>
+              ${roles.map(r => `<option value="${r.toLowerCase()}">${r}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 14px; color: var(--muted); white-space: nowrap;">Type:</label>
+            <select id="filter-type" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 140px;">
+              <option value="">All Types</option>
+              ${types.map(t => `<option value="${t.toLowerCase()}">${t}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 14px; color: var(--muted); white-space: nowrap;">Department:</label>
+            <select id="filter-department" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; min-width: 160px;">
+              <option value="">All Departments</option>
+              ${LOOKUPS.departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
+            </select>
+          </div>
+          <button id="clear-filters-btn" style="padding: 8px 16px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: var(--surface); cursor: pointer; display: none;">Clear Filters</button>
+        </div>
+        
         <table>
           <thead>
             <tr>
@@ -3757,24 +4798,8 @@ async function renderAdminUsers() {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody>
-            ${users.map(user => `
-              <tr>
-                <td>${user.name}</td>
-                <td>${user.email}</td>
-                <td>${user.role || 'N/A'}</td>
-                <td>${user.type || 'N/A'}</td>
-                <td>${nameById(LOOKUPS.departments, user.departmentId) || 'N/A'}</td>
-                <td>${user.active ? '✓' : '✗'}</td>
-                <td>${user.isAdmin ? '✓' : '✗'}</td>
-                <td>${user.emailActivated ? '✓' : '✗'}</td>
-                <td>
-                  <button onclick="editUser('${user.id}')" style="margin-right: 8px;">Edit</button>
-                  <button onclick="resetUserPassword('${user.id}', '${user.email}')" style="margin-right: 8px;" title="Reset Password">🔑</button>
-                  ${user.id !== currentUser?.id ? `<button onclick="deleteUser('${user.id}')" style="color: var(--danger);">Delete</button>` : ''}
-                </td>
-              </tr>
-            `).join('')}
+          <tbody id="users-tbody">
+            ${renderUserRows(users)}
           </tbody>
         </table>
       </div>
@@ -3802,6 +4827,7 @@ async function renderAdminUsers() {
               <select name="role">
                 <option value="">None</option>
                 <option value="IT">IT</option>
+                <option value="IT - PM">IT - PM</option>
                 <option value="Business User">Business User</option>
                 <option value="Admin">Admin</option>
               </select>
@@ -3821,29 +4847,85 @@ async function renderAdminUsers() {
                 ${LOOKUPS.departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
               </select>
             </div>
-            <div class="form-row">
-              <label>
-                <input type="checkbox" name="active" checked /> Active
-              </label>
+            <div class="form-row" style="flex-direction: row; align-items: center; gap: 8px;">
+              <label style="margin: 0;">Active</label>
+              <input type="checkbox" name="active" checked style="width: auto; margin: 0;" />
             </div>
-            <div class="form-row">
-              <label>
-                <input type="checkbox" name="isAdmin" /> Admin
-              </label>
+            <div class="form-row" style="flex-direction: row; align-items: center; gap: 8px;">
+              <label style="margin: 0;">Admin</label>
+              <input type="checkbox" name="isAdmin" style="width: auto; margin: 0;" />
             </div>
-            <div class="form-row">
-              <label>
-                <input type="checkbox" name="emailActivated" checked /> Email Activated
-              </label>
+            <div class="form-row" style="flex-direction: row; align-items: center; gap: 8px;">
+              <label style="margin: 0;">Email Activated</label>
+              <input type="checkbox" name="emailActivated" checked style="width: auto; margin: 0;" />
             </div>
-            <div>
-              <button type="submit" class="primary">Save</button>
-              <button type="button" onclick="closeUserForm()">Cancel</button>
+            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 16px;">
+              <button type="button" onclick="closeUserForm()" style="padding: 8px 24px; font-size: 14px; line-height: 1; margin: 0;">Cancel</button>
+              <button type="submit" style="padding: 8px 24px; font-size: 14px; line-height: 1; margin: 0; background: var(--color-primary-default); color: white; border-color: var(--color-primary-default);">Save</button>
             </div>
           </form>
         </div>
       </div>
     `;
+    
+    // Search and Filter functionality
+    const searchInput = document.getElementById('user-search');
+    const filterRole = document.getElementById('filter-role');
+    const filterType = document.getElementById('filter-type');
+    const filterDepartment = document.getElementById('filter-department');
+    const clearFiltersBtn = document.getElementById('clear-filters-btn');
+    const usersTbody = document.getElementById('users-tbody');
+    const userCount = document.getElementById('user-count');
+    
+    const applyFilters = () => {
+      const searchTerm = searchInput.value.toLowerCase().trim();
+      const roleFilter = filterRole.value.toLowerCase();
+      const typeFilter = filterType.value.toLowerCase();
+      const deptFilter = filterDepartment.value;
+      
+      const rows = usersTbody.querySelectorAll('tr');
+      let visibleCount = 0;
+      
+      rows.forEach(row => {
+        const name = row.dataset.name || '';
+        const email = row.dataset.email || '';
+        const role = row.dataset.role || '';
+        const type = row.dataset.type || '';
+        const dept = row.dataset.department || '';
+        
+        // Check search match
+        const searchMatch = !searchTerm || name.includes(searchTerm) || email.includes(searchTerm);
+        
+        // Check filter matches
+        const roleMatch = !roleFilter || role === roleFilter;
+        const typeMatch = !typeFilter || type === typeFilter;
+        const deptMatch = !deptFilter || dept === deptFilter;
+        
+        const matches = searchMatch && roleMatch && typeMatch && deptMatch;
+        row.style.display = matches ? '' : 'none';
+        if (matches) visibleCount++;
+      });
+      
+      userCount.textContent = visibleCount;
+      
+      // Show/hide clear filters button
+      const hasFilters = searchTerm || roleFilter || typeFilter || deptFilter;
+      clearFiltersBtn.style.display = hasFilters ? 'block' : 'none';
+    };
+    
+    // Add event listeners
+    searchInput.addEventListener('input', applyFilters);
+    filterRole.addEventListener('change', applyFilters);
+    filterType.addEventListener('change', applyFilters);
+    filterDepartment.addEventListener('change', applyFilters);
+    
+    clearFiltersBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      filterRole.value = '';
+      filterType.value = '';
+      filterDepartment.value = '';
+      applyFilters();
+    });
     
     window.showCreateUserForm = () => {
       document.getElementById('user-form-title').textContent = 'Create User';
@@ -3981,7 +5063,7 @@ async function renderAdminRoles() {
     });
     
     // Sort roles by predefined order, then by user count (descending)
-    const predefinedRoleOrder = ['Admin', 'SeniorManagement', 'PMO', 'IT Manager', 'IT PM', 'ITPIC', 'BusinessOwner', 'User'];
+    const predefinedRoleOrder = ['Admin', 'SeniorManagement', 'PMO', 'IT Manager', 'IT PM', 'IT - PM', 'ITPIC', 'BusinessOwner', 'User'];
     const sortedRoles = Object.entries(usersByRole).sort(([roleA, usersA], [roleB, usersB]) => {
       const indexA = predefinedRoleOrder.indexOf(roleA);
       const indexB = predefinedRoleOrder.indexOf(roleB);
@@ -4064,6 +5146,94 @@ async function renderCRDashboard() {
   if (selectedItManagerId) apiQs.set('itManagerId', selectedItManagerId);
   
   const d = await fetchJSON('/api/cr-dashboard?' + apiQs.toString());
+
+  // --- CR aging metrics (Avg Total Age / Avg Age Created→Start / Avg Cycle Time) ---
+  // Computed from CR initiatives dates so it matches Initiative page definitions.
+  let crAgingMetrics = {
+    avgTotalAge: 0,
+    avgAgeCreatedToStart: 0,
+    avgCycleTime: 0,
+    counts: { totalAge: 0, createdToStart: 0, cycleTime: 0 },
+    byId: {}
+  };
+
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const floorDays = (ms) => Math.floor(ms / msPerDay);
+  const safeDate = (v) => (v ? new Date(v) : null);
+  const today = new Date();
+
+  try {
+    // Fetch CR initiatives with dates so we can compute all age metrics.
+    // Apply the same dashboard filters (departmentId and itManagerId).
+    const crQs = new URLSearchParams();
+    crQs.set('type', 'CR');
+    if (selectedDepartmentId) crQs.set('departmentId', selectedDepartmentId);
+    const crInitiatives = await fetchJSON('/api/initiatives?' + crQs.toString());
+
+    // Role/type based IT Manager filter is stored on initiative.itManagerIds (array or CSV)
+    let filteredCRs = crInitiatives || [];
+    if (selectedItManagerId) {
+      filteredCRs = filteredCRs.filter(i => {
+        const raw = i.itManagerIds || i.itManagerId || [];
+        const ids = Array.isArray(raw) ? raw : String(raw).split(',').map(v => v.trim()).filter(Boolean);
+        return ids.includes(selectedItManagerId);
+      });
+    }
+
+    let sumTotalAge = 0;
+    let sumCreatedToStart = 0;
+    let sumCycleTime = 0;
+    let countTotalAge = 0;
+    let countCreatedToStart = 0;
+    let countCycleTime = 0;
+
+    (filteredCRs || []).forEach(cr => {
+      const createDate = safeDate(cr.createdAt);
+      const startDate = safeDate(cr.startDate);
+      const endDate = safeDate(cr.endDate);
+
+      let ageCreatedToStart = null;
+      if (createDate && startDate) {
+        ageCreatedToStart = floorDays(startDate - createDate);
+      }
+
+      let cycleTime = null;
+      if (startDate) {
+        const endOrNow = endDate || today;
+        cycleTime = floorDays(endOrNow - startDate);
+      }
+
+      let totalAge = null;
+      if (cycleTime !== null) {
+        totalAge = (ageCreatedToStart !== null ? ageCreatedToStart : 0) + cycleTime;
+      }
+
+      crAgingMetrics.byId[cr.id] = { ageCreatedToStart, cycleTime, totalAge };
+
+      if (totalAge !== null) {
+        sumTotalAge += totalAge;
+        countTotalAge++;
+      }
+      if (ageCreatedToStart !== null) {
+        sumCreatedToStart += ageCreatedToStart;
+        countCreatedToStart++;
+      }
+      if (cycleTime !== null) {
+        sumCycleTime += cycleTime;
+        countCycleTime++;
+      }
+    });
+
+    crAgingMetrics = {
+      avgTotalAge: countTotalAge ? Math.round(sumTotalAge / countTotalAge) : 0,
+      avgAgeCreatedToStart: countCreatedToStart ? Math.round(sumCreatedToStart / countCreatedToStart) : 0,
+      avgCycleTime: countCycleTime ? Math.round(sumCycleTime / countCycleTime) : 0,
+      counts: { totalAge: countTotalAge, createdToStart: countCreatedToStart, cycleTime: countCycleTime },
+      byId: crAgingMetrics.byId
+    };
+  } catch (e) {
+    console.warn('Failed to compute CR aging metrics from initiatives:', e);
+  }
   
   // Create simple bar charts
   const createBarChart = (data, labelKey, valueKey, title, clickable = false) => {
@@ -4077,7 +5247,7 @@ async function renderCRDashboard() {
         <div style="margin-top: 16px;">
           ${data.map(item => {
             const percentage = ((item[valueKey] || 0) / max) * 100;
-            const statusClass = item[labelKey]?.replace(/\s+/g, '-') || '';
+            const statusClass = item[labelKey]?.toLowerCase().replace(/\s+/g, '-') || '';
             const filterValue = item[labelKey] || '';
             const clickableStyle = clickable ? 'cursor: pointer;' : '';
             const clickableClass = clickable ? 'clickable-chart-item' : '';
@@ -4087,7 +5257,7 @@ async function renderCRDashboard() {
                 <div style="width: 120px; font-size: 12px; color: var(--muted);">${item[labelKey] || 'N/A'}</div>
                 <div style="flex: 1; margin: 0 12px;">
                   <div style="background: #f1f5f9; height: 20px; border-radius: 10px; overflow: hidden;">
-                    <div style="background: ${statusClass.includes('Live') ? '#3b82f6' : statusClass.includes('At-Risk') ? '#f59e0b' : statusClass.includes('Delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
+                    <div style="background: ${statusClass.includes('live') ? '#3b82f6' : statusClass.includes('at-risk') ? '#f59e0b' : statusClass.includes('delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
                   </div>
                 </div>
                 <div style="width: 40px; text-align: right; font-weight: 600; font-size: 14px;">${item[valueKey] || 0}</div>
@@ -4116,10 +5286,12 @@ async function renderCRDashboard() {
   const departmentOptions = LOOKUPS.departments.map(d => ({ value: d.id, label: d.name }));
   const itManagerOptions = LOOKUPS.users
     .filter(u => {
-      // Only include active users with role: IT Manager
+      // Only include active users with (Role: IT AND Type: Manager) OR Admin
       if (u.active === false) return false;
       const role = (u.role || '').toLowerCase().trim();
-      return role === 'it manager';
+      const type = (u.type || '').toLowerCase().trim();
+      const isAdmin = u.isAdmin === true || u.isAdmin === 1 || role === 'admin' || role === 'administrator';
+      return isAdmin || (role === 'it' && type === 'manager');
     })
     .map(u => ({ value: u.id, label: u.name || u.email }))
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -4145,9 +5317,21 @@ async function renderCRDashboard() {
         <div class="muted">Live CRs</div>
         <div style="font-size:32px;font-weight:700;color: var(--success)">${d.liveCount || 0}</div>
       </div>
-      <div class="card">
-        <div class="muted">Avg Age (Days)</div>
-        <div style="font-size:32px;font-weight:700;color: var(--warning)">${d.avgAgeSinceCreated || 0}</div>
+      <div class="card" style="border-left: 4px solid var(--warning);">
+        <div class="muted">Average CR Aging (Days)</div>
+        <div style="display:flex; align-items:baseline; justify-content: space-between; gap: 12px; margin-top: 6px;">
+          <div>
+            <div style="font-size:12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
+            <div style="font-size:34px;font-weight:800;color: var(--warning); line-height: 1;">${crAgingMetrics.avgTotalAge}</div>
+          </div>
+          <div style="font-size: 12px; color: var(--muted); text-align: right;">
+            <div><strong>${crAgingMetrics.avgAgeCreatedToStart}</strong> Avg Age Created→Start</div>
+            <div><strong>${crAgingMetrics.avgCycleTime}</strong> Avg Cycle Time (Start→End)</div>
+          </div>
+        </div>
+        <div class="muted" style="margin-top: 10px; font-size: 12px;">
+          Total Age = (Create→Start) + (Start→End/Now). For ongoing CRs, End uses today.
+        </div>
       </div>
     </div>
     <div class="grid" style="margin-top:24px">
@@ -4157,9 +5341,17 @@ async function renderCRDashboard() {
     </div>
     <div class="grid" style="margin-top:24px">
       <div class="card">
-        <h3>CR Aging (Days Since Created)</h3>
+        <h3>CR Aging (Total Age)</h3>
         <div style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
-          ${(d.crAging || []).slice(0, 20).map(cr => `
+          ${(d.crAging || []).slice(0, 20).map(cr => {
+            const m = crAgingMetrics.byId[cr.id] || {};
+            const total = (m.totalAge ?? cr.daysSinceCreated ?? 0);
+            const aCS = m.ageCreatedToStart;
+            const cT = m.cycleTime;
+            const breakdown = (aCS !== null && aCS !== undefined && cT !== null && cT !== undefined)
+              ? `Create→Start: ${aCS}d • Start→End/Now: ${cT}d`
+              : 'Breakdown not available';
+            return `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px; background: #f8fafc; border-radius: 6px;">
               <div style="flex: 1;">
                 <div style="font-weight: 500; margin-bottom: 4px;">${cr.name || 'Unnamed CR'}</div>
@@ -4167,12 +5359,14 @@ async function renderCRDashboard() {
                   <span class="status-badge status-${(cr.status || '').replace(/\s+/g, '-')}">${cr.status || 'N/A'}</span>
                   <span style="margin-left: 8px;">${cr.milestone || 'N/A'}</span>
                 </div>
+                <div class="muted" style="font-size: 11px; margin-top: 4px;">${breakdown}</div>
               </div>
               <div style="text-align: right;">
-                <span style="font-weight: 600; color: var(--warning);">${cr.daysSinceCreated || 0} days</span>
+                <span style="font-weight: 700; color: var(--warning);" title="${breakdown}">${total} days</span>
               </div>
             </div>
-          `).join('')}
+          `;
+          }).join('')}
           ${(!d.crAging || d.crAging.length === 0) ? '<p class="muted">No CR aging data available</p>' : ''}
         </div>
       </div>
@@ -4628,7 +5822,11 @@ async function router() {
     if (h.startsWith('#admin-users')) return renderAdminUsers();
     if (h.startsWith('#admin-roles')) return renderAdminRoles();
     if (h.startsWith('#profile')) return renderProfile();
-    if (h.startsWith('#new')) return renderNew();
+    if (h.startsWith('#new')) {
+      const parts = h.split('/');
+      const defaultType = parts[1] || 'Project'; // Default to Project if no type specified
+      return renderNew(defaultType);
+    }
     if (h.startsWith('#edit/')) return renderEdit(h.split('/')[1]);
     if (h.startsWith('#view/')) return renderView(h.split('/')[1]);
     if (h.startsWith('#crdashboard')) return renderCRDashboard();

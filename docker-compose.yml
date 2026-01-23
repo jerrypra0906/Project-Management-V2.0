@@ -24,7 +24,7 @@ services:
       dockerfile: Dockerfile
     container_name: project_management_backend
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=${NODE_ENV:-development}
       - DATABASE_URL=postgres://postgres:postgres123@postgres:5432/project_management_v2
       - PORT=3000
       - HOST=0.0.0.0
@@ -64,6 +64,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: project_management_frontend
+    environment:
+      # Set NGINX_ENV to: local, testing, or production
+      - NGINX_ENV=${NGINX_ENV:-local}
     ports:
       - "8080:80"
     depends_on:
@@ -71,8 +74,10 @@ services:
     volumes:
       # Mount frontend folder for live updates during development
       - ./frontend:/usr/share/nginx/html:ro
-      # Mount nginx config for live updates
-      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Mount all nginx configs for live updates
+      - ./frontend/nginx.conf.local:/etc/nginx/conf.d/nginx.conf.local:ro
+      - ./frontend/nginx.conf.testing:/etc/nginx/conf.d/nginx.conf.testing:ro
+      - ./frontend/nginx.conf.production:/etc/nginx/conf.d/nginx.conf.production:ro
     networks:
       - app-network
     restart: unless-stopped

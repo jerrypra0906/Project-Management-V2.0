@@ -5,9 +5,14 @@ services:
       dockerfile: Dockerfile
     container_name: project_management_frontend
     ports:
-      - "1818:80"   # External port 1818 maps to container port 80
+      - "80:80"     # Standard HTTP
+      - "443:443"   # Standard HTTPS
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
-      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Use SSL nginx config (serves HTTPS on 443 and redirects HTTP->HTTPS)
+      - ./frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro
+      # Mount provided certificates from repo assets into the container
+      # Place cert files at: /opt/Project-Management-V2.0/assets/ssl on the server
+      - ./assets/ssl:/etc/nginx/ssl:ro
     restart: unless-stopped
 

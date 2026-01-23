@@ -4,7 +4,7 @@ const { Pool } = pkg;
 
 const databaseUrl =
   process.env.DATABASE_URL ||
-  'postgres://postgres:postgres123@localhost:5434/project_management_v2';
+  'postgres://postgres:postgres123@localhost:5544/project_management_v2';
 
 const pool = new Pool({ connectionString: databaseUrl });
 let initialized = false;
@@ -626,7 +626,10 @@ async function write(data) {
     }
 
     await client.query('COMMIT');
+    console.log(`[STORE] Write completed successfully - Users: ${(data.users || []).length}, Initiatives: ${(data.initiatives || []).length}`);
   } catch (e) {
+    console.error(`[STORE] Write error:`, e.message);
+    console.error(`[STORE] Error stack:`, e.stack);
     await client.query('ROLLBACK');
     throw e;
   } finally {
