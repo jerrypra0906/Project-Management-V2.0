@@ -16,38 +16,24 @@ async function calculateWeeklyTrend(type = 'CR', filteredCRs = null) {
   // Use filtered CRs if provided, otherwise use all CRs
   const allCRs = filteredCRs || data.initiatives.filter(i => i.type === type);
   
-  if (allCRs.length === 0) {
-    return [];
+  // Generate the last 12 consecutive weeks from today going backwards
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const currentWeekKey = getWeekKey(todayStr);
+  
+  // Build array of 12 consecutive week keys (current week + 11 previous weeks)
+  const weekKeys = [];
+  for (let i = 0; i < 12; i++) {
+    const weekDate = new Date(currentWeekKey);
+    weekDate.setDate(weekDate.getDate() - (i * 7)); // Go back i weeks
+    weekKeys.push(getWeekKey(weekDate.toISOString().slice(0, 10)));
   }
   
-  // Get all unique weeks from CRs' createdAt dates
-  const weeks = new Set();
+  // Reverse to get chronological order (oldest to newest)
+  weekKeys.reverse();
   
-  // Add current week
-  const today = new Date().toISOString().slice(0, 10);
-  weeks.add(getWeekKey(today));
-  
-  // Add weeks from createdAt dates
-  allCRs.forEach(cr => {
-    if (cr.createdAt && cr.createdAt !== '' && cr.createdAt !== null) {
-      const weekKey = getWeekKey(cr.createdAt.slice(0, 10));
-      weeks.add(weekKey);
-    }
-  });
-  
-  // Add weeks from endDate dates (for LIVE CRs)
-  allCRs.forEach(cr => {
-    if (cr.endDate && cr.endDate !== '' && cr.endDate !== null) {
-      const weekKey = getWeekKey(cr.endDate.slice(0, 10));
-      weeks.add(weekKey);
-    }
-  });
-  
-  // Sort weeks chronologically
-  const sortedWeeks = Array.from(weeks).sort();
-  
-  // Calculate metrics for each week (cumulative)
-  const weeklyData = sortedWeeks.map((weekKey, index) => {
+  // Calculate metrics for each of the 12 consecutive weeks
+  const weeklyData = weekKeys.map((weekKey) => {
     const weekStartStr = weekKey;
     const weekEndStr = getWeekEnd(weekKey);
     
@@ -90,8 +76,8 @@ async function calculateWeeklyTrend(type = 'CR', filteredCRs = null) {
     };
   });
   
-  // Return only the last 12 weeks (about 3 months)
-  return weeklyData.slice(-12);
+  // Return all 12 consecutive weeks
+  return weeklyData;
 }
 
 /**
@@ -151,6 +137,47 @@ router.get('/', async (req, res) => {
   // Milestone distribution - only count CRs with non-blank milestones
   const crsWithMilestone = crInitiatives.filter(i => i.milestone && i.milestone.trim() !== '');
   const byMilestone = Object.entries(crsWithMilestone.reduce((acc, i) => { acc[i.milestone] = (acc[i.milestone]||0)+1; return acc; }, {})).map(([k,v]) => ({ milestone: k, c: v }));
+  
+  // Calculate breakdowns
+  // 1. Status breakdown by Priority (P0, P1, P2)
+  const byStatusBreakdown = {};
+  byStatus.forEach(statusItem => {
+    const status = statusItem.status;
+    const breakdown = { P0: 0, P1: 0, P2: 0 };
+    crInitiatives.filter(cr => cr.status === status).forEach(cr => {
+      const priority = cr.priority || 'P2';
+      if (breakdown[priority] !== undefined) {
+        breakdown[priority]++;
+      }
+    });
+    byStatusBreakdown[status] = breakdown;
+  });
+  
+  // 2. Priority breakdown by Status
+  const byPriorityBreakdown = {};
+  byPriority.forEach(priorityItem => {
+    const priority = priorityItem.priority;
+    const breakdown = {};
+    crInitiatives.filter(cr => cr.priority === priority).forEach(cr => {
+      const status = cr.status || 'N/A';
+      breakdown[status] = (breakdown[status] || 0) + 1;
+    });
+    byPriorityBreakdown[priority] = breakdown;
+  });
+  
+  // 3. Milestone breakdown by Priority (P0, P1, P2)
+  const byMilestoneBreakdown = {};
+  byMilestone.forEach(milestoneItem => {
+    const milestone = milestoneItem.milestone;
+    const breakdown = { P0: 0, P1: 0, P2: 0 };
+    crInitiatives.filter(cr => cr.milestone === milestone).forEach(cr => {
+      const priority = cr.priority || 'P2';
+      if (breakdown[priority] !== undefined) {
+        breakdown[priority]++;
+      }
+    });
+    byMilestoneBreakdown[milestone] = breakdown;
+  });
   
   const year = new Date().getFullYear();
   const liveYTD = crInitiatives.filter(i => (i.status && i.status.toUpperCase() === 'LIVE') && (i.updatedAt||'').startsWith(String(year))).length;
@@ -249,6 +276,9 @@ router.get('/', async (req, res) => {
   
   res.json({ 
     crs, byStatus, byPriority, byDepartment, byMilestone, liveYTD, liveCount,
+    byStatusBreakdown,
+    byPriorityBreakdown,
+    byMilestoneBreakdown,
     avgAgeSinceCreated,
     crAging,
     milestoneDurations,

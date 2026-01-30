@@ -156,7 +156,7 @@ router.post('/', async (req, res) => {
   const createdAt = now();
   const updatedAt = createdAt;
   const {
-    type,name,ticket,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,status,milestone,startDate,endDate,remark,documentationLink
+    type,name,ticket,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,status,milestone,startDate,endDate,planStartDate,planEndDate,remark,documentationLink
   } = req.body;
   const data = await store.read();
   
@@ -176,7 +176,7 @@ router.post('/', async (req, res) => {
     itPicIds: finalItPicIds,
     itPmId: itPmId || null,
     itManagerIds: itManagerIdsStr,
-    status,milestone,startDate,endDate: endDate||null,remark: remark||null,documentationLink: documentationLink||null, 
+    status,milestone,startDate,endDate: endDate||null,planStartDate: planStartDate||null,planEndDate: planEndDate||null,remark: remark||null,documentationLink: documentationLink||null, 
     createdAt, updatedAt 
   });
   if (type === 'CR') {
@@ -227,7 +227,7 @@ router.put('/:id', async (req, res) => {
   const initiative = data.initiatives[idx];
   const changes = [];
   const updatedAt = now();
-  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','startDate','endDate','remark','documentationLink'];
+  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','startDate','endDate','planStartDate','planEndDate','remark','documentationLink'];
   
   // Track changes and update fields
   for (const k of allowed) {

@@ -800,9 +800,9 @@ async function renderList() {
     { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
     { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
     { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
-    { key: 'startDate', class: 'col-start-date', label: 'Start Date', sortable: true },
+    { key: 'startDate', class: 'col-start-date', label: 'Actual Start Date', sortable: true },
     { key: 'createdAt', class: 'col-create-date', label: 'Create Date', sortable: true },
-    { key: 'endDate', class: 'col-end-date', label: 'End Date', sortable: true },
+    { key: 'endDate', class: 'col-end-date', label: 'Actual End Date', sortable: true },
     { key: 'description', class: 'col-description', label: 'Description', sortable: true },
     { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
     { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
@@ -822,8 +822,10 @@ async function renderList() {
       itPicIds: 'IT PIC',
       itPmId: 'IT PM',
       itManagerIds: 'IT Manager',
-      startDate: 'Start Date',
-      endDate: 'End Date',
+      startDate: 'Actual Start Date',
+      endDate: 'Actual End Date',
+      planStartDate: 'Plan Start Date',
+      planEndDate: 'Plan End Date',
       documentationLink: 'Project Doc Link'
     };
     if (mapping[field]) return mapping[field];
@@ -1015,7 +1017,7 @@ async function renderList() {
           </div>
           <div class="date-filter-wrapper">
             <button class="multi-select-btn" data-filter="fStartDate">
-              <span class="filter-label">Start Date</span> ${filter.startDate ? '<span class="filter-active">✓</span>' : ''}
+              <span class="filter-label">Actual Start Date</span> ${filter.startDate ? '<span class="filter-active">✓</span>' : ''}
             </button>
             <div class="date-filter-dropdown" id="dropdown-fStartDate">
               <div class="date-filter-content">
@@ -1030,7 +1032,7 @@ async function renderList() {
           </div>
           <div class="date-filter-wrapper">
             <button class="multi-select-btn" data-filter="fEndDate">
-              <span class="filter-label">End Date</span> ${filter.endDate ? '<span class="filter-active">✓</span>' : ''}
+              <span class="filter-label">Actual End Date</span> ${filter.endDate ? '<span class="filter-active">✓</span>' : ''}
             </button>
             <div class="date-filter-dropdown" id="dropdown-fEndDate">
               <div class="date-filter-content">
@@ -1593,7 +1595,7 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
   // Determine selected type: from initiative if exists, otherwise from defaultType
   const selectedType = initiative ? initiative.type : defaultType;
   
-  return [
+  const fields = [
     formRow('Type', `<select name="type" id="typeSelect" required><option value="Project" ${selectedType === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${selectedType === 'CR' ? 'selected' : ''}>CR</option></select>`),
     formRow(`<span id="nameLabelText">${nameLabel}</span>`, `<input name="name" id="nameInput" value="${initiative ? (initiative.name || '').replace(/"/g, '&quot;') : ''}" required />`),
     formRow('Description', `<textarea name="description" class="long-text" required>${initiative ? (initiative.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
@@ -1607,11 +1609,15 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
     formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, initiative?.itManagerIds || [])),
     formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => option(s, s, initiative?.status === s)).join('')}</select>`),
     formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, initiative?.milestone === m)).join('')}</select>`),
-    formRow('Start Date', `<input type="date" name="startDate" value="${initiative?.startDate?.slice(0,10) || ''}" required />`),
-    formRow('End Date', `<input type="date" name="endDate" value="${initiative?.endDate?.slice(0,10) || ''}" />`),
+    formRow('Actual Start Date', `<input type="date" name="startDate" value="${initiative?.startDate?.slice(0,10) || ''}" required />`),
+    formRow('Actual End Date', `<input type="date" name="endDate" value="${initiative?.endDate?.slice(0,10) || ''}" />`),
+    formRow('Plan Start Date', `<input type="date" name="planStartDate" value="${initiative?.planStartDate?.slice(0,10) || ''}" />`),
+    formRow('Plan End Date', `<input type="date" name="planEndDate" value="${initiative?.planEndDate?.slice(0,10) || ''}" />`),
     formRow('Remark', `<textarea name="remark" class="long-text">${initiative ? (initiative.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Project Doc Link', `<input name="documentationLink" type="url" value="${initiative?.documentationLink || ''}" />`)
-  ].join('');
+  ];
+  console.log('commonFields: Plan Start Date and Plan End Date fields included:', fields.some(f => f.includes('Plan Start Date') || f.includes('Plan End Date')));
+  return fields.join('');
 }
 
 function crFields() {
@@ -1688,6 +1694,8 @@ async function renderNew(defaultType = 'Project') {
       milestone: obj.milestone,
       startDate: obj.startDate,
       endDate: obj.endDate || null,
+      planStartDate: obj.planStartDate || null,
+      planEndDate: obj.planEndDate || null,
       remark: obj.remark || null,
       documentationLink: obj.documentationLink || null
     };
@@ -1849,8 +1857,10 @@ async function renderView(id) {
       itPicIds: 'IT PIC',
       itPmId: 'IT PM',
       itManagerIds: 'IT Manager',
-      startDate: 'Start Date',
-      endDate: 'End Date',
+      startDate: 'Actual Start Date',
+      endDate: 'Actual End Date',
+      planStartDate: 'Plan Start Date',
+      planEndDate: 'Plan End Date',
       documentationLink: 'Project Doc Link'
     };
     if (mapping[field]) return mapping[field];
@@ -1948,8 +1958,10 @@ async function renderView(id) {
         <div><div class="muted">% Completion</div><div><strong>${completionPercent}%</strong></div></div>
         <div><div class="muted">Milestone</div><div>${i.milestone}</div></div>
         <div><div class="muted">Department</div><div>${depName}</div></div>
-        <div><div class="muted">Start Date</div><div>${i.startDate?.slice(0,10) || ''}</div></div>
-        <div><div class="muted">End Date</div><div>${i.endDate?.slice(0,10) || ''}</div></div>
+        <div><div class="muted">Actual Start Date</div><div>${i.startDate?.slice(0,10) || ''}</div></div>
+        <div><div class="muted">Actual End Date</div><div>${i.endDate?.slice(0,10) || ''}</div></div>
+        <div><div class="muted">Plan Start Date</div><div>${i.planStartDate?.slice(0,10) || ''}</div></div>
+        <div><div class="muted">Plan End Date</div><div>${i.planEndDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">Age Created to Start</div><div><strong>${ageCreatedToStart !== null ? ageCreatedToStart + ' days' : 'N/A'}</strong></div></div>
         <div><div class="muted">Cycle Time (Age Start to End)</div><div><strong>${cycleTime !== null ? cycleTime + ' days' : 'N/A'}</strong></div></div>
         <div><div class="muted">Total Age</div><div><strong>${totalAge !== null ? totalAge + ' days' : 'N/A'}</strong></div></div>
@@ -2441,8 +2453,10 @@ async function renderView(id) {
           ${formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => `<option value="${s}" ${i.status && i.status.toLowerCase() === s.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}</select>`)}
         ${formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
         ${formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, i.departmentId || '', 'Select...'))}
-        ${formRow('Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" required />`)}
-        ${formRow('End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
+        ${formRow('Actual Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" required />`)}
+        ${formRow('Actual End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
+        ${formRow('Plan Start Date', `<input type="date" name="planStartDate" value="${i.planStartDate?.slice(0,10) || ''}" />`)}
+        ${formRow('Plan End Date', `<input type="date" name="planEndDate" value="${i.planEndDate?.slice(0,10) || ''}" />`)}
         <div class="form-row"><label>Age Created to Start</label><div><strong>${ageCreatedToStart !== null ? ageCreatedToStart + ' days' : 'N/A'}</strong></div></div>
         <div class="form-row"><label>Cycle Time (Age Start to End)</label><div><strong>${cycleTime !== null ? cycleTime + ' days' : 'N/A'}</strong></div></div>
         <div class="form-row"><label>Total Age</label><div><strong>${totalAge !== null ? totalAge + ' days' : 'N/A'}</strong></div></div>
@@ -2500,11 +2514,13 @@ async function renderView(id) {
         itPicIds: itPicIds.length > 0 ? itPicIds : null,
         itPmId: obj.itPmId || null,
         itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
-        status: obj.status,
-        milestone: obj.milestone,
-        startDate: obj.startDate,
-        endDate: obj.endDate || null,
-        remark: obj.remark || null,
+      status: obj.status,
+      milestone: obj.milestone,
+      startDate: obj.startDate,
+      endDate: obj.endDate || null,
+      planStartDate: obj.planStartDate || null,
+      planEndDate: obj.planEndDate || null,
+      remark: obj.remark || null,
         documentationLink: obj.documentationLink || null,
         changedBy: currentUser?.id || 'Unknown'
       };
@@ -3245,6 +3261,8 @@ async function renderEdit(id) {
       milestone: obj.milestone,
       startDate: obj.startDate,
       endDate: obj.endDate || null,
+      planStartDate: obj.planStartDate || null,
+      planEndDate: obj.planEndDate || null,
       remark: obj.remark || null,
       documentationLink: obj.documentationLink || null,
       changedBy: currentUser?.id || 'Unknown'
@@ -3613,7 +3631,7 @@ async function renderCRList() {
           </div>
           <div class="date-filter-wrapper">
             <button class="multi-select-btn" data-filter="fStartDate">
-              <span class="filter-label">Start Date</span> ${filter.startDate ? '<span class="filter-active">✓</span>' : ''}
+              <span class="filter-label">Actual Start Date</span> ${filter.startDate ? '<span class="filter-active">✓</span>' : ''}
             </button>
             <div class="date-filter-dropdown" id="dropdown-fStartDate">
               <div class="date-filter-content">
@@ -3628,7 +3646,7 @@ async function renderCRList() {
           </div>
           <div class="date-filter-wrapper">
             <button class="multi-select-btn" data-filter="fEndDate">
-              <span class="filter-label">End Date</span> ${filter.endDate ? '<span class="filter-active">✓</span>' : ''}
+              <span class="filter-label">Actual End Date</span> ${filter.endDate ? '<span class="filter-active">✓</span>' : ''}
             </button>
             <div class="date-filter-dropdown" id="dropdown-fEndDate">
               <div class="date-filter-content">
@@ -3885,10 +3903,21 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
     apiQs.set('departmentId', filterValue);
   } else if (filterType === 'all') {
     // Show all projects
+  } else if (filterType === 'open') {
+    // For "open" CRs, we'll fetch all and filter out LIVE ones
+    // Don't set any status filter, we'll filter client-side
   }
   
   try {
-    const initiatives = await fetchJSON('/api/initiatives?' + apiQs.toString());
+    let initiatives = await fetchJSON('/api/initiatives?' + apiQs.toString());
+    
+    // Filter out LIVE CRs for "open" filter
+    if (filterType === 'open' && initiativeType === 'CR') {
+      initiatives = initiatives.filter(i => {
+        const status = (i.status || '').toUpperCase();
+        return status !== 'LIVE';
+      });
+    }
     
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop';
@@ -5187,39 +5216,108 @@ async function renderCRDashboard() {
     let countCreatedToStart = 0;
     let countCycleTime = 0;
 
-    (filteredCRs || []).forEach(cr => {
+    // Calculate aging metrics for breakdown table
+    const calculateAgingMetrics = (cr, useForecast = false) => {
       const createDate = safeDate(cr.createdAt);
-      const startDate = safeDate(cr.startDate);
-      const endDate = safeDate(cr.endDate);
-
+      const startDate = useForecast ? safeDate(cr.planStartDate) : safeDate(cr.startDate);
+      const endDate = useForecast ? safeDate(cr.planEndDate) : safeDate(cr.endDate);
+      
       let ageCreatedToStart = null;
       if (createDate && startDate) {
         ageCreatedToStart = floorDays(startDate - createDate);
       }
-
+      
       let cycleTime = null;
       if (startDate) {
-        const endOrNow = endDate || today;
-        cycleTime = floorDays(endOrNow - startDate);
+        const endOrNow = endDate || (useForecast ? null : today);
+        if (endOrNow) {
+          cycleTime = floorDays(endOrNow - startDate);
+        }
       }
-
+      
       let totalAge = null;
       if (cycleTime !== null) {
         totalAge = (ageCreatedToStart !== null ? ageCreatedToStart : 0) + cycleTime;
       }
+      
+      return { ageCreatedToStart, cycleTime, totalAge };
+    };
 
-      crAgingMetrics.byId[cr.id] = { ageCreatedToStart, cycleTime, totalAge };
+    // Separate Open and Live CRs
+    const openCRs = filteredCRs.filter(cr => {
+      const status = (cr.status || '').toUpperCase();
+      return status !== 'LIVE';
+    });
+    
+    const liveCRs = filteredCRs.filter(cr => {
+      const status = (cr.status || '').toUpperCase();
+      return status === 'LIVE';
+    });
 
-      if (totalAge !== null) {
-        sumTotalAge += totalAge;
+    // Calculate metrics for breakdown table
+    const calculateBreakdown = (crs, useForecast = false) => {
+      const breakdown = {
+        P0: { qty: 0, sumCreatedToStart: 0, sumCycleTime: 0, countCreatedToStart: 0, countCycleTime: 0 },
+        P1: { qty: 0, sumCreatedToStart: 0, sumCycleTime: 0, countCreatedToStart: 0, countCycleTime: 0 },
+        P2: { qty: 0, sumCreatedToStart: 0, sumCycleTime: 0, countCreatedToStart: 0, countCycleTime: 0 }
+      };
+      
+      crs.forEach(cr => {
+        const priority = cr.priority || 'P2';
+        if (!breakdown[priority]) return;
+        
+        breakdown[priority].qty++;
+        const metrics = calculateAgingMetrics(cr, useForecast);
+        
+        if (metrics.ageCreatedToStart !== null) {
+          breakdown[priority].sumCreatedToStart += metrics.ageCreatedToStart;
+          breakdown[priority].countCreatedToStart++;
+        }
+        
+        if (metrics.cycleTime !== null) {
+          breakdown[priority].sumCycleTime += metrics.cycleTime;
+          breakdown[priority].countCycleTime++;
+        }
+      });
+      
+      // Calculate averages
+      ['P0', 'P1', 'P2'].forEach(p => {
+        const b = breakdown[p];
+        b.avgCreatedToStart = b.countCreatedToStart > 0 ? Math.round(b.sumCreatedToStart / b.countCreatedToStart) : 0;
+        b.avgCycleTime = b.countCycleTime > 0 ? Math.round(b.sumCycleTime / b.countCycleTime) : 0;
+        b.avgTotalAge = b.avgCreatedToStart + b.avgCycleTime;
+      });
+      
+      return breakdown;
+    };
+
+    // Calculate breakdowns for Open and Live CRs (Actual and Forecast)
+    const openActual = calculateBreakdown(openCRs, false);
+    const openForecast = calculateBreakdown(openCRs, true);
+    const liveActual = calculateBreakdown(liveCRs, false);
+    const liveForecast = calculateBreakdown(liveCRs, true);
+
+    // Store for table rendering
+    crAgingMetrics.breakdown = {
+      open: { actual: openActual, forecast: openForecast },
+      live: { actual: liveActual, forecast: liveForecast }
+    };
+
+    // Keep existing calculations for backward compatibility
+    (filteredCRs || []).forEach(cr => {
+      const metrics = calculateAgingMetrics(cr, false);
+      crAgingMetrics.byId[cr.id] = metrics;
+
+      if (metrics.totalAge !== null) {
+        sumTotalAge += metrics.totalAge;
         countTotalAge++;
       }
-      if (ageCreatedToStart !== null) {
-        sumCreatedToStart += ageCreatedToStart;
+      if (metrics.ageCreatedToStart !== null) {
+        sumCreatedToStart += metrics.ageCreatedToStart;
         countCreatedToStart++;
       }
-      if (cycleTime !== null) {
-        sumCycleTime += cycleTime;
+      if (metrics.cycleTime !== null) {
+        sumCycleTime += metrics.cycleTime;
         countCycleTime++;
       }
     });
@@ -5229,7 +5327,8 @@ async function renderCRDashboard() {
       avgAgeCreatedToStart: countCreatedToStart ? Math.round(sumCreatedToStart / countCreatedToStart) : 0,
       avgCycleTime: countCycleTime ? Math.round(sumCycleTime / countCycleTime) : 0,
       counts: { totalAge: countTotalAge, createdToStart: countCreatedToStart, cycleTime: countCycleTime },
-      byId: crAgingMetrics.byId
+      byId: crAgingMetrics.byId,
+      breakdown: crAgingMetrics.breakdown
     };
   } catch (e) {
     console.warn('Failed to compute CR aging metrics from initiatives:', e);
@@ -5261,6 +5360,85 @@ async function renderCRDashboard() {
                   </div>
                 </div>
                 <div style="width: 40px; text-align: right; font-weight: 600; font-size: 14px;">${item[valueKey] || 0}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  };
+  
+  // Create bar chart with breakdown
+  const createBarChartWithBreakdown = (data, labelKey, valueKey, title, breakdownData, breakdownType, clickable = false) => {
+    if (!data || data.length === 0) {
+      return `<div class="card"><h3>${title}</h3><p class="muted">No data available</p></div>`;
+    }
+    const max = Math.max(...data.map(item => item[valueKey] || 0), 1);
+    return `
+      <div class="card">
+        <h3>${title}</h3>
+        <div style="margin-top: 16px;">
+          ${data.map(item => {
+            const percentage = ((item[valueKey] || 0) / max) * 100;
+            const statusClass = item[labelKey]?.toLowerCase().replace(/\s+/g, '-') || '';
+            const filterValue = item[labelKey] || '';
+            const clickableStyle = clickable ? 'cursor: pointer;' : '';
+            const clickableClass = clickable ? 'clickable-chart-item' : '';
+            const dataAttrs = clickable ? `data-filter-type="${labelKey}" data-filter-value="${filterValue.replace(/"/g, '&quot;')}" data-title="${title}: ${filterValue.replace(/"/g, '&quot;')}" data-initiative-type="CR"` : '';
+            
+            // Get breakdown for this item
+            const breakdown = breakdownData && breakdownData[filterValue] ? breakdownData[filterValue] : null;
+            let breakdownHtml = '';
+            
+            if (breakdown) {
+              if (breakdownType === 'priority') {
+                // Breakdown by Priority (P0, P1, P2)
+                const p0 = breakdown.P0 || 0;
+                const p1 = breakdown.P1 || 0;
+                const p2 = breakdown.P2 || 0;
+                const totalBreakdown = p0 + p1 + p2;
+                if (totalBreakdown > 0) {
+                  breakdownHtml = `
+                    <div style="margin-top: 6px; padding-left: 132px; font-size: 11px; color: var(--muted); display: flex; gap: 12px;">
+                      ${p0 > 0 ? `<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; background: #ef4444; border-radius: 2px;"></span>P0: ${p0}</span>` : ''}
+                      ${p1 > 0 ? `<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; background: #f59e0b; border-radius: 2px;"></span>P1: ${p1}</span>` : ''}
+                      ${p2 > 0 ? `<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 2px;"></span>P2: ${p2}</span>` : ''}
+                    </div>
+                  `;
+                }
+              } else if (breakdownType === 'status') {
+                // Breakdown by Status
+                const statusKeys = Object.keys(breakdown).sort();
+                if (statusKeys.length > 0) {
+                  breakdownHtml = `
+                    <div style="margin-top: 6px; padding-left: 132px; font-size: 11px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap;">
+                      ${statusKeys.map(status => {
+                        const count = breakdown[status] || 0;
+                        if (count > 0) {
+                          const statusClass = status.toLowerCase().replace(/\s+/g, '-');
+                          const color = statusClass.includes('live') ? '#3b82f6' : statusClass.includes('at-risk') ? '#f59e0b' : statusClass.includes('delayed') ? '#ef4444' : '#6366f1';
+                          return `<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; background: ${color}; border-radius: 2px;"></span>${status}: ${count}</span>`;
+                        }
+                        return '';
+                      }).filter(Boolean).join('')}
+                    </div>
+                  `;
+                }
+              }
+            }
+            
+            return `
+              <div style="margin-bottom: ${breakdownHtml ? '16px' : '12px'};">
+                <div class="${clickableClass}" ${dataAttrs} style="display: flex; align-items: center; ${clickableStyle}">
+                  <div style="width: 120px; font-size: 12px; color: var(--muted);">${item[labelKey] || 'N/A'}</div>
+                  <div style="flex: 1; margin: 0 12px;">
+                    <div style="background: #f1f5f9; height: 20px; border-radius: 10px; overflow: hidden;">
+                      <div style="background: ${statusClass.includes('live') ? '#3b82f6' : statusClass.includes('at-risk') ? '#f59e0b' : statusClass.includes('delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
+                    </div>
+                  </div>
+                  <div style="width: 40px; text-align: right; font-weight: 600; font-size: 14px;">${item[valueKey] || 0}</div>
+                </div>
+                ${breakdownHtml}
               </div>
             `;
           }).join('')}
@@ -5317,6 +5495,10 @@ async function renderCRDashboard() {
         <div class="muted">Live CRs</div>
         <div style="font-size:32px;font-weight:700;color: var(--success)">${d.liveCount || 0}</div>
       </div>
+      <div class="card clickable-card" data-filter-type="open" data-filter-value="" data-title="Open CRs" data-initiative-type="CR" style="cursor: pointer;">
+        <div class="muted">Open CRs</div>
+        <div style="font-size:32px;font-weight:700;color: var(--warning)">${(d.crs || 0) - (d.liveCount || 0)}</div>
+      </div>
       <div class="card" style="border-left: 4px solid var(--warning);">
         <div class="muted">Average CR Aging (Days)</div>
         <div style="display:flex; align-items:baseline; justify-content: space-between; gap: 12px; margin-top: 6px;">
@@ -5335,39 +5517,134 @@ async function renderCRDashboard() {
       </div>
     </div>
     <div class="grid" style="margin-top:24px">
-      ${createBarChart(d.byStatus || [], 'status', 'c', 'Status Distribution', true)}
-      ${createBarChart(d.byPriority || [], 'priority', 'c', 'Priority Distribution', true)}
-      ${createBarChart(d.byMilestone || [], 'milestone', 'c', 'Milestone Distribution', true)}
+      ${createBarChartWithBreakdown(d.byStatus || [], 'status', 'c', 'Status Distribution', d.byStatusBreakdown, 'priority', true)}
+      ${createBarChartWithBreakdown(d.byPriority || [], 'priority', 'c', 'Priority Distribution', d.byPriorityBreakdown, 'status', true)}
+      ${createBarChartWithBreakdown(d.byMilestone || [], 'milestone', 'c', 'Milestone Distribution', d.byMilestoneBreakdown, 'priority', true)}
     </div>
     <div class="grid" style="margin-top:24px">
-      <div class="card">
+      <div class="card" style="grid-column: 1 / -1;">
         <h3>CR Aging (Total Age)</h3>
-        <div style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
-          ${(d.crAging || []).slice(0, 20).map(cr => {
-            const m = crAgingMetrics.byId[cr.id] || {};
-            const total = (m.totalAge ?? cr.daysSinceCreated ?? 0);
-            const aCS = m.ageCreatedToStart;
-            const cT = m.cycleTime;
-            const breakdown = (aCS !== null && aCS !== undefined && cT !== null && cT !== undefined)
-              ? `Create→Start: ${aCS}d • Start→End/Now: ${cT}d`
-              : 'Breakdown not available';
+        <div style="margin-top: 16px; overflow-x: auto;">
+          ${(() => {
+            const breakdown = crAgingMetrics.breakdown || {};
+            const open = breakdown.open || { actual: {}, forecast: {} };
+            const live = breakdown.live || { actual: {}, forecast: {} };
+            
+            const renderCell = (value, isHeader = false, bgColor = '') => {
+              const baseStyle = isHeader 
+                ? 'padding: 8px 12px; font-weight: 600; text-align: center; border: 1px solid #e2e8f0;'
+                : 'padding: 8px 12px; text-align: center; border: 1px solid #e2e8f0;';
+              const bgStyle = bgColor ? ` background: ${bgColor};` : '';
+              const textColor = bgColor === '#475569' ? ' color: white;' : '';
+              return `<td style="${baseStyle}${bgStyle}${textColor}">${value}</td>`;
+            };
+            
+            const renderDataCells = (data, rowType) => {
+              const actual = data.actual || {};
+              const forecast = data.forecast || {};
+              
+              let cells = '';
+              if (rowType === 'qty') {
+                cells = `
+                  ${renderCell(actual.P0?.qty || 0)}
+                  ${renderCell(actual.P1?.qty || 0)}
+                  ${renderCell(actual.P2?.qty || 0)}
+                  ${renderCell(forecast.P0?.qty || 0, false, '#475569')}
+                  ${renderCell(forecast.P1?.qty || 0, false, '#475569')}
+                  ${renderCell(forecast.P2?.qty || 0, false, '#475569')}
+                `;
+              } else if (rowType === 'rec-start') {
+                cells = `
+                  ${renderCell(actual.P0?.avgCreatedToStart || 0)}
+                  ${renderCell(actual.P1?.avgCreatedToStart || 0)}
+                  ${renderCell(actual.P2?.avgCreatedToStart || 0)}
+                  ${renderCell(forecast.P0?.avgCreatedToStart || 0, false, '#475569')}
+                  ${renderCell(forecast.P1?.avgCreatedToStart || 0, false, '#475569')}
+                  ${renderCell(forecast.P2?.avgCreatedToStart || 0, false, '#475569')}
+                `;
+              } else if (rowType === 'start-live') {
+                cells = `
+                  ${renderCell(actual.P0?.avgCycleTime || 0)}
+                  ${renderCell(actual.P1?.avgCycleTime || 0)}
+                  ${renderCell(actual.P2?.avgCycleTime || 0)}
+                  ${renderCell(forecast.P0?.avgCycleTime || 0, false, '#475569')}
+                  ${renderCell(forecast.P1?.avgCycleTime || 0, false, '#475569')}
+                  ${renderCell(forecast.P2?.avgCycleTime || 0, false, '#475569')}
+                `;
+              } else if (rowType === 'total-age') {
+                cells = `
+                  ${renderCell(actual.P0?.avgTotalAge || 0)}
+                  ${renderCell(actual.P1?.avgTotalAge || 0)}
+                  ${renderCell(actual.P2?.avgTotalAge || 0)}
+                  ${renderCell(forecast.P0?.avgTotalAge || 0, false, '#475569')}
+                  ${renderCell(forecast.P1?.avgTotalAge || 0, false, '#475569')}
+                  ${renderCell(forecast.P2?.avgTotalAge || 0, false, '#475569')}
+                `;
+              }
+              
+              return cells;
+            };
+            
             return `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px; background: #f8fafc; border-radius: 6px;">
-              <div style="flex: 1;">
-                <div style="font-weight: 500; margin-bottom: 4px;">${cr.name || 'Unnamed CR'}</div>
-                <div style="font-size: 12px; color: var(--muted);">
-                  <span class="status-badge status-${(cr.status || '').replace(/\s+/g, '-')}">${cr.status || 'N/A'}</span>
-                  <span style="margin-left: 8px;">${cr.milestone || 'N/A'}</span>
-                </div>
-                <div class="muted" style="font-size: 11px; margin-top: 4px;">${breakdown}</div>
-              </div>
-              <div style="text-align: right;">
-                <span style="font-weight: 700; color: var(--warning);" title="${breakdown}">${total} days</span>
-              </div>
-            </div>
-          `;
-          }).join('')}
-          ${(!d.crAging || d.crAging.length === 0) ? '<p class="muted">No CR aging data available</p>' : ''}
+              <table style="width: 100%; border-collapse: collapse; min-width: 600px; font-size: 13px;">
+                <thead>
+                  <tr>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;"></th>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;"></th>
+                    <th colspan="3" style="padding: 12px; background: #fbbf24; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: white;">Actual</th>
+                    <th colspan="3" style="padding: 12px; background: #475569; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: white;">Forecast</th>
+                  </tr>
+                  <tr>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P0</th>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P1</th>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P2</th>
+                    <th style="padding: 8px; background: #475569; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: white;">P0</th>
+                    <th style="padding: 8px; background: #475569; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: white;">P1</th>
+                    <th style="padding: 8px; background: #475569; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: white;">P2</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="background: #fef3c7;">
+                    <td rowspan="4" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: center;">Open</td>
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Total CRs</td>
+                    ${renderDataCells(open, 'qty')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Age Created→Start</td>
+                    ${renderDataCells(open, 'rec-start')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Cycle Time (Start→End)</td>
+                    ${renderDataCells(open, 'start-live')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Total Age</td>
+                    ${renderDataCells(open, 'total-age')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td rowspan="4" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: center;">Closed</td>
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Total CRs</td>
+                    ${renderDataCells(live, 'qty')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Age Created→Start</td>
+                    ${renderDataCells(live, 'rec-start')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Cycle Time (Start→End)</td>
+                    ${renderDataCells(live, 'start-live')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Total Age</td>
+                    ${renderDataCells(live, 'total-age')}
+                  </tr>
+                </tbody>
+              </table>
+            `;
+          })()}
+        </div>
+        <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 6px; font-size: 12px; color: var(--muted);">
+          <strong>Note:</strong> Days (Actual) uses Create Date, Actual Start Date, and Actual End Date. Forecast uses Create Date, Plan Start Date, and Plan End Date. Rec-Start = Avg Age Created → Start. Start-Live = Avg Cycle Time (Start → End/Live).
         </div>
       </div>
       <div class="card">
@@ -5389,33 +5666,119 @@ async function renderCRDashboard() {
       ${d.weeklyTrendData && d.weeklyTrendData.length > 0 ? `
       <div class="card" style="margin-top: 24px; grid-column: 1 / -1;">
         <h3>📈 CR Weekly Trend</h3>
-        <div style="margin-top: 16px; overflow-x: auto;">
-          <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
-            <thead>
-              <tr style="background: #f8fafc; border-bottom: 2px solid var(--border);">
-                <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text);">Week (Mon-Fri)</th>
-                <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text);">New CRs</th>
-                <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text);">CRs Went Live</th>
-                <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text);">Total CRs</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${d.weeklyTrendData.map((week, index) => {
-                const isLatest = index === d.weeklyTrendData.length - 1;
-                return `
-                  <tr style="border-bottom: 1px solid var(--border); ${isLatest ? 'background: #f0f9ff; font-weight: 600;' : ''}">
-                    <td style="padding: 12px; color: var(--text);">${week.weekLabel || `${week.weekStart} - ${week.weekEnd}`}</td>
-                    <td style="padding: 12px; text-align: center; color: var(--brand);">${week.newCRs || 0}</td>
-                    <td style="padding: 12px; text-align: center; color: var(--success);">${week.liveCRs || 0}</td>
-                    <td style="padding: 12px; text-align: center; color: var(--text);">${week.totalCRs || 0}</td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-        <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 6px; font-size: 12px; color: var(--muted);">
-          <strong>Note:</strong> Week shows Monday-Friday range. "New CRs" = CRs created that week. "CRs Went Live" = CRs that became LIVE that week. "Total CRs" = Cumulative count of all CRs by end of week.
+        <div style="margin-top: 16px;">
+          ${(() => {
+            // Calculate max value for scaling
+            const maxValue = Math.max(
+              ...d.weeklyTrendData.map(w => Math.max(w.newCRs || 0, w.liveCRs || 0, w.totalCRs || 0)),
+              1 // Ensure at least 1 to avoid division by zero
+            );
+            const chartHeight = 300;
+            const chartPadding = 40;
+            const usableHeight = chartHeight - chartPadding;
+            
+            return `
+              <div style="position: relative; padding: 20px; border: 1px solid var(--border); background: white; border-radius: 8px;">
+                <!-- Y-axis labels -->
+                <div style="position: absolute; left: 0; top: ${chartPadding}px; bottom: 60px; width: 40px; display: flex; flex-direction: column; justify-content: space-between; font-size: 11px; color: var(--muted);">
+                  ${[maxValue, Math.ceil(maxValue * 0.75), Math.ceil(maxValue * 0.5), Math.ceil(maxValue * 0.25), 0].map(val => `
+                    <div style="text-align: right; padding-right: 8px;">${val}</div>
+                  `).join('')}
+                </div>
+                
+                <!-- Chart area -->
+                <div style="margin-left: 50px; margin-right: 20px; overflow-x: auto;">
+                  <div style="display: flex; align-items: flex-end; gap: 8px; min-width: ${d.weeklyTrendData.length * 80}px; height: ${chartHeight}px; padding-bottom: 80px; position: relative;">
+                    <!-- Grid lines -->
+                    ${[0, 0.25, 0.5, 0.75, 1].map(ratio => `
+                      <div style="position: absolute; left: 0; right: 0; height: 1px; background: #e2e8f0; top: ${chartPadding + (1 - ratio) * usableHeight}px; z-index: 0;"></div>
+                    `).join('')}
+                    
+                    ${d.weeklyTrendData.map((week, index) => {
+                      const isLatest = index === d.weeklyTrendData.length - 1;
+                      const newCRsHeight = (week.newCRs || 0) / maxValue * usableHeight;
+                      const liveCRsHeight = (week.liveCRs || 0) / maxValue * usableHeight;
+                      const totalCRsHeight = (week.totalCRs || 0) / maxValue * usableHeight;
+                      
+                      // Format date label better
+                      let weekLabel = '';
+                      if (week.weekLabel) {
+                        weekLabel = week.weekLabel;
+                      } else if (week.weekStart) {
+                        const date = new Date(week.weekStart);
+                        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        weekLabel = `${monthNames[date.getMonth()]} ${date.getDate()}`;
+                        if (week.weekEnd) {
+                          const endDate = new Date(week.weekEnd);
+                          weekLabel += ` - ${monthNames[endDate.getMonth()]} ${endDate.getDate()}`;
+                        }
+                      } else {
+                        weekLabel = `Week ${index + 1}`;
+                      }
+                      
+                      return `
+                        <div style="flex: 0 0 auto; width: 70px; display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; z-index: 1;">
+                          <div style="display: flex; align-items: flex-end; gap: 3px; width: 100%; height: ${usableHeight}px; position: relative;">
+                            <!-- New CRs bar -->
+                            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; position: relative;">
+                              <div class="chart-bar" style="width: 100%; background: var(--brand); border-radius: 4px 4px 0 0; height: ${newCRsHeight}px; min-height: ${newCRsHeight > 0 ? '2px' : '0'}; position: relative; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" 
+                                   title="New CRs: ${week.newCRs || 0}"
+                                   onmouseover="this.style.opacity='0.85'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
+                                   onmouseout="this.style.opacity='1'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
+                                ${newCRsHeight > 25 ? `<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 600; color: var(--brand); white-space: nowrap;">${week.newCRs || 0}</div>` : ''}
+                              </div>
+                            </div>
+                            <!-- CRs Went Live bar -->
+                            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; position: relative;">
+                              <div class="chart-bar" style="width: 100%; background: var(--success); border-radius: 4px 4px 0 0; height: ${liveCRsHeight}px; min-height: ${liveCRsHeight > 0 ? '2px' : '0'}; position: relative; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
+                                   title="CRs Went Live: ${week.liveCRs || 0}"
+                                   onmouseover="this.style.opacity='0.85'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
+                                   onmouseout="this.style.opacity='1'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
+                                ${liveCRsHeight > 25 ? `<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 600; color: var(--success); white-space: nowrap;">${week.liveCRs || 0}</div>` : ''}
+                              </div>
+                            </div>
+                            <!-- Total CRs bar -->
+                            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; position: relative;">
+                              <div class="chart-bar" style="width: 100%; background: #64748b; border-radius: 4px 4px 0 0; height: ${totalCRsHeight}px; min-height: ${totalCRsHeight > 0 ? '2px' : '0'}; position: relative; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
+                                   title="Total CRs: ${week.totalCRs || 0}"
+                                   onmouseover="this.style.opacity='0.85'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
+                                   onmouseout="this.style.opacity='1'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
+                                ${totalCRsHeight > 25 ? `<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 600; color: #64748b; white-space: nowrap;">${week.totalCRs || 0}</div>` : ''}
+                              </div>
+                            </div>
+                          </div>
+                          <div style="margin-top: 8px; font-size: 11px; color: var(--text); font-weight: ${isLatest ? '600' : '400'}; text-align: center; height: 70px; display: flex; align-items: flex-start; justify-content: center; padding: 0 4px;">
+                            <div style="line-height: 1.3; word-break: break-word; hyphens: auto;">${weekLabel}</div>
+                          </div>
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Legend -->
+              <div style="padding: 16px; background: #f8fafc; border-radius: 8px; margin-top: 16px;">
+                <div style="display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; margin-bottom: 12px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; background: var(--brand); border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+                    <span style="font-size: 13px; color: var(--text); font-weight: 500;">New CRs</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; background: var(--success); border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+                    <span style="font-size: 13px; color: var(--text); font-weight: 500;">CRs Went Live</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; background: #64748b; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+                    <span style="font-size: 13px; color: var(--text); font-weight: 500;">Total CRs</span>
+                  </div>
+                </div>
+                <div style="padding: 12px; background: white; border-radius: 6px; font-size: 12px; color: var(--muted); text-align: center;">
+                  <strong>Note:</strong> Week shows Monday-Friday range. "New CRs" = CRs created that week. "CRs Went Live" = CRs that became LIVE that week. "Total CRs" = Cumulative count of all CRs by end of week.
+                </div>
+              </div>
+            `;
+          })()}
         </div>
       </div>
       ` : ''}
