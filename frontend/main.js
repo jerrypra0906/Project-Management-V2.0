@@ -1814,7 +1814,10 @@ async function renderView(id) {
   // Age Created to Start: Calculate from Create Date to Start Date
   let ageCreatedToStart = null;
   if (createDate && startDate) {
-    ageCreatedToStart = Math.floor((startDate - createDate) / (1000 * 60 * 60 * 24));
+    // Normalize dates to midnight to compare only the date part (ignore time)
+    const createDateNormalized = new Date(createDate.getFullYear(), createDate.getMonth(), createDate.getDate());
+    const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    ageCreatedToStart = Math.floor((startDateNormalized - createDateNormalized) / (1000 * 60 * 60 * 24));
   }
   
   // Cycle Time (Age Start to End): Calculate from Start Date to End Date (or Current Date if End Date is empty)
@@ -4056,7 +4059,10 @@ async function renderDashboard() {
 
       let ageCreatedToStart = null;
       if (createDate && startDate) {
-        ageCreatedToStart = floorDays(startDate - createDate);
+        // Normalize dates to midnight to compare only the date part (ignore time)
+        const createDateNormalized = new Date(createDate.getFullYear(), createDate.getMonth(), createDate.getDate());
+        const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+        ageCreatedToStart = floorDays(startDateNormalized - createDateNormalized);
       }
 
       let cycleTime = null;
@@ -5224,7 +5230,10 @@ async function renderCRDashboard() {
       
       let ageCreatedToStart = null;
       if (createDate && startDate) {
-        ageCreatedToStart = floorDays(startDate - createDate);
+        // Normalize dates to midnight to compare only the date part (ignore time)
+        const createDateNormalized = new Date(createDate.getFullYear(), createDate.getMonth(), createDate.getDate());
+        const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+        ageCreatedToStart = floorDays(startDateNormalized - createDateNormalized);
       }
       
       let cycleTime = null;
