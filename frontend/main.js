@@ -5939,7 +5939,7 @@ async function renderCRDashboard() {
               ...data.flatMap(d => [
                 d.movingAvg2M.P0 || 0,
                 d.movingAvg2M.P1 || 0,
-                d.movingAvg2M.P3 || 0,
+                d.movingAvg2M.P2 || 0,
                 d.movingAvg2M.Total || 0
               ]),
               benchmarkValue,
@@ -5964,7 +5964,7 @@ async function renderCRDashboard() {
             
             const pointsP0MA = generatePoints('P0');
             const pointsP1MA = generatePoints('P1');
-            const pointsP3MA = generatePoints('P3');
+            const pointsP2MA = generatePoints('P2');
             const pointsTotalMA = generatePoints('Total');
             
             // Generate path strings
@@ -6006,7 +6006,7 @@ async function renderCRDashboard() {
                   <!-- Moving Average Lines (solid, more prominent) -->
                   <path d="${generatePath(pointsP0MA)}" stroke="#ef4444" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="${generatePath(pointsP1MA)}" stroke="#3b82f6" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="${generatePath(pointsP3MA)}" stroke="#10b981" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="${generatePath(pointsP2MA)}" stroke="#10b981" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="${generatePath(pointsTotalMA)}" stroke="#8b5cf6" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
                   
                   <!-- Benchmark Line (horizontal at value 7) -->
@@ -6023,7 +6023,7 @@ async function renderCRDashboard() {
                   <!-- Data points for Moving Average -->
                   ${pointsP0MA.map(p => `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#ef4444" stroke="white" stroke-width="2" class="chart-point-ma" data-value="${p.value.toFixed(1)}" data-month="${p.month}" data-priority="P0" style="cursor: pointer;" title="P0 2M Avg: ${p.value.toFixed(1)} (${p.month})"/>`).join('')}
                   ${pointsP1MA.map(p => `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#3b82f6" stroke="white" stroke-width="2" class="chart-point-ma" data-value="${p.value.toFixed(1)}" data-month="${p.month}" data-priority="P1" style="cursor: pointer;" title="P1 2M Avg: ${p.value.toFixed(1)} (${p.month})"/>`).join('')}
-                  ${pointsP3MA.map(p => `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#10b981" stroke="white" stroke-width="2" class="chart-point-ma" data-value="${p.value.toFixed(1)}" data-month="${p.month}" data-priority="P3" style="cursor: pointer;" title="P3 2M Avg: ${p.value.toFixed(1)} (${p.month})"/>`).join('')}
+                  ${pointsP2MA.map(p => `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#10b981" stroke="white" stroke-width="2" class="chart-point-ma" data-value="${p.value.toFixed(1)}" data-month="${p.month}" data-priority="P2" style="cursor: pointer;" title="P2 2M Avg: ${p.value.toFixed(1)} (${p.month})"/>`).join('')}
                   ${pointsTotalMA.map(p => `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#8b5cf6" stroke="white" stroke-width="2" class="chart-point-ma" data-value="${p.value.toFixed(1)}" data-month="${p.month}" data-priority="Total" style="cursor: pointer;" title="Total 2M Avg: ${p.value.toFixed(1)} (${p.month})"/>`).join('')}
                   
                   <!-- X-axis labels -->
@@ -6057,15 +6057,15 @@ async function renderCRDashboard() {
                   <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
                     <div style="width: 50px; height: 4px; background: #10b981; border-radius: 2px;"></div>
                     <div>
-                      <div style="font-size: 14px; color: #1e293b; font-weight: 600;">P3</div>
-                      <div style="font-size: 11px; color: #64748b;">Priority 3</div>
+                      <div style="font-size: 14px; color: #1e293b; font-weight: 600;">P2</div>
+                      <div style="font-size: 11px; color: #64748b;">Priority 2</div>
                     </div>
                   </div>
                   <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
                     <div style="width: 50px; height: 4px; background: #8b5cf6; border-radius: 2px;"></div>
                     <div>
                       <div style="font-size: 14px; color: #1e293b; font-weight: 600;">Total</div>
-                      <div style="font-size: 11px; color: #64748b;">P0 + P1 + P3</div>
+                      <div style="font-size: 11px; color: #64748b;">P0 + P1 + P2</div>
                     </div>
                   </div>
                   <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: white; border-radius: 8px; border: 1px solid #fee2e2;">
@@ -6096,7 +6096,7 @@ async function renderCRDashboard() {
             const data = d.openBurndownData;
 
             const maxValue = Math.max(
-              ...data.flatMap(w => [w.P0 || 0, w.P1 || 0, w.P3 || 0, w.Total || 0]),
+              ...data.flatMap(w => [w.P0 || 0, w.P1 || 0, w.P2 || 0, w.Total || 0]),
               1
             );
 
@@ -6117,7 +6117,7 @@ async function renderCRDashboard() {
 
             const pointsP0 = generatePoints('P0');
             const pointsP1 = generatePoints('P1');
-            const pointsP3 = generatePoints('P3');
+            const pointsP2 = generatePoints('P2');
             const pointsTotal = generatePoints('Total');
 
             const generatePath = (points) => {
@@ -6156,12 +6156,12 @@ async function renderCRDashboard() {
 
                   <path d="${generatePath(pointsP0)}" stroke="#ef4444" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="${generatePath(pointsP1)}" stroke="#3b82f6" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="${generatePath(pointsP3)}" stroke="#10b981" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="${generatePath(pointsP2)}" stroke="#10b981" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="${generatePath(pointsTotal)}" stroke="#8b5cf6" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 
                   ${pointsP0.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#ef4444" stroke="white" stroke-width="2" title="P0 Open: ${p.value} (${p.label})"/>`).join('')}
                   ${pointsP1.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#3b82f6" stroke="white" stroke-width="2" title="P1 Open: ${p.value} (${p.label})"/>`).join('')}
-                  ${pointsP3.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#10b981" stroke="white" stroke-width="2" title="P3 Open: ${p.value} (${p.label})"/>`).join('')}
+                  ${pointsP2.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#10b981" stroke="white" stroke-width="2" title="P2 Open: ${p.value} (${p.label})"/>`).join('')}
                   ${pointsTotal.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#8b5cf6" stroke="white" stroke-width="2" title="Total Open: ${p.value} (${p.label})"/>`).join('')}
 
                   ${xAxisLabels.join('')}
@@ -6182,11 +6182,11 @@ async function renderCRDashboard() {
                   </div>
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <div style="width: 32px; height: 4px; background: #10b981; border-radius: 2px;"></div>
-                    <span style="font-size: 12px; color: #1e293b; font-weight: 600;">P3</span>
+                    <span style="font-size: 12px; color: #1e293b; font-weight: 600;">P2</span>
                   </div>
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <div style="width: 32px; height: 4px; background: #8b5cf6; border-radius: 2px;"></div>
-                    <span style="font-size: 12px; color: #1e293b; font-weight: 600;">Total (P0+P1+P3)</span>
+                    <span style="font-size: 12px; color: #1e293b; font-weight: 600;">Total (P0+P1+P2)</span>
                   </div>
                 </div>
                 <div style="font-size: 12px; color: #475569; text-align: center;">

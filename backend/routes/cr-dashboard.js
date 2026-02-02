@@ -157,14 +157,14 @@ function calculateOpenBurndown(crInitiatives) {
 
     const counts = openCRs.reduce(
       (acc, cr) => {
-        const priority = (cr.priority || 'P3').toUpperCase();
+        const priority = (cr.priority || 'P2').toUpperCase();
         if (priority === 'P0') acc.P0 += 1;
         else if (priority === 'P1') acc.P1 += 1;
-        else if (priority === 'P3') acc.P3 += 1;
-        acc.Total = acc.P0 + acc.P1 + acc.P3;
+        else if (priority === 'P2') acc.P2 += 1;
+        acc.Total = acc.P0 + acc.P1 + acc.P2;
         return acc;
       },
-      { P0: 0, P1: 0, P3: 0, Total: 0 }
+      { P0: 0, P1: 0, P2: 0, Total: 0 }
     );
 
     const mondayDate = new Date(weekKey);
@@ -242,7 +242,7 @@ function calculateGoLiveRate(crInitiatives) {
         date: new Date(currentDate),
         P0: 0,
         P1: 0,
-        P3: 0,
+        P2: 0,
         Total: 0
       };
       
@@ -260,7 +260,7 @@ function calculateGoLiveRate(crInitiatives) {
         const monthKey = endDateStr.slice(0, 7); // YYYY-MM
         
         if (monthlyData[monthKey]) {
-          const priority = (cr.priority || 'P3').toUpperCase();
+          const priority = (cr.priority || 'P2').toUpperCase();
           
           if (priority === 'P0') {
             monthlyData[monthKey].P0++;
@@ -268,8 +268,8 @@ function calculateGoLiveRate(crInitiatives) {
           } else if (priority === 'P1') {
             monthlyData[monthKey].P1++;
             monthlyData[monthKey].Total++;
-          } else if (priority === 'P3') {
-            monthlyData[monthKey].P3++;
+          } else if (priority === 'P2') {
+            monthlyData[monthKey].P2++;
             monthlyData[monthKey].Total++;
           }
         }
@@ -289,7 +289,7 @@ function calculateGoLiveRate(crInitiatives) {
       const movingAvg = {
         P0: 0,
         P1: 0,
-        P3: 0,
+        P2: 0,
         Total: 0
       };
 
@@ -301,14 +301,14 @@ function calculateGoLiveRate(crInitiatives) {
       monthsForAvg.forEach(m => {
         movingAvg.P0 += m.P0;
         movingAvg.P1 += m.P1;
-        movingAvg.P3 += m.P3;
+        movingAvg.P2 += m.P2;
         movingAvg.Total += m.Total;
       });
 
       // Calculate average
       movingAvg.P0 = monthCount > 0 ? Math.round((movingAvg.P0 / monthCount) * 10) / 10 : 0;
       movingAvg.P1 = monthCount > 0 ? Math.round((movingAvg.P1 / monthCount) * 10) / 10 : 0;
-      movingAvg.P3 = monthCount > 0 ? Math.round((movingAvg.P3 / monthCount) * 10) / 10 : 0;
+      movingAvg.P2 = monthCount > 0 ? Math.round((movingAvg.P2 / monthCount) * 10) / 10 : 0;
       movingAvg.Total = monthCount > 0 ? Math.round((movingAvg.Total / monthCount) * 10) / 10 : 0;
 
       return {
@@ -318,7 +318,7 @@ function calculateGoLiveRate(crInitiatives) {
         actual: {
           P0: month.P0,
           P1: month.P1,
-          P3: month.P3,
+          P2: month.P2,
           Total: month.Total
         },
         movingAvg2M: movingAvg
