@@ -106,6 +106,232 @@ function getWeekEnd(weekKey) {
   return friday.toISOString().slice(0, 10);
 }
 
+/**
+ * Calculate weekly open CR burndown by priority
+ * Open = status not LIVE and not CANCELLED at week end
+ * @param {Array} crInitiatives - Filtered CR initiatives
+ * @returns {Array} Array of weekly burndown data
+ */
+function calculateOpenBurndown(crInitiatives) {
+  if (!crInitiatives || crInitiatives.length === 0) {
+    return [];
+  }
+
+  // Reuse the same 12-week window as calculateWeeklyTrend
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const currentWeekKey = getWeekKey(todayStr);
+
+  const weekKeys = [];
+  for (let i = 0; i < 12; i++) {
+    const weekDate = new Date(currentWeekKey);
+    weekDate.setDate(weekDate.getDate() - i * 7);
+    weekKeys.push(getWeekKey(weekDate.toISOString().slice(0, 10)));
+  }
+  weekKeys.reverse();
+
+  const weeklyData = weekKeys.map((weekKey) => {
+    const weekEndStr = getWeekEnd(weekKey);
+
+    // Open = created on/before week end AND (no endDate or endDate after week end)
+    // AND status is not LIVE and not CANCELLED
+    const openCRs = crInitiatives.filter((cr) => {
+      try {
+        const status = (cr.status || '').toUpperCase();
+        if (status === 'LIVE' || status === 'CANCELLED') return false;
+
+        if (!cr.createdAt) return false;
+        const createdDateStr = cr.createdAt.slice(0, 10);
+        if (createdDateStr > weekEndStr) return false;
+
+        if (cr.endDate && cr.endDate !== '' && cr.endDate !== null) {
+          const endDateStr = cr.endDate.slice(0, 10);
+          if (endDateStr <= weekEndStr) return false;
+        }
+
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    const counts = openCRs.reduce(
+      (acc, cr) => {
+        const priority = (cr.priority || 'P3').toUpperCase();
+        if (priority === 'P0') acc.P0 += 1;
+        else if (priority === 'P1') acc.P1 += 1;
+        else if (priority === 'P3') acc.P3 += 1;
+        acc.Total = acc.P0 + acc.P1 + acc.P3;
+        return acc;
+      },
+      { P0: 0, P1: 0, P3: 0, Total: 0 }
+    );
+
+    const mondayDate = new Date(weekKey);
+    const fridayDate = new Date(weekEndStr);
+    const weekLabel = `${mondayDate.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })} - ${fridayDate.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })}`;
+
+    return {
+      weekStart: weekKey,
+      weekEnd: weekEndStr,
+      weekLabel,
+      ...counts,
+    };
+  });
+
+  return weeklyData;
+}
+
+/**
+ * Calculate Go Live Rate (3M Moving Average) by priority
+ * Based on CRs with Actual End Date (endDate field)
+ * @param {Array} crInitiatives - Filtered CR initiatives
+ * @returns {Array} Array of monthly data with 3M moving averages
+ */
+function calculateGoLiveRate(crInitiatives) {
+  try {
+    // Filter CRs with actual end date
+    const crsWithEndDate = crInitiatives.filter(cr => 
+      cr && cr.endDate && cr.endDate !== '' && cr.endDate !== null
+    );
+
+    if (crsWithEndDate.length === 0) {
+      return [];
+    }
+
+    // Get date range (from oldest endDate to today)
+    const endDates = crsWithEndDate
+      .map(cr => {
+        try {
+          return cr.endDate ? cr.endDate.slice(0, 10) : null;
+        } catch (e) {
+          return null;
+        }
+      })
+      .filter(date => date && date.length === 10)
+      .sort();
+    
+    if (endDates.length === 0) {
+      return [];
+    }
+    
+    const oldestDate = new Date(endDates[0]);
+    if (isNaN(oldestDate.getTime())) {
+      return [];
+    }
+    
+    const today = new Date();
+    
+    // Generate monthly buckets (YYYY-MM format)
+    const monthlyData = {};
+    const currentDate = new Date(oldestDate);
+    currentDate.setDate(1); // Start of month
+    
+    while (currentDate <= today) {
+      const monthKey = currentDate.toISOString().slice(0, 7); // YYYY-MM
+      monthlyData[monthKey] = {
+        month: monthKey,
+        date: new Date(currentDate),
+        P0: 0,
+        P1: 0,
+        P3: 0,
+        Total: 0
+      };
+      
+      // Move to next month
+      currentDate.setMonth(currentDate.getMonth() + 1);
+    }
+
+    // Count CRs by month and priority
+    crsWithEndDate.forEach(cr => {
+      try {
+        if (!cr || !cr.endDate) return;
+        const endDateStr = cr.endDate.slice(0, 10);
+        if (!endDateStr || endDateStr.length !== 10) return;
+        
+        const monthKey = endDateStr.slice(0, 7); // YYYY-MM
+        
+        if (monthlyData[monthKey]) {
+          const priority = (cr.priority || 'P3').toUpperCase();
+          
+          if (priority === 'P0') {
+            monthlyData[monthKey].P0++;
+            monthlyData[monthKey].Total++;
+          } else if (priority === 'P1') {
+            monthlyData[monthKey].P1++;
+            monthlyData[monthKey].Total++;
+          } else if (priority === 'P3') {
+            monthlyData[monthKey].P3++;
+            monthlyData[monthKey].Total++;
+          }
+        }
+      } catch (e) {
+        // Skip invalid entries
+        console.warn('Error processing CR for Go Live Rate:', e.message);
+      }
+    });
+
+    // Convert to array and sort by date
+    const monthlyArray = Object.values(monthlyData).sort((a, b) => 
+      a.date.getTime() - b.date.getTime()
+    );
+
+    // Calculate 2-month moving average
+    const result = monthlyArray.map((month, index) => {
+      const movingAvg = {
+        P0: 0,
+        P1: 0,
+        P3: 0,
+        Total: 0
+      };
+
+      // Get previous 1 month + current month (2 months total)
+      const startIdx = Math.max(0, index - 1);
+      const monthsForAvg = monthlyArray.slice(startIdx, index + 1);
+      const monthCount = monthsForAvg.length;
+
+      monthsForAvg.forEach(m => {
+        movingAvg.P0 += m.P0;
+        movingAvg.P1 += m.P1;
+        movingAvg.P3 += m.P3;
+        movingAvg.Total += m.Total;
+      });
+
+      // Calculate average
+      movingAvg.P0 = monthCount > 0 ? Math.round((movingAvg.P0 / monthCount) * 10) / 10 : 0;
+      movingAvg.P1 = monthCount > 0 ? Math.round((movingAvg.P1 / monthCount) * 10) / 10 : 0;
+      movingAvg.P3 = monthCount > 0 ? Math.round((movingAvg.P3 / monthCount) * 10) / 10 : 0;
+      movingAvg.Total = monthCount > 0 ? Math.round((movingAvg.Total / monthCount) * 10) / 10 : 0;
+
+      return {
+        month: month.month,
+        date: month.date.toISOString().slice(0, 10),
+        monthLabel: month.date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        actual: {
+          P0: month.P0,
+          P1: month.P1,
+          P3: month.P3,
+          Total: month.Total
+        },
+        movingAvg2M: movingAvg
+      };
+    });
+
+    return result;
+  } catch (error) {
+    console.error('Error calculating Go Live Rate:', error);
+    return [];
+  }
+}
+
 router.get('/', async (req, res) => {
   const { departmentId, itManagerId } = req.query;
   const data = await store.read();
@@ -210,7 +436,13 @@ router.get('/', async (req, res) => {
   
   // Calculate weekly trend data for CRs (using filtered CRs)
   const weeklyTrendData = await calculateWeeklyTrend('CR', crInitiatives);
-  
+
+  // Calculate Go Live Rate (2M Moving Average) by priority
+  const goLiveRateData = calculateGoLiveRate(crInitiatives);
+
+  // Calculate weekly open CR burndown by priority
+  const openBurndownData = calculateOpenBurndown(crInitiatives);
+
   // Calculate week boundaries (Monday to Sunday)
   const today = new Date();
   const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
@@ -283,6 +515,8 @@ router.get('/', async (req, res) => {
     crAging,
     milestoneDurations,
     weeklyTrendData,
+    goLiveRateData,
+    openBurndownData,
     insights
   });
 });
