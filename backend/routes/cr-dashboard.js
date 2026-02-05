@@ -325,7 +325,9 @@ function calculateGoLiveRate(crInitiatives) {
       };
     });
 
-    return result;
+    // Display window: start x-axis from Sep 2025 onwards (keep earlier months for MA calc above)
+    const START_MONTH = '2025-09'; // YYYY-MM
+    return result.filter(r => r && typeof r.month === 'string' && r.month >= START_MONTH);
   } catch (error) {
     console.error('Error calculating Go Live Rate:', error);
     return [];
