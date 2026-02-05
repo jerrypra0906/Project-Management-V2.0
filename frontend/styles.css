@@ -1351,6 +1351,11 @@ button.primary:hover {
 #initiatives-table thead th,
 #cr-table thead th {
   background: var(--color-bg-lighter);
+  white-space: normal; /* Allow text wrapping */
+  word-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.4;
+  vertical-align: top;
 }
 
 /* Horizontal scroll affordance for wide tables */
@@ -1391,6 +1396,8 @@ button.primary:hover {
   border-spacing: 0; 
   background: var(--color-bg-lighter); 
   font-size: 14px;
+  /* Allow user-resized column widths to actually take effect */
+  table-layout: fixed;
 }
 
 .modern-table thead {
@@ -1413,16 +1420,30 @@ th, td {
   font-family: var(--font-family-primary);
 }
 
+/* Make fixed-layout tables behave nicely when columns are narrowed */
+.modern-table th,
+.modern-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modern-table td {
+  white-space: nowrap;
+}
+
 .modern-table th {
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-steel);
   text-transform: none;
   background: var(--color-bg-lighter);
   padding: var(--spacing-2) var(--spacing-3);
-  white-space: nowrap;
+  white-space: normal; /* Allow text wrapping */
+  word-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.4;
   font-size: var(--font-size-small);
   font-family: var(--font-family-primary);
   position: relative;
+  vertical-align: top; /* Align text to top when wrapping */
 }
 
 
@@ -1938,18 +1959,48 @@ th.sortable {
   position: relative;
 }
 th.sortable:hover { background: #f1f5f9; }
-th { position: relative; white-space: nowrap; }
+th { 
+  position: relative; 
+  white-space: normal; /* Allow text wrapping */
+  word-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.4;
+  vertical-align: top;
+}
 .col-resize { 
   position: absolute; 
   top: 0; 
   right: 0; 
-  width: 4px; 
+  width: 8px; 
   height: 100%; 
+  min-height: 100%; /* Ensure it covers full header height even when wrapped */
   cursor: col-resize;
-  background: transparent;
+  background: rgba(15, 23, 42, 0.08);
   transition: background 0.2s;
+  z-index: 10;
+  pointer-events: auto;
 }
-.col-resize:hover { background: var(--brand); }
+.col-resize:hover { 
+  background: var(--brand); 
+  width: 10px;
+}
+
+/* Expandable table cells (Description / Remark) */
+td.cell-expandable .cell-full { display: none; }
+td.cell-expandable .cell-toggle {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--brand);
+  font-weight: 600;
+  cursor: pointer;
+}
+td.cell-expandable .cell-toggle:hover { text-decoration: underline; }
+
+td.cell-expandable.expanded .cell-short { display: none; }
+td.cell-expandable.expanded .cell-full { display: inline; }
+td.cell-expandable.expanded { white-space: normal; }
 
 /* Status badges */
 .status-badge { 

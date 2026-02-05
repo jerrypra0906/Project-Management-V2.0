@@ -41,13 +41,13 @@ import { authenticateToken } from './middleware/auth.js';
 
 // Public routes
 app.use('/api/auth', authRouter);
+app.use('/api/lookups', lookupsRouter);
 
 // Protected routes (require authentication)
 app.use('/api/initiatives', authenticateToken, initiativesRouter);
 app.use('/api/dashboard', authenticateToken, dashboardRouter);
 app.use('/api/cr-dashboard', authenticateToken, crDashboardRouter);
 app.use('/api/daily-snapshots', authenticateToken, dailySnapshotsRouter);
-app.use('/api/lookups', authenticateToken, lookupsRouter);
 app.use('/api/user-dashboard', userDashboardRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/comments', commentsRouter);
