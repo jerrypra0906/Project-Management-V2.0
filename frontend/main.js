@@ -4812,7 +4812,10 @@ async function renderDashboard() {
   const liveProjects = d.liveCount || statusCount('LIVE') || 0;
   const cancelledProjects = statusCount('CANCELLED');
   const onHoldProjects = statusCount('ON HOLD');
-  const inProgressProjects = Math.max(0, (d.projects || 0) - notStartedProjects - liveProjects - cancelledProjects - onHoldProjects);
+  const onTrackProjects = statusCount('ON TRACK');
+  const atRiskProjects = statusCount('AT RISK');
+  const delayedProjects = statusCount('DELAYED');
+  const inProgressProjects = onTrackProjects + atRiskProjects + delayedProjects;
 
   app.innerHTML = `
     <div class="card" style="margin-bottom: 24px; padding: 20px;">
@@ -4840,7 +4843,7 @@ async function renderDashboard() {
         <div class="muted">In Progress Projects</div>
         <div style="font-size:32px;font-weight:700;color: var(--success)">${inProgressProjects}</div>
         <div class="muted" style="margin-top: 6px; font-size: 12px;">
-          Total − Not Started − Live − Cancelled − On Hold
+          On Track + At Risk + Delayed
         </div>
       </div>
       <div class="card clickable-card" data-filter-type="status" data-filter-value="NOT STARTED" data-title="Not Started Projects" style="cursor: pointer;">
@@ -6226,18 +6229,16 @@ async function renderCRDashboard() {
       <div class="card" style="border-left: 4px solid var(--success);">
         <div class="muted">In Progress CRs</div>
         <div style="font-size:32px;font-weight:700;color: var(--success)">${(() => {
-          const totalCRs = d.crs || 0;
-          const liveCRs = d.liveCount || 0;
-          const notStartedStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'NOT STARTED');
-          const notStartedCRs = notStartedStatus ? (notStartedStatus.c || 0) : 0;
-          const cancelledStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'CANCELLED');
-          const cancelledCRs = cancelledStatus ? (cancelledStatus.c || 0) : 0;
-          const onHoldStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'ON HOLD');
-          const onHoldCRs = onHoldStatus ? (onHoldStatus.c || 0) : 0;
-          return Math.max(0, totalCRs - liveCRs - notStartedCRs - cancelledCRs - onHoldCRs);
+          const onTrackStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'ON TRACK');
+          const onTrackCRs = onTrackStatus ? (onTrackStatus.c || 0) : 0;
+          const atRiskStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'AT RISK');
+          const atRiskCRs = atRiskStatus ? (atRiskStatus.c || 0) : 0;
+          const delayedStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'DELAYED');
+          const delayedCRs = delayedStatus ? (delayedStatus.c || 0) : 0;
+          return onTrackCRs + atRiskCRs + delayedCRs;
         })()}</div>
         <div class="muted" style="margin-top: 6px; font-size: 12px;">
-          Total − Live − Not Started − Cancelled − On Hold
+          On Track + At Risk + Delayed
         </div>
       </div>
       <div class="card" style="border-left: 4px solid var(--warning);">
