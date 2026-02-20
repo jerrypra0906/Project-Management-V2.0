@@ -9,6 +9,116 @@ const nav = {
   dashboard: document.getElementById('nav-dashboard')
 };
 
+// Indonesia Public Holidays (2024-2026)
+// Format: 'YYYY-MM-DD'
+const INDONESIA_HOLIDAYS = [
+  // 2024
+  '2024-01-01', // New Year's Day
+  '2024-02-10', // Chinese New Year
+  '2024-02-11', // Chinese New Year (observed)
+  '2024-03-11', // Nyepi Day
+  '2024-03-29', // Good Friday
+  '2024-04-10', // Idul Fitri
+  '2024-04-11', // Idul Fitri
+  '2024-05-01', // Labor Day
+  '2024-05-09', // Ascension Day of Jesus Christ
+  '2024-05-23', // Vesak Day
+  '2024-06-01', // Pancasila Day
+  '2024-06-17', // Idul Adha
+  '2024-07-07', // Islamic New Year
+  '2024-08-17', // Independence Day
+  '2024-09-16', // Prophet Muhammad's Birthday
+  '2024-12-25', // Christmas
+  '2024-12-26', // Christmas (observed)
+  // 2025
+  '2025-01-01', // New Year's Day
+  '2025-01-29', // Chinese New Year
+  '2025-03-29', // Nyepi Day
+  '2025-03-31', // Good Friday
+  '2025-03-31', // Idul Fitri
+  '2025-04-01', // Idul Fitri
+  '2025-05-01', // Labor Day
+  '2025-05-29', // Ascension Day of Jesus Christ
+  '2025-05-12', // Vesak Day
+  '2025-06-01', // Pancasila Day
+  '2025-06-07', // Idul Adha
+  '2025-06-26', // Islamic New Year
+  '2025-08-17', // Independence Day
+  '2025-09-05', // Prophet Muhammad's Birthday
+  '2025-12-25', // Christmas
+  '2025-12-26', // Christmas (observed)
+  // 2026
+  '2026-01-01', // New Year's Day
+  '2026-02-17', // Chinese New Year
+  '2026-03-19', // Nyepi Day
+  '2026-03-20', // Good Friday
+  '2026-03-20', // Idul Fitri
+  '2026-03-21', // Idul Fitri
+  '2026-05-01', // Labor Day
+  '2026-05-14', // Ascension Day of Jesus Christ
+  '2026-05-01', // Vesak Day
+  '2026-06-01', // Pancasila Day
+  '2026-05-27', // Idul Adha
+  '2026-06-15', // Islamic New Year
+  '2026-08-17', // Independence Day
+  '2026-08-25', // Prophet Muhammad's Birthday
+  '2026-12-25', // Christmas
+];
+
+// Helper function to format date as YYYY-MM-DD
+const formatDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Check if a date is a weekend (Saturday = 6, Sunday = 0)
+const isWeekend = (date) => {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+};
+
+// Check if a date is a public holiday
+const isHoliday = (date) => {
+  const dateKey = formatDateKey(date);
+  return INDONESIA_HOLIDAYS.includes(dateKey);
+};
+
+// Check if a date is a working day (not weekend and not holiday)
+const isWorkingDay = (date) => {
+  return !isWeekend(date) && !isHoliday(date);
+};
+
+// Calculate working days between two dates (inclusive of start, exclusive of end)
+// Returns the number of working days
+const calculateWorkingDays = (startDate, endDate) => {
+  if (!startDate || !endDate) return null;
+  
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  
+  // Normalize to midnight to compare only dates
+  start.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+  
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+  if (start >= end) return 0;
+  
+  let workingDays = 0;
+  const current = new Date(start);
+  
+  // Iterate through each day from start to end (exclusive)
+  while (current < end) {
+    if (isWorkingDay(current)) {
+      workingDays++;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  
+  return workingDays;
+};
+
 function setActive(hash) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   const id = hash.replace('#','').split('/')[0] || 'list';
@@ -646,17 +756,17 @@ function initiativeRow(i, crData = null, colVisibility = null) {
   // Default visibility if not provided
   if (!colVisibility) colVisibility = getDefaultColumns('list');
   
-  // Calculate Age Created to Start: from Create Date to Start Date
+  // Calculate Age Created to Start: from Create Date to Start Date (working days only)
   let ageCreatedToStart = null;
   if (i.createdAt && i.startDate) {
     const createDate = new Date(i.createdAt);
     const startDate = new Date(i.startDate);
     if (!isNaN(createDate.getTime()) && !isNaN(startDate.getTime())) {
-      ageCreatedToStart = Math.floor((startDate - createDate) / (1000 * 60 * 60 * 24));
+      ageCreatedToStart = calculateWorkingDays(createDate, startDate);
     }
   }
   
-  // Calculate Cycle Time (Age Start to End): from Start Date to End Date (or current date if End Date is empty)
+  // Calculate Cycle Time (Age Start to End): from Start Date to End Date (or current date if End Date is empty) - working days only
   let cycleTime = null;
   if (i.startDate) {
     const startDate = new Date(i.startDate);
@@ -664,12 +774,17 @@ function initiativeRow(i, crData = null, colVisibility = null) {
       if (i.endDate) {
         const endDate = new Date(i.endDate);
         if (!isNaN(endDate.getTime())) {
-          cycleTime = Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
+          // For end date, we want to include the end date itself, so add 1 day
+          const endDateInclusive = new Date(endDate);
+          endDateInclusive.setDate(endDateInclusive.getDate() + 1);
+          cycleTime = calculateWorkingDays(startDate, endDateInclusive);
         }
       } else {
-        // If no end date, calculate from start date to current date
+        // If no end date, calculate from start date to current date (inclusive of today)
         const now = new Date();
-        cycleTime = Math.floor((now - startDate) / (1000 * 60 * 60 * 24));
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        cycleTime = calculateWorkingDays(startDate, tomorrow);
       }
     }
   }
@@ -4693,16 +4808,19 @@ async function renderDashboard() {
 
       let ageCreatedToStart = null;
       if (createDate && startDate) {
-        // Normalize dates to midnight to compare only the date part (ignore time)
-        const createDateNormalized = new Date(createDate.getFullYear(), createDate.getMonth(), createDate.getDate());
-        const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-        ageCreatedToStart = floorDays(startDateNormalized - createDateNormalized);
+        // Calculate working days from create date to start date
+        ageCreatedToStart = calculateWorkingDays(createDate, startDate);
       }
 
       let cycleTime = null;
       if (startDate) {
         const endOrNow = endDate || today;
-        cycleTime = floorDays(endOrNow - startDate);
+        if (endOrNow) {
+          // For end date, we want to include the end date itself, so add 1 day
+          const endDateInclusive = new Date(endOrNow);
+          endDateInclusive.setDate(endDateInclusive.getDate() + 1);
+          cycleTime = calculateWorkingDays(startDate, endDateInclusive);
+        }
       }
 
       // Total Age = Age Created→Start + Cycle Time.
@@ -5890,17 +6008,18 @@ async function renderCRDashboard() {
       
       let ageCreatedToStart = null;
       if (createDate && startDate) {
-        // Normalize dates to midnight to compare only the date part (ignore time)
-        const createDateNormalized = new Date(createDate.getFullYear(), createDate.getMonth(), createDate.getDate());
-        const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-        ageCreatedToStart = floorDays(startDateNormalized - createDateNormalized);
+        // Calculate working days from create date to start date
+        ageCreatedToStart = calculateWorkingDays(createDate, startDate);
       }
       
       let cycleTime = null;
       if (startDate) {
         const endOrNow = endDate || (useForecast ? null : today);
         if (endOrNow) {
-          cycleTime = floorDays(endOrNow - startDate);
+          // For end date, we want to include the end date itself, so add 1 day
+          const endDateInclusive = new Date(endOrNow);
+          endDateInclusive.setDate(endDateInclusive.getDate() + 1);
+          cycleTime = calculateWorkingDays(startDate, endDateInclusive);
         }
       }
       
