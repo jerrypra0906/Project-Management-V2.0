@@ -313,6 +313,7 @@ function calculateGoLiveRate(crInitiatives) {
 
       return {
         month: month.month,
+        monthKey: month.month, // Add monthKey for easier matching
         date: month.date.toISOString().slice(0, 10),
         monthLabel: month.date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
         actual: {
@@ -508,6 +509,9 @@ router.get('/', async (req, res) => {
     insights.recommendations.push(`✨ All CRs are on track. Keep up the good work!`);
   }
   
+  // Calculate monthly open CRs for forecasting
+  const monthlyOpenCRs = calculateMonthlyOpenCRs(crInitiatives);
+
   res.json({ 
     crs, byStatus, byPriority, byDepartment, byMilestone, liveYTD, liveCount,
     byStatusBreakdown,
@@ -519,9 +523,72 @@ router.get('/', async (req, res) => {
     weeklyTrendData,
     goLiveRateData,
     openBurndownData,
+    monthlyOpenCRs,
     insights
   });
 });
+
+/**
+ * Calculate monthly open CRs (status != Live and != Cancelled) at end of each month
+ * @param {Array} crInitiatives - Filtered CR initiatives
+ * @returns {Array} Array of monthly open CR data
+ */
+function calculateMonthlyOpenCRs(crInitiatives) {
+  if (!crInitiatives || crInitiatives.length === 0) {
+    return [];
+  }
+
+  // Generate months from Dec 2025 to current month
+  const startDate = new Date('2025-12-01');
+  const currentDate = new Date();
+  const months = [];
+  
+  for (let d = new Date(startDate); d <= currentDate; d.setMonth(d.getMonth() + 1)) {
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    const monthEnd = new Date(year, month + 1, 0); // Last day of month
+    const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const monthLabel = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    const monthEndStr = monthEnd.toISOString().slice(0, 10);
+    
+    // Count open CRs at end of month (status != Live and != Cancelled)
+    // Use the same logic as calculateOpenBurndown
+    const openCRs = crInitiatives.filter((cr) => {
+      try {
+        const status = (cr.status || '').toUpperCase();
+        if (status === 'LIVE' || status === 'CANCELLED') return false;
+
+        if (!cr.createdAt) return false;
+        const createdDateStr = cr.createdAt.slice(0, 10);
+        // CR must be created on or before month end
+        if (createdDateStr > monthEndStr) return false;
+
+        // If CR has an endDate, it must be after month end (not closed yet)
+        if (cr.endDate && cr.endDate !== '' && cr.endDate !== null) {
+          const endDateStr = cr.endDate.slice(0, 10);
+          // If endDate is on or before month end, CR is closed
+          if (endDateStr <= monthEndStr) return false;
+        }
+
+        return true;
+      } catch (err) {
+        console.error('Error calculating open CRs for month:', monthEndStr, err);
+        return false;
+      }
+    }).length;
+    
+    months.push({
+      year,
+      month: month + 1,
+      monthKey,
+      monthLabel,
+      monthEnd: monthEndStr,
+      openCRs
+    });
+  }
+  
+  return months;
+}
 
 export default router;
 

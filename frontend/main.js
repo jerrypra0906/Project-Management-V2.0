@@ -472,20 +472,92 @@ async function fetchJSON(url, options) {
   return res.json();
 }
 
-// File compression function
-async function compressFile(file) {
-  // For images, use canvas compression
-  if (file.type.startsWith('image/')) {
-    return await compressImage(file);
+// File compression function - handles images, PDF, Word, Excel
+async function compressFile(file, maxSizeKB = 300) {
+  const fileSizeKB = file.size / 1024;
+  
+  // If file is already under the limit, return as-is
+  if (fileSizeKB <= maxSizeKB) {
+    return file;
   }
   
-  // For other files, if still too large, return as-is (or implement other compression)
-  // For now, we'll just return the file and let the backend handle it
+  // For images (JPEG, PNG), use canvas compression
+  const imageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  if (imageTypes.includes(file.type.toLowerCase())) {
+    return await compressImage(file, maxSizeKB);
+  }
+  
+  // For PDF files - attempt compression using CompressionStream API if available
+  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    console.log(`[PDF Compression] Attempting to compress PDF: ${file.name} (${fileSizeKB.toFixed(2)} KB)`);
+    
+    if ('CompressionStream' in window) {
+      try {
+        const stream = file.stream();
+        const compressedStream = stream.pipeThrough(new CompressionStream('deflate'));
+        const chunks = [];
+        const reader = compressedStream.getReader();
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        
+        const compressedBlob = new Blob(chunks, { type: 'application/pdf' });
+        const compressedSizeKB = compressedBlob.size / 1024;
+        const reductionPercent = ((fileSizeKB - compressedSizeKB) / fileSizeKB * 100).toFixed(1);
+        
+        console.log(`[PDF Compression] Result: ${compressedSizeKB.toFixed(2)} KB (${reductionPercent}% reduction)`);
+        
+        // Use compressed version if it's actually smaller (even if still above limit)
+        // This helps reduce file size even if we can't get it under 300KB
+        if (compressedSizeKB < fileSizeKB) {
+          console.log(`[PDF Compression] Using compressed version (${compressedSizeKB.toFixed(2)} KB vs original ${fileSizeKB.toFixed(2)} KB)`);
+          return new File([compressedBlob], file.name, {
+            type: file.type,
+            lastModified: Date.now()
+          });
+        } else {
+          console.log(`[PDF Compression] Compression didn't reduce size, using original`);
+        }
+      } catch (error) {
+        console.warn('[PDF Compression] Compression failed, using original:', error);
+      }
+    } else {
+      console.warn('[PDF Compression] CompressionStream API not available in this browser');
+    }
+    
+    // Note: Scanned PDFs are particularly difficult to compress because they contain
+    // already-compressed images. Client-side compression has limited effectiveness.
+    // For better results, consider server-side compression or pre-compressing PDFs.
+    return file;
+  }
+  
+  // For Word and Excel files - client-side compression is very limited
+  // These formats are binary and require specialized tools
+  // We'll return the file as-is and let the user know if it's too large
+  const officeTypes = [
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  ];
+  const isOfficeFile = officeTypes.includes(file.type) || 
+    /\.(doc|docx|xls|xlsx)$/i.test(file.name);
+  
+  if (isOfficeFile) {
+    // Return as-is - these formats are difficult to compress client-side
+    // User will be informed if file exceeds limit
+    return file;
+  }
+  
+  // For other file types, return as-is
   return file;
 }
 
-// Image compression function
-async function compressImage(file) {
+// Image compression function - targets 300KB
+async function compressImage(file, maxSizeKB = 300) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -513,11 +585,17 @@ async function compressImage(file) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
         
-        // Try different quality levels to get under 500KB
+        // Try different quality levels to get under target size (300KB)
         let quality = 0.9;
         const tryCompress = () => {
           canvas.toBlob((blob) => {
-            if (blob.size <= 500 * 1024 || quality <= 0.1) {
+            if (!blob) {
+              resolve(file); // Fallback to original
+              return;
+            }
+            
+            const sizeKB = blob.size / 1024;
+            if (sizeKB <= maxSizeKB || quality <= 0.1) {
               // Create a new File object with the compressed blob
               const compressedFile = new File([blob], file.name, {
                 type: file.type,
@@ -533,10 +611,10 @@ async function compressImage(file) {
         
         tryCompress();
       };
-      img.onerror = reject;
+      img.onerror = () => resolve(file); // Fallback to original on error
       img.src = e.target.result;
     };
-    reader.onerror = reject;
+    reader.onerror = () => resolve(file); // Fallback to original on error
     reader.readAsDataURL(file);
   });
 }
@@ -1783,11 +1861,9 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
     formRow('Plan End Date', `<input type="date" name="planEndDate" value="${initiative?.planEndDate?.slice(0,10) || ''}" />`),
     formRow('Remark', `<textarea name="remark" class="long-text">${initiative ? (initiative.remark || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''}</textarea>`),
     formRow('Project Doc Link', `<input name="documentationLink" type="url" value="${initiative?.documentationLink || ''}" />`),
-    ...(initiative ? [] : [
-      formRow('Documents', `<input type="file" name="documents" id="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.zip,.rar" />
-        <div id="filePreview" style="margin-top: 10px;"></div>
-        <small style="color: #666;">You can select multiple files. Max 10MB per file.</small>`)
-    ])
+    formRow('Documents', `<input type="file" name="documents" id="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.zip,.rar" />
+      <div id="filePreview" style="margin-top: 10px;"></div>
+      <small style="color: #666;">You can select multiple files. Files larger than 300KB will be automatically compressed (images) or may require manual compression (PDF, Word, Excel).</small>`)
   ];
   console.log('commonFields: Plan Start Date and Plan End Date fields included:', fields.some(f => f.includes('Plan Start Date') || f.includes('Plan End Date')));
   return fields.join('');
@@ -1841,8 +1917,8 @@ async function renderNew(defaultType = 'Project') {
   typeEl.onchange = updateLabelsForType;
   updateLabelsForType(); // Apply initial state
   
-  // Compression function for images
-  async function compressImage(file, maxSizeKB = 500) {
+  // Compression function for images - targets 300KB
+  async function compressImage(file, maxSizeKB = 300) {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -1903,24 +1979,10 @@ async function renderNew(defaultType = 'Project') {
     });
   }
   
-  // Compress file if needed
+  // Compress file if needed - targets 300KB
   async function compressFileIfNeeded(file) {
-    const maxSizeKB = 500;
-    const fileSizeKB = file.size / 1024;
-    
-    // Only compress if file is larger than 500KB
-    if (fileSizeKB <= maxSizeKB) {
-      return file;
-    }
-    
-    // Check if it's an image
-    const imageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (imageTypes.includes(file.type.toLowerCase())) {
-      return await compressImage(file, maxSizeKB);
-    }
-    
-    // For non-image files, return as-is (could add other compression methods later)
-    return file;
+    const maxSizeKB = 300;
+    return await compressFile(file, maxSizeKB);
   }
   
   // File upload handling
@@ -1944,8 +2006,26 @@ async function renderNew(defaultType = 'Project') {
         const compressed = await compressFileIfNeeded(file);
         selectedFiles.push(compressed);
         
+        // Track compression info - show even if compression happened but didn't reach target
         if (compressed.size < originalSize) {
-          compressionInfo.push({ original: originalSize, compressed: compressed.size });
+          // Compression occurred, even if minimal
+          const reductionPercent = ((originalSize - compressed.size) / originalSize * 100).toFixed(1);
+          compressionInfo.push({ 
+            original: originalSize, 
+            compressed: compressed.size, 
+            reduced: true,
+            reductionPercent: reductionPercent
+          });
+          console.log(`[File Compression] ${file.name}: ${(originalSize/1024).toFixed(2)} KB → ${(compressed.size/1024).toFixed(2)} KB (${reductionPercent}% reduction)`);
+        } else if (compressed.size === originalSize && originalSize > 300 * 1024) {
+          // File couldn't be compressed (e.g., already optimized)
+          compressionInfo.push({ 
+            original: originalSize, 
+            compressed: compressed.size, 
+            reduced: false, 
+            note: 'File already optimized - minimal compression possible' 
+          });
+          console.log(`[File Compression] ${file.name}: No compression possible (already optimized)`);
         } else {
           compressionInfo.push(null);
         }
@@ -1956,14 +2036,26 @@ async function renderNew(defaultType = 'Project') {
         filePreview.innerHTML = '<div style="margin-top: 8px;"><strong>Selected files:</strong></div>' +
           selectedFiles.map((file, index) => {
             const compInfo = compressionInfo[index];
-            const sizeDisplay = compInfo 
-              ? `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #28a745;">(compressed from ${(compInfo.original / 1024).toFixed(1)} KB)</span></span>`
-              : `<span style="color: #666; font-size: 0.9em;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
+            let sizeDisplay = '';
+            if (compInfo && compInfo.reduced) {
+              const reduction = ((compInfo.original - compInfo.compressed) / compInfo.original * 100).toFixed(1);
+              sizeDisplay = `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #28a745;">(compressed from ${(compInfo.original / 1024).toFixed(1)} KB, ${reduction}% reduction)</span></span>`;
+            } else if (compInfo && !compInfo.reduced && compInfo.note) {
+              sizeDisplay = `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #ff9800;">(${compInfo.note})</span></span>`;
+            } else {
+              sizeDisplay = `<span style="color: #666; font-size: 0.9em;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
+            }
+            
+            // Warn if file is still too large
+            const warning = file.size > 300 * 1024 
+              ? `<span style="color: #ff6b6b; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds 300KB${compInfo && compInfo.note ? ' - ' + compInfo.note.toLowerCase() : ' - may need manual compression'}</span>`
+              : '';
             
             return `
               <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px; background: #f5f5f5; border-radius: 4px;">
                 <span>📄 ${file.name}</span>
                 ${sizeDisplay}
+                ${warning}
                 <button type="button" onclick="removeFile(${index})" style="margin-left: auto; background: #ff4444; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer;">Remove</button>
               </div>
             `;
@@ -1993,10 +2085,16 @@ async function renderNew(defaultType = 'Project') {
               ? `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #28a745;">(compressed from ${(compInfo.original / 1024).toFixed(1)} KB)</span></span>`
               : `<span style="color: #666; font-size: 0.9em;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
             
+            // Warn if file is still too large
+            const warning = file.size > 300 * 1024 
+              ? `<span style="color: #ff6b6b; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds 300KB - may need manual compression</span>`
+              : '';
+            
             return `
               <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px; background: #f5f5f5; border-radius: 4px;">
                 <span>📄 ${file.name}</span>
                 ${sizeDisplay}
+                ${warning}
                 <button type="button" onclick="removeFile(${newIndex})" style="margin-left: auto; background: #ff4444; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer;">Remove</button>
               </div>
             `;
@@ -2627,10 +2725,10 @@ async function renderView(id) {
         const file = files[i];
         progressBar.style.width = `${((i + 1) / files.length) * 100}%`;
         
-        // Compress file if larger than 500KB
+        // Compress file if larger than 300KB
         let fileToUpload = file;
-        if (file.size > 500 * 1024) {
-          fileToUpload = await compressFile(file);
+        if (file.size > 300 * 1024) {
+          fileToUpload = await compressFile(file, 300);
         }
         
         const formData = new FormData();
@@ -2711,53 +2809,6 @@ async function renderView(id) {
       }
     };
   });
-  
-  // Event handlers for documents
-  document.getElementById('upload-documents-btn').onclick = async () => {
-    const fileInput = document.getElementById('document-upload');
-    const files = Array.from(fileInput.files);
-    
-    if (files.length === 0) {
-      alert('Please select at least one file');
-      return;
-    }
-    
-    const progressDiv = document.getElementById('upload-progress');
-    const progressBar = document.getElementById('upload-progress-bar');
-    progressDiv.style.display = 'block';
-    
-    try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        progressBar.style.width = `${((i + 1) / files.length) * 100}%`;
-        
-        // Compress file if larger than 500KB
-        let fileToUpload = file;
-        if (file.size > 500 * 1024) {
-          fileToUpload = await compressFile(file);
-        }
-        
-        const formData = new FormData();
-        formData.append('file', fileToUpload);
-        formData.append('initiativeId', id);
-        
-        await fetchJSON('/api/documents', {
-          method: 'POST',
-          body: formData,
-          skipJson: true // Skip JSON parsing for file upload
-        });
-      }
-      
-      fileInput.value = '';
-      progressDiv.style.display = 'none';
-      progressBar.style.width = '0%';
-      renderView(id);
-    } catch (error) {
-      alert('Failed to upload documents: ' + error.message);
-      progressDiv.style.display = 'none';
-      progressBar.style.width = '0%';
-    }
-  };
   
   document.querySelectorAll('.delete-document-btn').forEach(btn => {
     btn.onclick = async () => {
@@ -3614,6 +3665,124 @@ async function renderEdit(id) {
   // Initialize multi-select dropdowns
   initializeMultiSelects();
   
+  // File upload handling for edit form
+  const fileInput = document.getElementById('documents');
+  const filePreview = document.getElementById('filePreview');
+  const selectedFiles = [];
+  const compressionInfo = [];
+  
+  if (fileInput) {
+    fileInput.onchange = async (e) => {
+      const files = Array.from(e.target.files);
+      selectedFiles.length = 0;
+      compressionInfo.length = 0;
+      
+      // Process and compress files
+      filePreview.innerHTML = '<div style="margin-top: 8px;"><strong>Processing files...</strong></div>';
+      
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const originalSize = file.size;
+        const compressed = await compressFileIfNeeded(file);
+        selectedFiles.push(compressed);
+        
+        // Track compression info - show even if compression happened but didn't reach target
+        if (compressed.size < originalSize) {
+          // Compression occurred, even if minimal
+          const reductionPercent = ((originalSize - compressed.size) / originalSize * 100).toFixed(1);
+          compressionInfo.push({ 
+            original: originalSize, 
+            compressed: compressed.size, 
+            reduced: true,
+            reductionPercent: reductionPercent
+          });
+          console.log(`[File Compression] ${file.name}: ${(originalSize/1024).toFixed(2)} KB → ${(compressed.size/1024).toFixed(2)} KB (${reductionPercent}% reduction)`);
+        } else if (compressed.size === originalSize && originalSize > 300 * 1024) {
+          // File couldn't be compressed (e.g., already optimized)
+          compressionInfo.push({ 
+            original: originalSize, 
+            compressed: compressed.size, 
+            reduced: false, 
+            note: 'File already optimized - minimal compression possible' 
+          });
+          console.log(`[File Compression] ${file.name}: No compression possible (already optimized)`);
+        } else {
+          compressionInfo.push(null);
+        }
+      }
+      
+      // Display file preview
+      if (selectedFiles.length > 0) {
+        filePreview.innerHTML = '<div style="margin-top: 8px;"><strong>Selected files:</strong></div>' +
+          selectedFiles.map((file, index) => {
+            const compInfo = compressionInfo[index];
+            let sizeDisplay = '';
+            if (compInfo && compInfo.reduced) {
+              const reduction = ((compInfo.original - compInfo.compressed) / compInfo.original * 100).toFixed(1);
+              sizeDisplay = `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #28a745;">(compressed from ${(compInfo.original / 1024).toFixed(1)} KB, ${reduction}% reduction)</span></span>`;
+            } else if (compInfo && !compInfo.reduced && compInfo.note) {
+              sizeDisplay = `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #ff9800;">(${compInfo.note})</span></span>`;
+            } else {
+              sizeDisplay = `<span style="color: #666; font-size: 0.9em;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
+            }
+            
+            // Warn if file is still too large
+            const warning = file.size > 300 * 1024 
+              ? `<span style="color: #ff6b6b; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds 300KB${compInfo && compInfo.note ? ' - ' + compInfo.note.toLowerCase() : ' - may need manual compression'}</span>`
+              : '';
+            
+            return `
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px; background: #f5f5f5; border-radius: 4px;">
+                <span>📄 ${file.name}</span>
+                ${sizeDisplay}
+                ${warning}
+                <button type="button" onclick="removeFileEdit(${index})" style="margin-left: auto; background: #ff4444; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer;">Remove</button>
+              </div>
+            `;
+          }).join('');
+      } else {
+        filePreview.innerHTML = '';
+      }
+    };
+    
+    // Global function to remove files in edit form
+    window.removeFileEdit = (index) => {
+      selectedFiles.splice(index, 1);
+      compressionInfo.splice(index, 1);
+      
+      // Update file input
+      const dt = new DataTransfer();
+      selectedFiles.forEach(file => dt.items.add(file));
+      fileInput.files = dt.files;
+      
+      // Rebuild preview display
+      if (selectedFiles.length > 0) {
+        filePreview.innerHTML = '<div style="margin-top: 8px;"><strong>Selected files:</strong></div>' +
+          selectedFiles.map((file, newIndex) => {
+            const compInfo = compressionInfo[newIndex];
+            const sizeDisplay = compInfo 
+              ? `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #28a745;">(compressed from ${(compInfo.original / 1024).toFixed(1)} KB)</span></span>`
+              : `<span style="color: #666; font-size: 0.9em;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
+            
+            const warning = file.size > 300 * 1024 
+              ? `<span style="color: #ff6b6b; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds 300KB - may need manual compression</span>`
+              : '';
+            
+            return `
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px; background: #f5f5f5; border-radius: 4px;">
+                <span>📄 ${file.name}</span>
+                ${sizeDisplay}
+                ${warning}
+                <button type="button" onclick="removeFileEdit(${newIndex})" style="margin-left: auto; background: #ff4444; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer;">Remove</button>
+              </div>
+            `;
+          }).join('');
+      } else {
+        filePreview.innerHTML = '';
+      }
+    };
+  }
+  
   const f = document.getElementById('f');
   f.onsubmit = async (e) => {
     e.preventDefault();
@@ -3652,6 +3821,27 @@ async function renderEdit(id) {
     }
     try {
       await fetchJSON(`/api/initiatives/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      
+      // Upload documents if any files were selected
+      if (selectedFiles && selectedFiles.length > 0) {
+        try {
+          for (const file of selectedFiles) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('initiativeId', id);
+            
+            await fetchJSON('/api/documents', {
+              method: 'POST',
+              body: formData,
+              skipJson: true
+            });
+          }
+        } catch (uploadError) {
+          console.error('Error uploading documents:', uploadError);
+          alert(`Initiative updated successfully, but some documents failed to upload: ${uploadError.message}`);
+        }
+      }
+      
       location.hash = `#view/${id}`;
       renderView(id);
     } catch (e) {
@@ -5779,6 +5969,60 @@ async function renderCRDashboard() {
       live: { actual: liveActual, forecast: liveForecast }
     };
 
+    // Calculate department breakdown for Department Distribution table
+    const calculateDepartmentBreakdown = (crs, useForecast = false) => {
+      const deptBreakdown = {};
+      
+      crs.forEach(cr => {
+        const deptId = cr.departmentId || 'N/A';
+        if (!deptBreakdown[deptId]) {
+          deptBreakdown[deptId] = {
+            P0: { qty: 0, sumCreatedToStart: 0, sumCycleTime: 0, countCreatedToStart: 0, countCycleTime: 0 },
+            P1: { qty: 0, sumCreatedToStart: 0, sumCycleTime: 0, countCreatedToStart: 0, countCycleTime: 0 },
+            P2: { qty: 0, sumCreatedToStart: 0, sumCycleTime: 0, countCreatedToStart: 0, countCycleTime: 0 }
+          };
+        }
+        
+        const priority = (cr.priority || 'P2').toUpperCase();
+        if (!deptBreakdown[deptId][priority]) return;
+        
+        deptBreakdown[deptId][priority].qty++;
+        const metrics = calculateAgingMetrics(cr, useForecast);
+        
+        if (metrics.ageCreatedToStart !== null) {
+          deptBreakdown[deptId][priority].sumCreatedToStart += metrics.ageCreatedToStart;
+          deptBreakdown[deptId][priority].countCreatedToStart++;
+        }
+        
+        if (metrics.cycleTime !== null) {
+          deptBreakdown[deptId][priority].sumCycleTime += metrics.cycleTime;
+          deptBreakdown[deptId][priority].countCycleTime++;
+        }
+      });
+      
+      // Calculate averages for each department
+      Object.keys(deptBreakdown).forEach(deptId => {
+        ['P0', 'P1', 'P2'].forEach(p => {
+          const b = deptBreakdown[deptId][p];
+          b.avgCreatedToStart = b.countCreatedToStart > 0 ? Math.round(b.sumCreatedToStart / b.countCreatedToStart) : 0;
+          b.avgCycleTime = b.countCycleTime > 0 ? Math.round(b.sumCycleTime / b.countCycleTime) : 0;
+          b.avgTotalAge = b.avgCreatedToStart + b.avgCycleTime;
+        });
+      });
+      
+      return deptBreakdown;
+    };
+
+    // Calculate department breakdowns for Open and Live CRs (Actual only)
+    const openDeptBreakdown = calculateDepartmentBreakdown(openCRs, false);
+    const liveDeptBreakdown = calculateDepartmentBreakdown(liveCRs, false);
+    
+    // Store for Department Distribution table rendering
+    crAgingMetrics.departmentBreakdown = {
+      open: openDeptBreakdown,
+      live: liveDeptBreakdown
+    };
+
     // Keep existing calculations for backward compatibility
     (filteredCRs || []).forEach(cr => {
       const metrics = calculateAgingMetrics(cr, false);
@@ -5804,7 +6048,8 @@ async function renderCRDashboard() {
       avgCycleTime: countCycleTime ? Math.round(sumCycleTime / countCycleTime) : 0,
       counts: { totalAge: countTotalAge, createdToStart: countCreatedToStart, cycleTime: countCycleTime },
       byId: crAgingMetrics.byId,
-      breakdown: crAgingMetrics.breakdown
+      breakdown: crAgingMetrics.breakdown,
+      departmentBreakdown: crAgingMetrics.departmentBreakdown || { open: {}, live: {} }
     };
   } catch (e) {
     console.warn('Failed to compute CR aging metrics from initiatives:', e);
@@ -6321,11 +6566,19 @@ async function renderCRDashboard() {
 
             const chartHeight = 360;
             const chartPadding = { top: 30, right: 40, bottom: 90, left: 70 };
-            const chartWidth = Math.max(900, data.length * 80);
-            const usableWidth = chartWidth - chartPadding.left - chartPadding.right;
+            // Chart width will be calculated after determining prediction needs
+            let chartWidth = Math.max(900, data.length * 80);
+            let usableWidth = chartWidth - chartPadding.left - chartPadding.right;
             const usableHeight = chartHeight - chartPadding.top - chartPadding.bottom;
 
-            const generatePoints = (key) => {
+            // This will be updated after we calculate the final chart width
+            let generatePoints = null;
+
+            // Points will be generated after we calculate the extended data
+            let pointsP0, pointsP1, pointsP2, pointsTotal;
+
+            // Generate points for historical lines only (no prediction)
+            generatePoints = (key) => {
               return data.map((item, index) => {
                 const x = chartPadding.left + (index / (data.length - 1 || 1)) * usableWidth;
                 const value = item[key] || 0;
@@ -6333,11 +6586,12 @@ async function renderCRDashboard() {
                 return { x, y, value, label: item.weekLabel || item.weekEnd || '' };
               });
             };
-
-            const pointsP0 = generatePoints('P0');
-            const pointsP1 = generatePoints('P1');
-            const pointsP2 = generatePoints('P2');
-            const pointsTotal = generatePoints('Total');
+            
+            // Generate points for historical lines
+            pointsP0 = generatePoints('P0');
+            pointsP1 = generatePoints('P1');
+            pointsP2 = generatePoints('P2');
+            pointsTotal = generatePoints('Total');
 
             const generatePath = (points) => {
               if (points.length === 0) return '';
@@ -6359,6 +6613,7 @@ async function renderCRDashboard() {
               );
             }
 
+            // Generate x-axis labels for historical weeks only
             const xAxisLabels = data.map((item, index) => {
               const x = chartPadding.left + (index / (data.length - 1 || 1)) * usableWidth;
               const label = item.weekLabel || item.weekEnd || '';
@@ -6382,6 +6637,7 @@ async function renderCRDashboard() {
                   ${pointsP1.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#3b82f6" stroke="white" stroke-width="2" title="P1 Open: ${p.value} (${p.label})"/>`).join('')}
                   ${pointsP2.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#10b981" stroke="white" stroke-width="2" title="P2 Open: ${p.value} (${p.label})"/>`).join('')}
                   ${pointsTotal.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#8b5cf6" stroke="white" stroke-width="2" title="Total Open: ${p.value} (${p.label})"/>`).join('')}
+                  
 
                   ${xAxisLabels.join('')}
 
@@ -6416,21 +6672,231 @@ async function renderCRDashboard() {
           })()}
         </div>
       </div>
+      ${(() => {
+        // CR Open to Closed Forecasting Table
+        const monthlyOpenCRs = d.monthlyOpenCRs || [];
+        const goLiveRateData = d.goLiveRateData || [];
+        
+        if (monthlyOpenCRs.length === 0) {
+          return '';
+        }
+        
+        // Calculate forecasting data for each month
+        const forecastingData = monthlyOpenCRs.map(monthInfo => {
+          // Get 2M Moving Average for this month from goLiveRateData
+          // Try to find by monthKey first, then by month field, then by monthLabel
+          let monthData = goLiveRateData.find(m => (m.monthKey || m.month) === monthInfo.monthKey);
+          if (!monthData) {
+            // Fallback: try to find by monthLabel
+            monthData = goLiveRateData.find(m => m.monthLabel === monthInfo.monthLabel);
+          }
+          const movingAvg2M = monthData?.movingAvg2M?.Total || 0;
+          
+          // Calculate forecast based on Benchmark (7 CRs/month)
+          const benchmarkRate = 7;
+          const monthsToCompleteBenchmark = monthInfo.openCRs > 0 ? Math.ceil(monthInfo.openCRs / benchmarkRate) : 0;
+          const forecastBenchmark = monthsToCompleteBenchmark > 0 ? (() => {
+            const forecastDate = new Date(monthInfo.year, monthInfo.month - 1 + monthsToCompleteBenchmark, 1);
+            return forecastDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+          })() : '-';
+          
+          // Calculate forecast based on 2M Moving Average
+          // Always calculate if we have openCRs, even if movingAvg2M is small
+          let forecast2M = '-';
+          if (monthInfo.openCRs > 0) {
+            if (movingAvg2M > 0) {
+              const monthsToComplete2M = Math.ceil(monthInfo.openCRs / movingAvg2M);
+              if (monthsToComplete2M > 0) {
+                const forecastDate = new Date(monthInfo.year, monthInfo.month - 1 + monthsToComplete2M, 1);
+                forecast2M = forecastDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+              }
+            } else {
+              // If movingAvg2M is 0, it means no CRs were delivered, so it will never complete
+              forecast2M = 'N/A';
+            }
+          }
+          
+          return {
+            month: monthInfo.monthLabel,
+            openCRs: monthInfo.openCRs,
+            forecastBenchmark,
+            forecast2M
+          };
+        });
+        
+        return `
+      <div class="card" style="grid-column: 1 / -1; margin-top: 24px;">
+        <h3>CR Open to Closed Forecasting</h3>
+        <div style="margin-top: 16px; overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden;">
+            <thead>
+              <tr style="background: #e0f2fe;">
+                <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #1e293b; border-bottom: 2px solid #cbd5e1;">Month</th>
+                <th style="padding: 12px 16px; text-align: center; font-weight: 600; color: #1e293b; border-bottom: 2px solid #cbd5e1;">No of CR Open</th>
+                <th style="padding: 12px 16px; text-align: center; font-weight: 600; color: #1e293b; border-bottom: 2px solid #cbd5e1;">Forecast All CR completed on Benchmark (7 CRs/month)</th>
+                <th style="padding: 12px 16px; text-align: center; font-weight: 600; color: #1e293b; border-bottom: 2px solid #cbd5e1;">Forecast All CR completed based on Total 2M Moving Average</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${forecastingData.map((row, idx) => `
+                <tr style="${idx % 2 === 0 ? 'background: #f8fafc;' : 'background: white;'} border-bottom: 1px solid #e2e8f0;">
+                  <td style="padding: 12px 16px; font-weight: 600; color: #1e293b;">${row.month}</td>
+                  <td style="padding: 12px 16px; text-align: center; color: #475569;">${row.openCRs}</td>
+                  <td style="padding: 12px 16px; text-align: center; color: #475569;">${row.forecastBenchmark}</td>
+                  <td style="padding: 12px 16px; text-align: center; color: #475569;">${row.forecast2M}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      `;
+      })()}
       ` : ''}
-      <div class="card">
+      <div class="card" style="grid-column: 1 / -1;">
         <h3>Department Distribution</h3>
-        <div style="margin-top: 16px;">
-          ${(d.byDepartment || []).map(item => {
-            const deptName = nameById(LOOKUPS.departments, item.departmentId);
-            const deptId = item.departmentId || '';
+        <div style="margin-top: 16px; overflow-x: auto;">
+          ${(() => {
+            // Get department breakdown from crAgingMetrics
+            const deptBreakdown = crAgingMetrics.departmentBreakdown || {};
+            const openDeptBreakdown = deptBreakdown.open || {};
+            const liveDeptBreakdown = deptBreakdown.live || {};
+            
+            // Get all unique departments
+            const allDeptIds = new Set([
+              ...Object.keys(openDeptBreakdown),
+              ...Object.keys(liveDeptBreakdown)
+            ]);
+            
+            if (allDeptIds.size === 0) {
+              return '<p class="muted">No department data available</p>';
+            }
+            
+            const renderCell = (value, isHeader = false, bgColor = '', whiteText = false) => {
+              const baseStyle = isHeader 
+                ? 'padding: 8px 12px; font-weight: 600; text-align: center; border: 1px solid #e2e8f0;'
+                : 'padding: 8px 12px; font-weight: 600; text-align: center; border: 1px solid #e2e8f0;';
+              const bgStyle = bgColor ? ` background: ${bgColor};` : '';
+              const textColor = (whiteText || bgColor === '#475569') ? ' color: white;' : '';
+              return `<td style="${baseStyle}${bgStyle}${textColor}">${value}</td>`;
+            };
+            
+            const renderDataCells = (deptData, rowType) => {
+              if (!deptData) {
+                return `
+                  ${renderCell(0, false, rowType === 'qty' ? '#3b82f6' : '', rowType === 'qty')}
+                  ${renderCell(0, false, rowType === 'qty' ? '#3b82f6' : '', rowType === 'qty')}
+                  ${renderCell(0, false, rowType === 'qty' ? '#3b82f6' : '', rowType === 'qty')}
+                `;
+              }
+              
+              let cells = '';
+              if (rowType === 'qty') {
+                // Total CRs - blue background
+                cells = `
+                  ${renderCell(deptData.P0?.qty || 0, false, '#3b82f6', true)}
+                  ${renderCell(deptData.P1?.qty || 0, false, '#3b82f6', true)}
+                  ${renderCell(deptData.P2?.qty || 0, false, '#3b82f6', true)}
+                `;
+              } else if (rowType === 'rec-start') {
+                cells = `
+                  ${renderCell(deptData.P0?.avgCreatedToStart || 0)}
+                  ${renderCell(deptData.P1?.avgCreatedToStart || 0)}
+                  ${renderCell(deptData.P2?.avgCreatedToStart || 0)}
+                `;
+              } else if (rowType === 'start-live') {
+                cells = `
+                  ${renderCell(deptData.P0?.avgCycleTime || 0)}
+                  ${renderCell(deptData.P1?.avgCycleTime || 0)}
+                  ${renderCell(deptData.P2?.avgCycleTime || 0)}
+                `;
+              } else if (rowType === 'total-age') {
+                // Avg Total Age - green background
+                cells = `
+                  ${renderCell(deptData.P0?.avgTotalAge || 0, false, '#10b981', true)}
+                  ${renderCell(deptData.P1?.avgTotalAge || 0, false, '#10b981', true)}
+                  ${renderCell(deptData.P2?.avgTotalAge || 0, false, '#10b981', true)}
+                `;
+              }
+              
+              return cells;
+            };
+            
+            // Sort departments by name
+            const sortedDepts = Array.from(allDeptIds).map(deptId => ({
+              id: deptId,
+              name: nameById(LOOKUPS.departments, deptId) || deptId
+            })).sort((a, b) => a.name.localeCompare(b.name));
+            
             return `
-              <div class="clickable-chart-item" data-filter-type="departmentId" data-filter-value="${deptId}" data-title="Department: ${deptName}" data-initiative-type="CR" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px; background: #f8fafc; border-radius: 6px; cursor: pointer;">
-                <span style="font-weight: 500;">${deptName || item.departmentId || 'N/A'}</span>
-                <span style="font-weight: 600;">${item.c || 0}</span>
-              </div>
+              <table style="width: 100%; border-collapse: collapse; min-width: 600px; font-size: 13px;">
+                <thead>
+                  <tr>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;">Department</th>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;"></th>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;"></th>
+                    <th colspan="3" style="padding: 12px; background: #fbbf24; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: white;">Actual</th>
+                  </tr>
+                  <tr>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P0</th>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P1</th>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P2</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${sortedDepts.map(dept => {
+                    const openData = openDeptBreakdown[dept.id];
+                    const liveData = liveDeptBreakdown[dept.id];
+                    const deptId = dept.id;
+                    const deptName = dept.name;
+                    
+                    return `
+                      <tr style="background: #fef3c7;">
+                        <td rowspan="8" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: left;">
+                          <div class="clickable-chart-item" data-filter-type="departmentId" data-filter-value="${deptId}" data-title="Department: ${deptName}" data-initiative-type="CR" style="cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='transparent'">${deptName}</div>
+                        </td>
+                        <td rowspan="4" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: center;">Open</td>
+                        <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #3b82f6; color: white;">Total CRs</td>
+                        ${renderDataCells(openData, 'qty')}
+                      </tr>
+                      <tr style="background: #fef3c7;">
+                        <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Age Created→Start</td>
+                        ${renderDataCells(openData, 'rec-start')}
+                      </tr>
+                      <tr style="background: #fef3c7;">
+                        <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Cycle Time (Start→End)</td>
+                        ${renderDataCells(openData, 'start-live')}
+                      </tr>
+                      <tr style="background: #fef3c7;">
+                        <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #10b981; color: white;">Avg Total Age</td>
+                        ${renderDataCells(openData, 'total-age')}
+                      </tr>
+                      <tr style="background: #fef3c7;">
+                        <td rowspan="4" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: center;">Closed</td>
+                        <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #3b82f6; color: white;">Total CRs</td>
+                        ${renderDataCells(liveData, 'qty')}
+                      </tr>
+                      <tr style="background: #fef3c7;">
+                        <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Age Created→Start</td>
+                        ${renderDataCells(liveData, 'rec-start')}
+                      </tr>
+                      <tr style="background: #fef3c7;">
+                        <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Cycle Time (Start→End)</td>
+                        ${renderDataCells(liveData, 'start-live')}
+                      </tr>
+                      <tr style="background: #fef3c7;">
+                        <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #10b981; color: white;">Avg Total Age</td>
+                        ${renderDataCells(liveData, 'total-age')}
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
             `;
-          }).join('')}
-          ${(!d.byDepartment || d.byDepartment.length === 0) ? '<p class="muted">No department data available</p>' : ''}
+          })()}
+        </div>
+        <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 6px; font-size: 12px; color: var(--muted);">
+          <strong>Note:</strong> Days (Actual) uses Create Date, Actual Start Date, and Actual End Date. Rec-Start = Avg Age Created → Start. Start-Live = Avg Cycle Time (Start → End/Live).
         </div>
       </div>
       ${d.weeklyTrendData && d.weeklyTrendData.length > 0 ? `
@@ -6440,7 +6906,7 @@ async function renderCRDashboard() {
           ${(() => {
             // Calculate max value for scaling
             const maxValue = Math.max(
-              ...d.weeklyTrendData.map(w => Math.max(w.newCRs || 0, w.liveCRs || 0, w.totalCRs || 0)),
+              ...d.weeklyTrendData.map(w => Math.max(w.newCRs || 0, w.liveCRs || 0)),
               1 // Ensure at least 1 to avoid division by zero
             );
             const chartHeight = 300;
@@ -6468,7 +6934,6 @@ async function renderCRDashboard() {
                       const isLatest = index === d.weeklyTrendData.length - 1;
                       const newCRsHeight = (week.newCRs || 0) / maxValue * usableHeight;
                       const liveCRsHeight = (week.liveCRs || 0) / maxValue * usableHeight;
-                      const totalCRsHeight = (week.totalCRs || 0) / maxValue * usableHeight;
                       
                       // Format date label better
                       let weekLabel = '';
@@ -6507,15 +6972,6 @@ async function renderCRDashboard() {
                                 ${liveCRsHeight > 25 ? `<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 600; color: var(--success); white-space: nowrap;">${week.liveCRs || 0}</div>` : ''}
                               </div>
                             </div>
-                            <!-- Total CRs bar -->
-                            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; position: relative;">
-                              <div class="chart-bar" style="width: 100%; background: #64748b; border-radius: 4px 4px 0 0; height: ${totalCRsHeight}px; min-height: ${totalCRsHeight > 0 ? '2px' : '0'}; position: relative; transition: all 0.2s ease; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
-                                   title="Total CRs: ${week.totalCRs || 0}"
-                                   onmouseover="this.style.opacity='0.85'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
-                                   onmouseout="this.style.opacity='1'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
-                                ${totalCRsHeight > 25 ? `<div style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 600; color: #64748b; white-space: nowrap;">${week.totalCRs || 0}</div>` : ''}
-                              </div>
-                            </div>
                           </div>
                           <div style="margin-top: 8px; font-size: 11px; color: var(--text); font-weight: ${isLatest ? '600' : '400'}; text-align: center; height: 70px; display: flex; align-items: flex-start; justify-content: center; padding: 0 4px;">
                             <div style="line-height: 1.3; word-break: break-word; hyphens: auto;">${weekLabel}</div>
@@ -6538,13 +6994,9 @@ async function renderCRDashboard() {
                     <div style="width: 20px; height: 20px; background: var(--success); border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
                     <span style="font-size: 13px; color: var(--text); font-weight: 500;">CRs Went Live</span>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <div style="width: 20px; height: 20px; background: #64748b; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
-                    <span style="font-size: 13px; color: var(--text); font-weight: 500;">Total CRs</span>
-                  </div>
                 </div>
                 <div style="padding: 12px; background: white; border-radius: 6px; font-size: 12px; color: var(--muted); text-align: center;">
-                  <strong>Note:</strong> Week shows Monday-Friday range. "New CRs" = CRs created that week. "CRs Went Live" = CRs that became LIVE that week. "Total CRs" = Cumulative count of all CRs by end of week.
+                  <strong>Note:</strong> Week shows Monday-Friday range. "New CRs" = CRs created that week. "CRs Went Live" = CRs that became LIVE that week.
                 </div>
               </div>
             `;
