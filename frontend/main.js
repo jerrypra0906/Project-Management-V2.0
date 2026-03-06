@@ -4950,10 +4950,12 @@ async function renderDashboard() {
   // Normalize status labels for Status Distribution (combine different casings)
   const combinedStatusMap = {};
   (d.byStatus || []).forEach(item => {
-    const key = String(item.status || '').toUpperCase().trim();
+    const rawStatus = String(item.status || '');
+    const key = rawStatus.toUpperCase().trim();
     if (!key) return;
     if (!combinedStatusMap[key]) {
-      combinedStatusMap[key] = { ...item, status: key, c: item.c || 0 };
+      // Preserve original casing for display, but normalize the key for grouping
+      combinedStatusMap[key] = { ...item, status: rawStatus, c: item.c || 0 };
     } else {
       combinedStatusMap[key].c += item.c || 0;
     }
