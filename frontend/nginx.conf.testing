@@ -28,6 +28,9 @@ server {
         add_header Expires "0";
     }
 
+    # Allow larger file uploads (15MB to account for files before compression)
+    client_max_body_size 15M;
+
     # Proxy API requests to backend
     # TESTING: Update this to your testing/staging backend URL
     # Example: http://testing-backend.example.com:3000
