@@ -4658,6 +4658,8 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
   } else if (filterType === 'open') {
     // For "open" CRs, we'll fetch all and filter out LIVE ones
     // Don't set any status filter, we'll filter client-side
+  } else if (filterType === 'inProgress') {
+    // For "In Progress Projects", we'll fetch all projects and filter client-side
   }
   
   try {
@@ -4668,6 +4670,14 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
       initiatives = initiatives.filter(i => {
         const status = (i.status || '').toUpperCase();
         return status !== 'LIVE';
+      });
+    }
+
+    // Filter to only in-progress project statuses for "inProgress" filter
+    if (filterType === 'inProgress' && initiativeType === 'Project') {
+      initiatives = initiatives.filter(i => {
+        const status = (i.status || '').toUpperCase().trim();
+        return status === 'ON TRACK' || status === 'AT RISK' || status === 'DELAYED';
       });
     }
     
@@ -4923,8 +4933,9 @@ async function renderDashboard() {
   // KPI helpers
   const statusCount = (statusName) => {
     const target = (statusName || '').toUpperCase().trim();
-    const row = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === target);
-    return row ? (row.c || 0) : 0;
+    return (d.byStatus || [])
+      .filter(s => String(s.status || '').toUpperCase().trim() === target)
+      .reduce((sum, s) => sum + (s.c || 0), 0);
   };
   const notStartedProjects = statusCount('NOT STARTED');
   const liveProjects = d.liveCount || statusCount('LIVE') || 0;
@@ -4934,6 +4945,20 @@ async function renderDashboard() {
   const atRiskProjects = statusCount('AT RISK');
   const delayedProjects = statusCount('DELAYED');
   const inProgressProjects = onTrackProjects + atRiskProjects + delayedProjects;
+  const totalProjectsExCancelled = (d.projects || 0) - cancelledProjects;
+
+  // Normalize status labels for Status Distribution (combine different casings)
+  const combinedStatusMap = {};
+  (d.byStatus || []).forEach(item => {
+    const key = String(item.status || '').toUpperCase().trim();
+    if (!key) return;
+    if (!combinedStatusMap[key]) {
+      combinedStatusMap[key] = { ...item, status: key, c: item.c || 0 };
+    } else {
+      combinedStatusMap[key].c += item.c || 0;
+    }
+  });
+  const combinedByStatus = Object.values(combinedStatusMap);
 
   app.innerHTML = `
     <div class="card" style="margin-bottom: 24px; padding: 20px;">
@@ -4951,13 +4976,13 @@ async function renderDashboard() {
     <div class="kpis">
       <div class="card clickable-card" data-filter-type="all" data-filter-value="" data-title="All Projects" data-initiative-type="Project" style="cursor: pointer;">
         <div class="muted">Total Projects</div>
-        <div style="font-size:32px;font-weight:700;color: var(--brand)">${d.projects}</div>
+        <div style="font-size:32px;font-weight:700;color: var(--brand)">${totalProjectsExCancelled}</div>
       </div>
       <div class="card clickable-card" data-filter-type="status" data-filter-value="LIVE" data-title="Live Projects" style="cursor: pointer;">
         <div class="muted">Live Projects</div>
         <div style="font-size:32px;font-weight:700;color: #3b82f6">${d.liveCount || 0}</div>
       </div>
-      <div class="card" style="border-left: 4px solid var(--success);">
+      <div class="card clickable-card" data-filter-type="inProgress" data-filter-value="" data-title="In Progress Projects" data-initiative-type="Project" style="cursor: pointer; border-left: 4px solid var(--success);">
         <div class="muted">In Progress Projects</div>
         <div style="font-size:32px;font-weight:700;color: var(--success)">${inProgressProjects}</div>
         <div class="muted" style="margin-top: 6px; font-size: 12px;">
@@ -4986,7 +5011,7 @@ async function renderDashboard() {
       </div>
     </div>
     <div class="grid" style="margin-top:24px">
-      ${createBarChart(d.byStatus, 'status', 'c', 'Status Distribution', true)}
+      ${createBarChart(combinedByStatus, 'status', 'c', 'Status Distribution', true)}
       ${createBarChart(d.byPriority, 'priority', 'c', 'Priority Distribution', true)}
       <div class="card">
         <h3>Project Aging (Total Age)</h3>

@@ -2498,24 +2498,87 @@ You can also integrate these checks into AliCloud CloudMonitor or your own monit
 On the backend server, create a backup directory:
 
 ```bash
-sudo mkdir -p /var/backups/project_management
-sudo chown $USER:$USER /var/backups/project_management
+sudo mkdir -p /opt/backups/Project-Management-V2.0
+sudo chown $USER:$USER /opt/backups/Project-Management-V2.0
 ```
 
-Add a daily cron job to dump the DB (run `crontab -e`):
+**Backup Schedule:**
+- Daily backups at **7:00 PM GMT+7 (Jakarta time)** = **12:00 PM UTC (noon)**
+- Backups stored in: `/opt/backups/Project-Management-V2.0/`
+- Backup files older than **14 days** are automatically deleted
+
+Add daily cron jobs to dump the DB and clean up old backups (run `crontab -e`):
 
 ```cron
-0 2 * * * docker exec project_management_db pg_dump -U postgres project_management_v2 > /var/backups/project_management/pm_$(date +\%F).sql
+# Daily database backup at 7PM GMT+7 (12:00 UTC)
+0 12 * * * docker exec project_management_db pg_dump -U postgres project_management_v2 > /opt/backups/Project-Management-V2.0/pm_$(date +\%Y\%m\%d_\%H\%M\%S).sql 2>&1
+
+# Clean up backups older than 14 days (runs 5 minutes after backup)
+5 12 * * * find /opt/backups/Project-Management-V2.0 -name "pm_*.sql" -type f -mtime +14 -delete
 ```
 
-Rotate / clean up old backups periodically (e.g. via another cron or logrotate).
+**Explanation:**
+- `0 12 * * *` = Runs daily at 12:00 UTC (7:00 PM GMT+7)
+- Backup filename includes timestamp: `pm_YYYYMMDD_HHMMSS.sql`
+- `-mtime +14` = Files modified more than 14 days ago
+- `-delete` = Removes matching files
+
+**Verify cron jobs are set:**
+```bash
+crontab -l
+```
+
+**Test backup manually:**
+```bash
+# Test backup creation
+docker exec project_management_db pg_dump -U postgres project_management_v2 > /opt/backups/Project-Management-V2.0/pm_test_$(date +\%Y\%m\%d_\%H\%M\%S).sql
+
+# Verify backup file was created
+ls -lh /opt/backups/Project-Management-V2.0/
+
+# Test cleanup (dry run - shows what would be deleted)
+find /opt/backups/Project-Management-V2.0 -name "pm_*.sql" -type f -mtime +14 -ls
+
+# Test cleanup (actual deletion - use with caution)
+find /opt/backups/Project-Management-V2.0 -name "pm_*.sql" -type f -mtime +14 -delete
+```
+
+**Check backup logs:**
+```bash
+# View cron job execution logs
+grep CRON /var/log/syslog | grep "pg_dump\|find.*backups"
+
+# Or check system logs
+journalctl -u cron | grep "pg_dump\|backups"
+```
 
 ### 6.2. Restoring from backup
 
-Copy the chosen `.sql` file to the backend server (if not already there), then:
-
+**List available backups:**
 ```bash
-docker exec -i project_management_db psql -U postgres -d project_management_v2 < /path/to/backup.sql
+ls -lh /opt/backups/Project-Management-V2.0/
+```
+
+**Restore from a backup file:**
+
+If the backup file is already on the server:
+```bash
+docker exec -i project_management_db psql -U postgres -d project_management_v2 < /opt/backups/Project-Management-V2.0/pm_YYYYMMDD_HHMMSS.sql
+```
+
+If you need to copy a backup file to the server first:
+```bash
+# Copy backup file to server (from your local machine)
+scp /path/to/backup.sql user@172.28.80.51:/opt/backups/Project-Management-V2.0/
+
+# Then restore it
+docker exec -i project_management_db psql -U postgres -d project_management_v2 < /opt/backups/Project-Management-V2.0/backup.sql
+```
+
+**Important:** Before restoring, consider backing up the current database state:
+```bash
+# Create a pre-restore backup
+docker exec project_management_db pg_dump -U postgres project_management_v2 > /opt/backups/Project-Management-V2.0/pm_pre_restore_$(date +\%Y\%m\%d_\%H\%M\%S).sql
 ```
 
 ### 6.3. Code rollback
