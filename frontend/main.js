@@ -151,6 +151,122 @@ async function getCurrentUser() {
   }
 }
 
+// Cached access rules for current user (menus + edit rights)
+let CURRENT_ACCESS = null;
+
+function computeAccessRules(user, profile) {
+  if (!user) return null;
+
+  const isAdmin = !!user.isAdmin;
+  const email = (user.email || profile?.email || '').toLowerCase();
+  const isEnergiDomain = email.endsWith('@energi-up.com');
+  const type = profile?.type || null;
+
+  // Base access: any authenticated user can work with CRs and user dashboard
+  const access = {
+    isAdmin,
+    email,
+    type,
+    isEnergiDomain,
+    canViewUserDashboard: true,
+    canViewCRDashboard: true,
+    canViewCRList: true,
+    canCreateCR: true,
+    canEditCR: true,
+    canViewProjectDashboard: false,
+    canViewProjectList: false,
+    canCreateProject: false,
+    canEditAnyProject: false,
+    restrictProjectVisibilityToOwnTeamOnly: false,
+    restrictProjectEditToOwnTeamOnly: false,
+  };
+
+  if (isAdmin) {
+    // Admin keeps existing full access
+    access.canViewProjectDashboard = true;
+    access.canViewProjectList = true;
+    access.canCreateProject = true;
+    access.canEditAnyProject = true;
+    access.restrictProjectVisibilityToOwnTeamOnly = false;
+    access.restrictProjectEditToOwnTeamOnly = false;
+    return access;
+  }
+
+  const isManagement = type === 'Management';
+  const isIC = (type || '').toLowerCase().startsWith('ic');
+  const isManagerType = type === 'Manager';
+
+  // Users with external email domain and not Management:
+  // Only CR Dashboard + CR List (create/update/view)
+  if (!isEnergiDomain && !isManagement) {
+    access.canViewProjectDashboard = false;
+    access.canViewProjectList = false;
+    access.canCreateProject = false;
+    access.canEditAnyProject = false;
+    access.restrictProjectVisibilityToOwnTeamOnly = false;
+    access.restrictProjectEditToOwnTeamOnly = false;
+    return access;
+  }
+
+  // Type = Management: can see both dashboards and both lists, full project edit
+  if (isManagement) {
+    access.canViewProjectDashboard = true;
+    access.canViewProjectList = true;
+    access.canCreateProject = false; // keep project creation limited (unchanged behaviour)
+    access.canEditAnyProject = true;
+    access.restrictProjectVisibilityToOwnTeamOnly = false;
+    access.restrictProjectEditToOwnTeamOnly = false;
+    return access;
+  }
+
+  // Internal IC:
+  // - CR Dashboard + CR List (create/update/view)
+  // - Project List & Project edit/visibility restricted to projects where they are part of the project team
+  if (isEnergiDomain && isIC) {
+    access.canViewProjectDashboard = false;
+    access.canViewProjectList = true;
+    access.canCreateProject = false;
+    access.canEditAnyProject = false;
+    access.restrictProjectVisibilityToOwnTeamOnly = true;
+    access.restrictProjectEditToOwnTeamOnly = true;
+    return access;
+  }
+
+  // Internal Manager:
+  // - CR Dashboard + CR List (create/update/view)
+  // - Project Dashboard
+  // - Project List (see all), but can only edit projects where they are part of the project team
+  if (isEnergiDomain && isManagerType) {
+    access.canViewProjectDashboard = true;
+    access.canViewProjectList = true;
+    access.canCreateProject = false;
+    access.canEditAnyProject = false;
+    access.restrictProjectVisibilityToOwnTeamOnly = false;
+    access.restrictProjectEditToOwnTeamOnly = true;
+    return access;
+  }
+
+  // Fallback for other internal types: no project access changes from default (no Project menus)
+  return access;
+}
+
+async function getUserAccess() {
+  const user = await getCurrentUser();
+  if (!user) {
+    CURRENT_ACCESS = null;
+    return null;
+  }
+  let profile = null;
+  try {
+    profile = await fetchJSON('/api/profile');
+  } catch (e) {
+    console.error('Failed to load profile for access rules:', e);
+  }
+  const access = computeAccessRules(user, profile);
+  CURRENT_ACCESS = access;
+  return access;
+}
+
 // Column visibility management
 function getColumnVisibility(viewType = 'list') {
   const key = `pm_column_visibility_${viewType}`;
@@ -792,6 +908,57 @@ function initiativeRow(i, crData = null, colVisibility = null) {
   // CR Timeline display - removed (CR dates no longer used)
   const timelineCell = '';
 
+  // Helper to decide if current user is part of the initiative team
+  const isUserInInitiativeTeam = (initiative, userId) => {
+    if (!initiative || !userId) return false;
+    const normalizeIds = (val) => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(Boolean);
+      if (typeof val === 'string') {
+        return val.split(',').map(v => v.trim()).filter(Boolean);
+      }
+      return [];
+    };
+    const candidateId = String(userId);
+    const check = (id) => id && String(id) === candidateId;
+
+    if (check(initiative.itPicId)) return true;
+    if (normalizeIds(initiative.itPicIds).some(check)) return true;
+    if (check(initiative.itPmId)) return true;
+    if (normalizeIds(initiative.itPmIds).some(check)) return true;
+    if (normalizeIds(initiative.itManagerIds).some(check)) return true;
+    if (check(initiative.businessOwnerId)) return true;
+    if (normalizeIds(initiative.businessUserIds).some(check)) return true;
+    return false;
+  };
+
+  const canEditInitiative = (initiative) => {
+    const user = currentUser;
+    const access = CURRENT_ACCESS;
+    if (!user || !access) return false;
+    if (access.isAdmin) return true;
+
+    const type = initiative.type || '';
+    // All authenticated users with access rules can edit CRs
+    if (type === 'CR') {
+      return access.canEditCR !== false;
+    }
+
+    if (type === 'Project') {
+      if (!access.canViewProjectList) return false;
+      if (access.canEditAnyProject) return true;
+      if (access.restrictProjectEditToOwnTeamOnly) {
+        return isUserInInitiativeTeam(initiative, user.id);
+      }
+      return false;
+    }
+
+    return false;
+  };
+
+  const canEdit = canEditInitiative(i);
+  const canDelete = !!currentUser?.isAdmin;
+
   // Expand/collapse support for long text cells (Description + Remark)
   const makeExpandable = (text, maxLen, colClass) => {
     const raw = (text || '').toString();
@@ -834,8 +1001,8 @@ function initiativeRow(i, crData = null, colVisibility = null) {
     ${timelineCell}
     <td class="col-actions">
       <button data-id="${i.id}" class="view" style="margin-right: 8px;">View</button>
-      <button data-id="${i.id}" class="edit" style="margin-right: 8px; color: var(--brand);">Edit</button>
-      ${currentUser?.isAdmin ? `<button data-id="${i.id}" class="delete" style="color: var(--danger);">Delete</button>` : ''}
+      ${canEdit ? `<button data-id="${i.id}" class="edit" style="margin-right: 8px; color: var(--brand);">Edit</button>` : ''}
+      ${canDelete ? `<button data-id="${i.id}" class="delete" style="color: var(--danger);">Delete</button>` : ''}
     </td>
   </tr>`;
 }
@@ -884,6 +1051,18 @@ async function renderList() {
   } catch (error) {
     console.error('Error loading lookups:', error);
     app.innerHTML = `<div class="error">Error loading lookups: ${error.message}</div>`;
+    return;
+  }
+
+  // Apply access control for Project List
+  const access = await getUserAccess();
+  const user = currentUser;
+  if (!access || !user) {
+    app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You must be logged in to view Project List.</p></div>`;
+    return;
+  }
+  if (!access.canViewProjectList) {
+    app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You do not have access to Project List.</p></div>`;
     return;
   }
   const urlParams = new URLSearchParams(location.search);
@@ -939,6 +1118,35 @@ async function renderList() {
     console.error('Failed to fetch initiatives:', e);
     app.innerHTML = `<div class="error">Failed to load initiatives: ${e.message}</div>`;
     return;
+  }
+
+  // For internal ICs, restrict Project List visibility to projects where they are part of the project team
+  if (access.restrictProjectVisibilityToOwnTeamOnly && user) {
+    const userId = user.id;
+    const isUserInInitiativeTeam = (initiative, uid) => {
+      if (!initiative || !uid) return false;
+      const normalizeIds = (val) => {
+        if (!val) return [];
+        if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(Boolean);
+        if (typeof val === 'string') {
+          return val.split(',').map(v => v.trim()).filter(Boolean);
+        }
+        return [];
+      };
+      const candidateId = String(uid);
+      const check = (id) => id && String(id) === candidateId;
+
+      if (check(initiative.itPicId)) return true;
+      if (normalizeIds(initiative.itPicIds).some(check)) return true;
+      if (check(initiative.itPmId)) return true;
+      if (normalizeIds(initiative.itPmIds).some(check)) return true;
+      if (normalizeIds(initiative.itManagerIds).some(check)) return true;
+      if (check(initiative.businessOwnerId)) return true;
+      if (normalizeIds(initiative.businessUserIds).some(check)) return true;
+      return false;
+    };
+
+    data = data.filter(i => isUserInInitiativeTeam(i, userId));
   }
   
   // Calculate milestone counts from filtered data
@@ -1346,7 +1554,7 @@ async function renderList() {
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('list')" title="Column Settings" class="icon-btn">⚙️</button>
           <button id="apply-filters-btn" class="primary" onclick="applyFilters()">Apply Filters</button>
-          <a href="#new/Project"><button class="primary">+ New Initiative</button></a>
+          ${access.canCreateProject || access.isAdmin ? '<a href="#new/Project"><button class="primary">+ New Initiative</button></a>' : ''}
         </div>
       </div>
     </div>
@@ -4181,7 +4389,9 @@ async function renderCRList() {
     { key: 'documentationLink', class: 'col-doc', label: 'CR Doc Link', sortable: true },
     { key: 'actions', class: 'col-actions', label: 'Actions', sortable: false }
   ];
-  
+  const access = await getUserAccess();
+  const canCreateCR = !access || access.canCreateCR !== false || access.isAdmin;
+
   app.innerHTML = `
     <div class="milestone-graph">
       <h3>Milestone Distribution</h3>
@@ -4351,7 +4561,7 @@ async function renderCRList() {
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('crlist')" title="Column Settings" class="icon-btn">⚙️</button>
           <button id="apply-filters-btn" class="primary" onclick="applyFiltersCR()">Apply Filters</button>
-          <a href="#new/CR"><button class="primary">+ New CR</button></a>
+          ${canCreateCR ? '<a href="#new/CR"><button class="primary">+ New CR</button></a>' : ''}
         </div>
       </div>
     </div>
@@ -4651,6 +4861,8 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
     apiQs.set('status', filterValue);
   } else if (filterType === 'priority') {
     apiQs.set('priority', filterValue);
+  } else if (filterType === 'milestone') {
+    apiQs.set('milestone', filterValue);
   } else if (filterType === 'departmentId') {
     apiQs.set('departmentId', filterValue);
   } else if (filterType === 'all') {
@@ -4747,6 +4959,13 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
 async function renderDashboard() {
   setActive('#dashboard');
   await ensureLookups();
+
+  // Enforce access rules for Project Dashboard
+  const access = await getUserAccess();
+  if (!access || !access.canViewProjectDashboard) {
+    app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You do not have access to Project Dashboard.</p></div>`;
+    return;
+  }
   
   // Get current user profile to check if they're a Manager
   let currentUserProfile = null;
@@ -4769,6 +4988,7 @@ async function renderDashboard() {
   const selectedDepartmentId = urlParams.get('departmentId') || '';
   const selectedItPmId = urlParams.get('itPmId') || '';
   const selectedTeamMemberId = urlParams.get('teamMemberId') || '';
+  const selectedCalendarPriority = urlParams.get('calPriority') || '';
   
   // Build API query string with filters
   const apiQs = new URLSearchParams();
@@ -4792,6 +5012,12 @@ async function renderDashboard() {
   const floorDays = (ms) => Math.floor(ms / msPerDay);
   const safeDate = (v) => (v ? new Date(v) : null);
   const today = new Date();
+  let projectAgingBreakdown = {
+    open: { actual: { P0: null, P1: null, P2: null } },
+    closed: { actual: { P0: null, P1: null, P2: null } }
+  };
+  let projectDepartmentBreakdown = { open: {}, live: {} };
+  let projectsForCalendar = [];
 
   try {
     // Fetch projects with dates so we can compute all age metrics.
@@ -4803,6 +5029,7 @@ async function renderDashboard() {
     if (selectedTeamMemberId) projQs.set('teamMemberId', selectedTeamMemberId);
 
     const projects = await fetchJSON('/api/initiatives?' + projQs.toString());
+    projectsForCalendar = Array.isArray(projects) ? projects : [];
 
     let sumTotalAge = 0;
     let sumCreatedToStart = 0;
@@ -4810,6 +5037,34 @@ async function renderDashboard() {
     let countTotalAge = 0;
     let countCreatedToStart = 0;
     let countCycleTime = 0;
+
+    const initBucket = () => ({
+      qty: 0,
+      sumCreatedToStart: 0,
+      sumCycleTime: 0,
+      countCreatedToStart: 0,
+      countCycleTime: 0,
+      avgCreatedToStart: 0,
+      avgCycleTime: 0,
+      avgTotalAge: 0
+    });
+    const ensureBucket = (section, prio) => {
+      if (!projectAgingBreakdown[section]) projectAgingBreakdown[section] = { actual: {} };
+      if (!projectAgingBreakdown[section].actual) projectAgingBreakdown[section].actual = {};
+      if (!projectAgingBreakdown[section].actual[prio]) projectAgingBreakdown[section].actual[prio] = initBucket();
+      return projectAgingBreakdown[section].actual[prio];
+    };
+
+    const ensureDeptBucket = (section, deptId, prio) => {
+      if (!projectDepartmentBreakdown[section]) projectDepartmentBreakdown[section] = {};
+      if (!projectDepartmentBreakdown[section][deptId]) {
+        projectDepartmentBreakdown[section][deptId] = { P0: initBucket(), P1: initBucket(), P2: initBucket() };
+      }
+      if (!projectDepartmentBreakdown[section][deptId][prio]) {
+        projectDepartmentBreakdown[section][deptId][prio] = initBucket();
+      }
+      return projectDepartmentBreakdown[section][deptId][prio];
+    };
 
     (projects || []).forEach(p => {
       const createDate = safeDate(p.createdAt);
@@ -4842,6 +5097,38 @@ async function renderDashboard() {
 
       projectAgingMetrics.byId[p.id] = { ageCreatedToStart, cycleTime, totalAge };
 
+      // Breakdown for Project Aging table (Actual only)
+      const statusU = String(p.status || '').toUpperCase().trim();
+      if (statusU !== 'CANCELLED') {
+        const section = statusU === 'LIVE' ? 'closed' : 'open';
+        const deptSection = statusU === 'LIVE' ? 'live' : 'open';
+        const prioU = String(p.priority || 'P2').toUpperCase().trim();
+        const prio = (prioU === 'P0' || prioU === 'P1' || prioU === 'P2') ? prioU : 'P2';
+        const bucket = ensureBucket(section, prio);
+        bucket.qty += 1;
+        if (ageCreatedToStart !== null && ageCreatedToStart !== undefined) {
+          bucket.sumCreatedToStart += ageCreatedToStart;
+          bucket.countCreatedToStart += 1;
+        }
+        if (cycleTime !== null && cycleTime !== undefined) {
+          bucket.sumCycleTime += cycleTime;
+          bucket.countCycleTime += 1;
+        }
+
+        // Department breakdown (Open/Closed) for Department Distribution table (Actual only)
+        const deptId = p.departmentId || 'N/A';
+        const deptBucket = ensureDeptBucket(deptSection, deptId, prio);
+        deptBucket.qty += 1;
+        if (ageCreatedToStart !== null && ageCreatedToStart !== undefined) {
+          deptBucket.sumCreatedToStart += ageCreatedToStart;
+          deptBucket.countCreatedToStart += 1;
+        }
+        if (cycleTime !== null && cycleTime !== undefined) {
+          deptBucket.sumCycleTime += cycleTime;
+          deptBucket.countCycleTime += 1;
+        }
+      }
+
       if (totalAge !== null) {
         sumTotalAge += totalAge;
         countTotalAge++;
@@ -4863,6 +5150,33 @@ async function renderDashboard() {
       counts: { totalAge: countTotalAge, createdToStart: countCreatedToStart, cycleTime: countCycleTime },
       byId: projectAgingMetrics.byId
     };
+
+    // Finalize averages for breakdown buckets
+    ['open', 'closed'].forEach(section => {
+      ['P0', 'P1', 'P2'].forEach(prio => {
+        const bucket = projectAgingBreakdown?.[section]?.actual?.[prio];
+        if (!bucket) return;
+        bucket.avgCreatedToStart = bucket.countCreatedToStart > 0 ? Math.round(bucket.sumCreatedToStart / bucket.countCreatedToStart) : 0;
+        bucket.avgCycleTime = bucket.countCycleTime > 0 ? Math.round(bucket.sumCycleTime / bucket.countCycleTime) : 0;
+        bucket.avgTotalAge = bucket.avgCreatedToStart + bucket.avgCycleTime;
+      });
+    });
+
+    projectAgingMetrics.breakdown = projectAgingBreakdown;
+    // Finalize averages for department breakdown
+    ['open', 'live'].forEach(section => {
+      const depts = projectDepartmentBreakdown?.[section] || {};
+      Object.keys(depts).forEach(deptId => {
+        ['P0', 'P1', 'P2'].forEach(prio => {
+          const b = depts?.[deptId]?.[prio];
+          if (!b) return;
+          b.avgCreatedToStart = b.countCreatedToStart > 0 ? Math.round(b.sumCreatedToStart / b.countCreatedToStart) : 0;
+          b.avgCycleTime = b.countCycleTime > 0 ? Math.round(b.sumCycleTime / b.countCycleTime) : 0;
+          b.avgTotalAge = b.avgCreatedToStart + b.avgCycleTime;
+        });
+      });
+    });
+    projectAgingMetrics.departmentBreakdown = projectDepartmentBreakdown;
   } catch (e) {
     console.warn('Failed to compute project aging metrics from initiatives:', e);
   }
@@ -4891,6 +5205,81 @@ async function renderDashboard() {
                 </div>
                 <div style="width: 40px; text-align: right; font-weight: 600; font-size: 14px;">${item[valueKey]}</div>
               </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  };
+
+  // Create bar chart with breakdown (same concept as CR Dashboard)
+  const createBarChartWithBreakdown = (data, labelKey, valueKey, title, breakdownData, breakdownType, clickable = false, initiativeType = 'Project') => {
+    if (!data || data.length === 0) {
+      return `<div class="card"><h3>${title}</h3><p class="muted">No data available</p></div>`;
+    }
+    const max = Math.max(...data.map(item => item[valueKey] || 0), 1);
+    return `
+      <div class="card">
+        <h3>${title}</h3>
+        <div style="margin-top: 16px;">
+          ${data.map(item => {
+            const percentage = ((item[valueKey] || 0) / max) * 100;
+            const statusClass = item[labelKey]?.toLowerCase().replace(/\s+/g, '-') || '';
+            const filterValue = item[labelKey] || '';
+            const clickableStyle = clickable ? 'cursor: pointer;' : '';
+            const clickableClass = clickable ? 'clickable-chart-item' : '';
+            const safeValue = String(filterValue).replace(/"/g, '&quot;');
+            const dataAttrs = clickable ? `data-filter-type="${labelKey}" data-filter-value="${safeValue}" data-title="${title}: ${safeValue}" data-initiative-type="${initiativeType}"` : '';
+
+            const normalizedKey = String(filterValue || '').toUpperCase().trim();
+            const trimmedKey = String(filterValue || '').trim();
+            const breakdown = breakdownData ? (breakdownData[filterValue] || breakdownData[trimmedKey] || breakdownData[normalizedKey]) : null;
+            let breakdownHtml = '';
+
+            if (breakdown) {
+              if (breakdownType === 'priority') {
+                const p0 = breakdown.P0 || 0;
+                const p1 = breakdown.P1 || 0;
+                const p2 = breakdown.P2 || 0;
+                const totalBreakdown = p0 + p1 + p2;
+                if (totalBreakdown > 0) {
+                  breakdownHtml = `
+                    <div style="margin-top: 6px; padding-left: 132px; font-size: 11px; color: var(--muted); display: flex; gap: 12px;">
+                      ${p0 > 0 ? `<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; background: #ef4444; border-radius: 2px;"></span>P0: ${p0}</span>` : ''}
+                      ${p1 > 0 ? `<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; background: #f59e0b; border-radius: 2px;"></span>P1: ${p1}</span>` : ''}
+                      ${p2 > 0 ? `<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 2px;"></span>P2: ${p2}</span>` : ''}
+                    </div>
+                  `;
+                }
+              } else if (breakdownType === 'status') {
+                const statusKeys = Object.keys(breakdown).sort();
+                if (statusKeys.length > 0) {
+                  breakdownHtml = `
+                    <div style="margin-top: 6px; padding-left: 132px; font-size: 11px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap;">
+                      ${statusKeys.map(status => {
+                        const count = breakdown[status] || 0;
+                        if (count <= 0) return '';
+                        const statusClass = String(status).toLowerCase().replace(/\s+/g, '-');
+                        const color = statusClass.includes('live') ? '#3b82f6' : statusClass.includes('at-risk') ? '#f59e0b' : statusClass.includes('delayed') ? '#ef4444' : '#6366f1';
+                        return `<span style="display: inline-flex; align-items: center; gap: 4px;"><span style="display: inline-block; width: 8px; height: 8px; background: ${color}; border-radius: 2px;"></span>${escapeHtml(status)}: ${count}</span>`;
+                      }).join('')}
+                    </div>
+                  `;
+                }
+              }
+            }
+
+            return `
+              <div class="${clickableClass}" ${dataAttrs} style="display: flex; align-items: center; margin-bottom: 12px; ${clickableStyle}">
+                <div style="width: 120px; font-size: 12px; color: var(--muted);">${escapeHtml(item[labelKey] || 'N/A')}</div>
+                <div style="flex: 1; margin: 0 12px;">
+                  <div style="background: #f1f5f9; height: 20px; border-radius: 10px; overflow: hidden;">
+                    <div style="background: ${statusClass.includes('live') ? '#3b82f6' : statusClass.includes('at-risk') ? '#f59e0b' : statusClass.includes('delayed') ? '#ef4444' : '#6366f1'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
+                  </div>
+                </div>
+                <div style="width: 40px; text-align: right; font-weight: 600; font-size: 14px;">${item[valueKey] || 0}</div>
+              </div>
+              ${breakdownHtml}
             `;
           }).join('')}
         </div>
@@ -5013,99 +5402,847 @@ async function renderDashboard() {
       </div>
     </div>
     <div class="grid" style="margin-top:24px">
-      ${createBarChart(combinedByStatus, 'status', 'c', 'Status Distribution', true)}
-      ${createBarChart(d.byPriority, 'priority', 'c', 'Priority Distribution', true)}
-      <div class="card">
+      ${createBarChartWithBreakdown(combinedByStatus, 'status', 'c', 'Status Distribution', d.byStatusBreakdown || {}, 'priority', true, 'Project')}
+      ${createBarChartWithBreakdown(d.byPriority || [], 'priority', 'c', 'Priority Distribution', d.byPriorityBreakdown || {}, 'status', true, 'Project')}
+      ${createBarChartWithBreakdown(d.byMilestone || [], 'milestone', 'c', 'Milestone Distribution', d.byMilestoneBreakdown || {}, 'priority', true, 'Project')}
+    </div>
+    <div class="grid" style="margin-top:24px">
+      <div class="card" style="grid-column: 1 / -1;">
         <h3>Project Aging (Total Age)</h3>
-        <div style="margin-top: 16px; max-height: 400px; overflow-y: auto;">
-          ${d.projectAging.map(project => {
-            const m = projectAgingMetrics.byId[project.id] || {};
-            const total = (m.totalAge ?? project.daysSinceCreated ?? 0);
-            const aCS = m.ageCreatedToStart;
-            const cT = m.cycleTime;
-            const breakdown = (aCS !== null && aCS !== undefined && cT !== null && cT !== undefined)
-              ? `Create→Start: ${aCS}d • Start→End/Now: ${cT}d`
-              : 'Breakdown not available';
+        <div style="margin-top: 16px; overflow-x: auto;">
+          ${(() => {
+            const breakdown = projectAgingMetrics.breakdown || {};
+            const open = breakdown.open || { actual: {} };
+            const closed = breakdown.closed || { actual: {} };
+            
+            const renderCell = (value, isHeader = false, bgColor = '', whiteText = false) => {
+              const baseStyle = isHeader
+                ? 'padding: 8px 12px; font-weight: 600; text-align: center; border: 1px solid #e2e8f0;'
+                : 'padding: 8px 12px; font-weight: 600; text-align: center; border: 1px solid #e2e8f0;';
+              const bgStyle = bgColor ? ` background: ${bgColor};` : '';
+              const textColor = (whiteText || bgColor === '#475569') ? ' color: white;' : '';
+              return `<td style="${baseStyle}${bgStyle}${textColor}">${value}</td>`;
+            };
+            
+            const renderDataCells = (data, rowType) => {
+              const actual = data.actual || {};
+              
+              if (rowType === 'qty') {
+                return `
+                  ${renderCell(actual.P0?.qty || 0, false, '#3b82f6', true)}
+                  ${renderCell(actual.P1?.qty || 0, false, '#3b82f6', true)}
+                  ${renderCell(actual.P2?.qty || 0, false, '#3b82f6', true)}
+                `;
+              }
+              if (rowType === 'rec-start') {
+                return `
+                  ${renderCell(actual.P0?.avgCreatedToStart || 0)}
+                  ${renderCell(actual.P1?.avgCreatedToStart || 0)}
+                  ${renderCell(actual.P2?.avgCreatedToStart || 0)}
+                `;
+              }
+              if (rowType === 'start-live') {
+                return `
+                  ${renderCell(actual.P0?.avgCycleTime || 0)}
+                  ${renderCell(actual.P1?.avgCycleTime || 0)}
+                  ${renderCell(actual.P2?.avgCycleTime || 0)}
+                `;
+              }
+              if (rowType === 'total-age') {
+                return `
+                  ${renderCell(actual.P0?.avgTotalAge || 0, false, '#10b981', true)}
+                  ${renderCell(actual.P1?.avgTotalAge || 0, false, '#10b981', true)}
+                  ${renderCell(actual.P2?.avgTotalAge || 0, false, '#10b981', true)}
+                `;
+              }
+              return '';
+            };
+            
             return `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px; background: #f8fafc; border-radius: 6px;">
-              <div style="flex: 1;">
-                <div style="font-weight: 500; margin-bottom: 4px;">${project.name}</div>
-                <div style="font-size: 12px; color: var(--muted);">
-                  <span class="status-badge status-${project.status?.replace(/\s+/g, '-')}">${project.status}</span>
-                  <span style="margin-left: 8px;">${project.milestone}</span>
+              <table style="width: 100%; border-collapse: collapse; min-width: 600px; font-size: 13px;">
+                <thead>
+                  <tr>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;"></th>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;"></th>
+                    <th colspan="3" style="padding: 12px; background: #fbbf24; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: white;">Actual</th>
+                  </tr>
+                  <tr>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P0</th>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P1</th>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P2</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="background: #fef3c7;">
+                    <td rowspan="4" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: center;">Open</td>
+                    <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #3b82f6; color: white;">Total Projects</td>
+                    ${renderDataCells(open, 'qty')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Age Created→Start</td>
+                    ${renderDataCells(open, 'rec-start')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Cycle Time (Start→End)</td>
+                    ${renderDataCells(open, 'start-live')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #10b981; color: white;">Avg Total Age</td>
+                    ${renderDataCells(open, 'total-age')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td rowspan="4" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: center;">Closed</td>
+                    <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #3b82f6; color: white;">Total Projects</td>
+                    ${renderDataCells(closed, 'qty')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Age Created→Start</td>
+                    ${renderDataCells(closed, 'rec-start')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Cycle Time (Start→End)</td>
+                    ${renderDataCells(closed, 'start-live')}
+                  </tr>
+                  <tr style="background: #fef3c7;">
+                    <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #10b981; color: white;">Avg Total Age</td>
+                    ${renderDataCells(closed, 'total-age')}
+                  </tr>
+                </tbody>
+              </table>
+            `;
+          })()}
+        </div>
+        <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 6px; font-size: 12px; color: var(--muted);">
+          <strong>Note:</strong> Days uses Create Date, Actual Start Date, and Actual End Date. Total Age = (Create→Start) + (Start→End/Now). For ongoing projects, End uses today. (Working days only.)
+        </div>
+      </div>
+      ${d.goLiveRateData && d.goLiveRateData.length > 0 ? `
+      <div class="card" style="grid-column: 1 / -1; margin-top: 24px;">
+        <h3>Go Live Rate (2M Moving Average)</h3>
+        <div style="margin-top: 16px;">
+          ${(() => {
+            const data = d.goLiveRateData;
+            
+            // Calculate max value for scaling (use moving average and benchmark)
+            const benchmarkValue = 2;
+            const maxValue = Math.max(
+              ...data.flatMap(d => [
+                d.movingAvg2M.P0 || 0,
+                d.movingAvg2M.P1 || 0,
+                d.movingAvg2M.P2 || 0,
+                d.movingAvg2M.Total || 0
+              ]),
+              benchmarkValue,
+              1
+            );
+            
+            const chartHeight = 400;
+            const chartPadding = { top: 30, right: 50, bottom: 90, left: 70 };
+            const chartWidth = Math.max(900, data.length * 70);
+            const usableWidth = chartWidth - chartPadding.left - chartPadding.right;
+            const usableHeight = chartHeight - chartPadding.top - chartPadding.bottom;
+            
+            // Generate points for moving average lines only
+            const generatePoints = (key) => {
+              return data.map((item, index) => {
+                const x = chartPadding.left + (index / (data.length - 1 || 1)) * usableWidth;
+                const value = item.movingAvg2M[key];
+                const y = chartPadding.top + usableHeight - (value / maxValue) * usableHeight;
+                return { x, y, value, month: item.monthLabel };
+              });
+            };
+            
+            const pointsP0MA = generatePoints('P0');
+            const pointsP1MA = generatePoints('P1');
+            const pointsP2MA = generatePoints('P2');
+            const pointsTotalMA = generatePoints('Total');
+            
+            // Generate path strings
+            const generatePath = (points) => {
+              if (points.length === 0) return '';
+              if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+              return points.map((p, i) => i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`).join(' ');
+            };
+            
+            // Generate grid lines
+            const gridLines = [];
+            const gridSteps = Math.ceil(maxValue) <= 10 ? Math.ceil(maxValue) : 10;
+            for (let i = 0; i <= gridSteps; i++) {
+              const y = chartPadding.top + (i / gridSteps) * usableHeight;
+              const value = maxValue - (i / gridSteps) * maxValue;
+              const displayValue = maxValue <= 10 ? value.toFixed(1) : Math.round(value);
+              gridLines.push(`<line x1="${chartPadding.left}" y1="${y}" x2="${chartPadding.left + usableWidth}" y2="${y}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="2,2"/>`);
+              gridLines.push(`<text x="${chartPadding.left - 15}" y="${y + 5}" text-anchor="end" font-size="12" fill="#475569" font-weight="500">${displayValue}</text>`);
+            }
+            
+            // Generate X-axis labels
+            const xAxisLabels = data.map((item, index) => {
+              const x = chartPadding.left + (index / (data.length - 1 || 1)) * usableWidth;
+              return `<text x="${x}" y="${chartHeight - chartPadding.bottom + 25}" text-anchor="middle" font-size="12" fill="#475569" font-weight="500" transform="rotate(-45 ${x} ${chartHeight - chartPadding.bottom + 25})">${item.monthLabel}</text>`;
+            });
+            
+            return `
+              <div style="overflow-x: auto; padding: 24px; border: 1px solid #e2e8f0; background: linear-gradient(to bottom, #ffffff, #f8fafc); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                <svg width="${chartWidth}" height="${chartHeight}" style="min-width: ${chartWidth}px;">
+                  <!-- Grid lines -->
+                  ${gridLines.join('')}
+                  
+                  <!-- Y-axis label -->
+                  <text x="${chartPadding.left / 2}" y="${chartHeight / 2}" text-anchor="middle" font-size="13" fill="#334155" font-weight="600" transform="rotate(-90 ${chartPadding.left / 2} ${chartHeight / 2})">Count Projects</text>
+                  
+                  <!-- X-axis label -->
+                  <text x="${chartWidth / 2}" y="${chartHeight - 15}" text-anchor="middle" font-size="13" fill="#334155" font-weight="600">Date (Month)</text>
+                  
+                  <!-- Moving Average Lines (solid, more prominent) -->
+                  <path d="${generatePath(pointsP0MA)}" stroke="#ef4444" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="${generatePath(pointsP1MA)}" stroke="#3b82f6" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="${generatePath(pointsP2MA)}" stroke="#10b981" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="${generatePath(pointsTotalMA)}" stroke="#8b5cf6" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  
+                  <!-- Benchmark Line (horizontal at value 2) -->
+                  ${(() => {
+                    const y = chartPadding.top + usableHeight - (benchmarkValue / maxValue) * usableHeight;
+                    return `
+                      <line x1="${chartPadding.left}" y1="${y}" x2="${chartPadding.left + usableWidth}" y2="${y}" stroke="#f97316" stroke-width="2.5" stroke-dasharray="8,6" />
+                      <text x="${chartPadding.left + usableWidth}" y="${y - 6}" text-anchor="end" font-size="11" fill="#f97316" font-weight="600">
+                        Benchmark (2)
+                      </text>
+                    `;
+                  })()}
+                  
+                  <!-- Data points for Moving Average -->
+                  ${pointsP0MA.map(p => `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#ef4444" stroke="white" stroke-width="2" class="chart-point-ma" data-value="${p.value.toFixed(1)}" data-month="${p.month}" data-priority="P0" style="cursor: pointer;" title="P0 2M Avg: ${p.value.toFixed(1)} (${p.month})"/>`).join('')}
+                  ${pointsP1MA.map(p => `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#3b82f6" stroke="white" stroke-width="2" class="chart-point-ma" data-value="${p.value.toFixed(1)}" data-month="${p.month}" data-priority="P1" style="cursor: pointer;" title="P1 2M Avg: ${p.value.toFixed(1)} (${p.month})"/>`).join('')}
+                  ${pointsP2MA.map(p => `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#10b981" stroke="white" stroke-width="2" class="chart-point-ma" data-value="${p.value.toFixed(1)}" data-month="${p.month}" data-priority="P2" style="cursor: pointer;" title="P2 2M Avg: ${p.value.toFixed(1)} (${p.month})"/>`).join('')}
+                  ${pointsTotalMA.map(p => `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#8b5cf6" stroke="white" stroke-width="2" class="chart-point-ma" data-value="${p.value.toFixed(1)}" data-month="${p.month}" data-priority="Total" style="cursor: pointer;" title="Total 2M Avg: ${p.value.toFixed(1)} (${p.month})"/>`).join('')}
+                  
+                  <!-- X-axis labels -->
+                  ${xAxisLabels.join('')}
+                  
+                  <!-- Y-axis line -->
+                  <line x1="${chartPadding.left}" y1="${chartPadding.top}" x2="${chartPadding.left}" y2="${chartPadding.top + usableHeight}" stroke="#334155" stroke-width="2.5"/>
+                  
+                  <!-- X-axis line -->
+                  <line x1="${chartPadding.left}" y1="${chartPadding.top + usableHeight}" x2="${chartPadding.left + usableWidth}" y2="${chartPadding.top + usableHeight}" stroke="#334155" stroke-width="2.5"/>
+                </svg>
+              </div>
+              
+              <!-- Legend -->
+              <div style="padding: 20px; background: linear-gradient(to bottom, #f8fafc, #ffffff); border: 1px solid #e2e8f0; border-radius: 12px; margin-top: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.05);">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px;">
+                  <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <div style="width: 50px; height: 4px; background: #ef4444; border-radius: 2px;"></div>
+                    <div>
+                      <div style="font-size: 14px; color: #1e293b; font-weight: 600;">P0</div>
+                      <div style="font-size: 11px; color: #64748b;">Priority 0</div>
+                    </div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <div style="width: 50px; height: 4px; background: #3b82f6; border-radius: 2px;"></div>
+                    <div>
+                      <div style="font-size: 14px; color: #1e293b; font-weight: 600;">P1</div>
+                      <div style="font-size: 11px; color: #64748b;">Priority 1</div>
+                    </div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <div style="width: 50px; height: 4px; background: #10b981; border-radius: 2px;"></div>
+                    <div>
+                      <div style="font-size: 14px; color: #1e293b; font-weight: 600;">P2</div>
+                      <div style="font-size: 11px; color: #64748b;">Priority 2</div>
+                    </div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: white; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <div style="width: 50px; height: 4px; background: #8b5cf6; border-radius: 2px;"></div>
+                    <div>
+                      <div style="font-size: 14px; color: #1e293b; font-weight: 600;">Total</div>
+                      <div style="font-size: 11px; color: #64748b;">P0 + P1 + P2</div>
+                    </div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px; padding: 8px; background: white; border-radius: 8px; border: 1px solid #fee2e2;">
+                    <div style="width: 50px; height: 0; border-top: 3px dashed #f97316; border-radius: 2px;"></div>
+                    <div>
+                      <div style="font-size: 14px; color: #1e293b; font-weight: 600;">Benchmark</div>
+                      <div style="font-size: 11px; color: #64748b;">Target = 2 Projects per month</div>
+                    </div>
+                  </div>
                 </div>
-                <div class="muted" style="font-size: 11px; margin-top: 4px;">${breakdown}</div>
+                <div style="padding: 12px; background: white; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
+                  <div style="font-size: 12px; color: #475569; line-height: 1.6;">
+                    <span style="font-weight: 700; color: #1e293b;">📈 2-Month Moving Average:</span> <span style="color: #64748b;">Smoothed trend showing the average count of Projects completed over the current and previous month</span><br/>
+                    <span style="font-weight: 700; color: #f97316;">📏 Benchmark (2):</span> <span style="color: #64748b;">Target threshold for monthly completions</span>
+                  </div>
+                </div>
               </div>
-              <div style="text-align: right;">
-                <span style="font-weight: 700; color: var(--warning);" title="${breakdown}">${total} days</span>
+            `;
+          })()}
+        </div>
+      </div>
+      ` : ''}
+      ${d.openBurndownData && d.openBurndownData.length > 0 ? `
+      <div class="card" style="grid-column: 1 / -1; margin-top: 24px;">
+        <h3>Project Open Burndown (Weekly)</h3>
+        <div style="margin-top: 16px;">
+          ${(() => {
+            const data = d.openBurndownData;
+
+            const maxValue = Math.max(
+              ...data.flatMap(w => [w.P0 || 0, w.P1 || 0, w.P2 || 0, w.Total || 0]),
+              1
+            );
+
+            const chartHeight = 360;
+            const chartPadding = { top: 30, right: 40, bottom: 90, left: 70 };
+            let chartWidth = Math.max(900, data.length * 80);
+            let usableWidth = chartWidth - chartPadding.left - chartPadding.right;
+            const usableHeight = chartHeight - chartPadding.top - chartPadding.bottom;
+
+            const generatePoints = (key) => {
+              return data.map((item, index) => {
+                const x = chartPadding.left + (index / (data.length - 1 || 1)) * usableWidth;
+                const value = item[key] || 0;
+                const y = chartPadding.top + usableHeight - (value / maxValue) * usableHeight;
+                return { x, y, value, label: item.weekLabel || item.weekEnd || '' };
+              });
+            };
+
+            const pointsP0 = generatePoints('P0');
+            const pointsP1 = generatePoints('P1');
+            const pointsP2 = generatePoints('P2');
+            const pointsTotal = generatePoints('Total');
+
+            const generatePath = (points) => {
+              if (points.length === 0) return '';
+              if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+              return points.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ');
+            };
+
+            const gridLines = [];
+            const gridSteps = Math.ceil(maxValue) <= 10 ? Math.ceil(maxValue) : 10;
+            for (let i = 0; i <= gridSteps; i++) {
+              const y = chartPadding.top + (i / gridSteps) * usableHeight;
+              const value = maxValue - (i / gridSteps) * maxValue;
+              const displayValue = maxValue <= 10 ? value.toFixed(1) : Math.round(value);
+              gridLines.push(
+                `<line x1="${chartPadding.left}" y1="${y}" x2="${chartPadding.left + usableWidth}" y2="${y}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="2,2"/>`
+              );
+              gridLines.push(
+                `<text x="${chartPadding.left - 15}" y="${y + 5}" text-anchor="end" font-size="12" fill="#475569" font-weight="500">${displayValue}</text>`
+              );
+            }
+
+            const xAxisLabels = data.map((item, index) => {
+              const x = chartPadding.left + (index / (data.length - 1 || 1)) * usableWidth;
+              const label = item.weekLabel || item.weekEnd || '';
+              return `<text x="${x}" y="${chartHeight - chartPadding.bottom + 25}" text-anchor="middle" font-size="11" fill="#475569" transform="rotate(-45 ${x} ${chartHeight - chartPadding.bottom + 25})">${label}</text>`;
+            });
+
+            return `
+              <div style="overflow-x: auto; padding: 20px; border: 1px solid #e2e8f0; background: #ffffff; border-radius: 12px;">
+                <svg width="${chartWidth}" height="${chartHeight}" style="min-width: ${chartWidth}px;">
+                  ${gridLines.join('')}
+
+                  <text x="${chartPadding.left / 2}" y="${chartHeight / 2}" text-anchor="middle" font-size="13" fill="#334155" font-weight="600" transform="rotate(-90 ${chartPadding.left / 2} ${chartHeight / 2})">Open Projects</text>
+                  <text x="${chartWidth / 2}" y="${chartHeight - 15}" text-anchor="middle" font-size="13" fill="#334155" font-weight="600">Week</text>
+
+                  <path d="${generatePath(pointsP0)}" stroke="#ef4444" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="${generatePath(pointsP1)}" stroke="#3b82f6" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="${generatePath(pointsP2)}" stroke="#10b981" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="${generatePath(pointsTotal)}" stroke="#8b5cf6" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+                  ${pointsP0.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#ef4444" stroke="white" stroke-width="2" title="P0 Open: ${p.value} (${p.label})"/>`).join('')}
+                  ${pointsP1.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#3b82f6" stroke="white" stroke-width="2" title="P1 Open: ${p.value} (${p.label})"/>`).join('')}
+                  ${pointsP2.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#10b981" stroke="white" stroke-width="2" title="P2 Open: ${p.value} (${p.label})"/>`).join('')}
+                  ${pointsTotal.map(p => `<circle cx="${p.x}" cy="${p.y}" r="4.5" fill="#8b5cf6" stroke="white" stroke-width="2" title="Total Open: ${p.value} (${p.label})"/>`).join('')}
+
+                  ${xAxisLabels.join('')}
+
+                  <line x1="${chartPadding.left}" y1="${chartPadding.top}" x2="${chartPadding.left}" y2="${chartPadding.top + usableHeight}" stroke="#334155" stroke-width="2.5"/>
+                  <line x1="${chartPadding.left}" y1="${chartPadding.top + usableHeight}" x2="${chartPadding.left + usableWidth}" y2="${chartPadding.top + usableHeight}" stroke="#334155" stroke-width="2.5"/>
+                </svg>
               </div>
-            </div>
-          `;
-          }).join('')}
+              <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+                <div style="display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; margin-bottom: 8px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 32px; height: 4px; background: #ef4444; border-radius: 2px;"></div>
+                    <span style="font-size: 12px; color: #1e293b; font-weight: 600;">P0</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 32px; height: 4px; background: #3b82f6; border-radius: 2px;"></div>
+                    <span style="font-size: 12px; color: #1e293b; font-weight: 600;">P1</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 32px; height: 4px; background: #10b981; border-radius: 2px;"></div>
+                    <span style="font-size: 12px; color: #1e293b; font-weight: 600;">P2</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 32px; height: 4px; background: #8b5cf6; border-radius: 2px;"></div>
+                    <span style="font-size: 12px; color: #1e293b; font-weight: 600;">Total (P0+P1+P2)</span>
+                  </div>
+                </div>
+                <div style="font-size: 12px; color: #475569; text-align: center;">
+                  Showing how many Projects are still open each week (Status ≠ LIVE and ≠ CANCELLED), broken down by priority.
+                </div>
+              </div>
+            `;
+          })()}
+        </div>
+      </div>
+      ` : ''}
+      ${(() => {
+        // Project Open to Closed Forecasting Table
+        const monthlyOpenProjects = d.monthlyOpenProjects || [];
+        const goLiveRateData = d.goLiveRateData || [];
+
+        if (monthlyOpenProjects.length === 0) {
+          return '';
+        }
+
+        const forecastingData = monthlyOpenProjects.map(monthInfo => {
+          // Find 2M Moving Average for this month from goLiveRateData
+          let monthData = goLiveRateData.find(m => (m.monthKey || m.month) === monthInfo.monthKey);
+          if (!monthData) {
+            monthData = goLiveRateData.find(m => m.monthLabel === monthInfo.monthLabel);
+          }
+          const movingAvg2M = monthData?.movingAvg2M?.Total || 0;
+
+          // Benchmark rate (Projects/month)
+          const benchmarkRate = 2;
+          const monthsToCompleteBenchmark = monthInfo.openProjects > 0 ? Math.ceil(monthInfo.openProjects / benchmarkRate) : 0;
+          const forecastBenchmark = monthsToCompleteBenchmark > 0 ? (() => {
+            const forecastDate = new Date(monthInfo.year, monthInfo.month - 1 + monthsToCompleteBenchmark, 1);
+            return forecastDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+          })() : '-';
+
+          // Forecast based on 2M Moving Average
+          let forecast2M = '-';
+          if (monthInfo.openProjects > 0) {
+            if (movingAvg2M > 0) {
+              const monthsToComplete2M = Math.ceil(monthInfo.openProjects / movingAvg2M);
+              if (monthsToComplete2M > 0) {
+                const forecastDate = new Date(monthInfo.year, monthInfo.month - 1 + monthsToComplete2M, 1);
+                forecast2M = forecastDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+              }
+            } else {
+              forecast2M = 'N/A';
+            }
+          }
+
+          return {
+            month: monthInfo.monthLabel,
+            openProjects: monthInfo.openProjects,
+            forecastBenchmark,
+            forecast2M
+          };
+        });
+
+        return `
+      <div class="card" style="grid-column: 1 / -1; margin-top: 24px;">
+        <h3>Project Open to Closed Forecasting</h3>
+        <div style="margin-top: 16px; overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden;">
+            <thead>
+              <tr style="background: #e0f2fe;">
+                <th style="padding: 12px 16px; text-align: left; font-weight: 600; color: #1e293b; border-bottom: 2px solid #cbd5e1;">Month</th>
+                <th style="padding: 12px 16px; text-align: center; font-weight: 600; color: #1e293b; border-bottom: 2px solid #cbd5e1;">No of Project Open</th>
+                <th style="padding: 12px 16px; text-align: center; font-weight: 600; color: #1e293b; border-bottom: 2px solid #cbd5e1;">Forecast All Project completed on Benchmark (2 Projects/month)</th>
+                <th style="padding: 12px 16px; text-align: center; font-weight: 600; color: #1e293b; border-bottom: 2px solid #cbd5e1;">Forecast All Project completed based on Total 2M Moving Average</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${forecastingData.map((row, idx) => `
+                <tr style="${idx % 2 === 0 ? 'background: #f8fafc;' : 'background: white;'} border-bottom: 1px solid #e2e8f0;">
+                  <td style="padding: 12px 16px; font-weight: 600; color: #1e293b;">${row.month}</td>
+                  <td style="padding: 12px 16px; text-align: center; color: #475569;">${row.openProjects}</td>
+                  <td style="padding: 12px 16px; text-align: center; color: #475569;">${row.forecastBenchmark}</td>
+                  <td style="padding: 12px 16px; text-align: center; color: #475569;">${row.forecast2M}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      `;
+      })()}
+      <div class="card" style="grid-column: 1 / -1; margin-top: 24px;">
+        <h3>Department Distribution</h3>
+        <div style="margin-top: 16px; overflow-x: auto;">
+          ${(() => {
+            const deptBreakdown = projectAgingMetrics.departmentBreakdown || {};
+            const openDeptBreakdown = deptBreakdown.open || {};
+            const liveDeptBreakdown = deptBreakdown.live || {};
+
+            const allDeptIds = new Set([
+              ...Object.keys(openDeptBreakdown),
+              ...Object.keys(liveDeptBreakdown),
+            ]);
+
+            if (allDeptIds.size === 0) {
+              return '<p class="muted">No department data available</p>';
+            }
+
+            const renderCell = (value, isHeader = false, bgColor = '', whiteText = false) => {
+              const baseStyle = isHeader
+                ? 'padding: 8px 12px; font-weight: 600; text-align: center; border: 1px solid #e2e8f0;'
+                : 'padding: 8px 12px; font-weight: 600; text-align: center; border: 1px solid #e2e8f0;';
+              const bgStyle = bgColor ? ` background: ${bgColor};` : '';
+              const textColor = (whiteText || bgColor === '#475569') ? ' color: white;' : '';
+              return `<td style="${baseStyle}${bgStyle}${textColor}">${value}</td>`;
+            };
+
+            const renderDataCells = (deptData, rowType) => {
+              if (!deptData) {
+                return `
+                  ${renderCell(0, false, rowType === 'qty' ? '#3b82f6' : '', rowType === 'qty')}
+                  ${renderCell(0, false, rowType === 'qty' ? '#3b82f6' : '', rowType === 'qty')}
+                  ${renderCell(0, false, rowType === 'qty' ? '#3b82f6' : '', rowType === 'qty')}
+                `;
+              }
+
+              if (rowType === 'qty') {
+                return `
+                  ${renderCell(deptData.P0?.qty || 0, false, '#3b82f6', true)}
+                  ${renderCell(deptData.P1?.qty || 0, false, '#3b82f6', true)}
+                  ${renderCell(deptData.P2?.qty || 0, false, '#3b82f6', true)}
+                `;
+              }
+              if (rowType === 'rec-start') {
+                return `
+                  ${renderCell(deptData.P0?.avgCreatedToStart || 0)}
+                  ${renderCell(deptData.P1?.avgCreatedToStart || 0)}
+                  ${renderCell(deptData.P2?.avgCreatedToStart || 0)}
+                `;
+              }
+              if (rowType === 'start-live') {
+                return `
+                  ${renderCell(deptData.P0?.avgCycleTime || 0)}
+                  ${renderCell(deptData.P1?.avgCycleTime || 0)}
+                  ${renderCell(deptData.P2?.avgCycleTime || 0)}
+                `;
+              }
+              if (rowType === 'total-age') {
+                return `
+                  ${renderCell(deptData.P0?.avgTotalAge || 0, false, '#10b981', true)}
+                  ${renderCell(deptData.P1?.avgTotalAge || 0, false, '#10b981', true)}
+                  ${renderCell(deptData.P2?.avgTotalAge || 0, false, '#10b981', true)}
+                `;
+              }
+              return '';
+            };
+
+            const sortedDepts = Array.from(allDeptIds)
+              .map((deptId) => ({
+                id: deptId,
+                name: nameById(LOOKUPS.departments, deptId) || deptId,
+              }))
+              .sort((a, b) => a.name.localeCompare(b.name));
+
+            return `
+              <table style="width: 100%; border-collapse: collapse; min-width: 600px; font-size: 13px;">
+                <thead>
+                  <tr>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;">Department</th>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;"></th>
+                    <th rowspan="2" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; text-align: left; font-weight: 600;"></th>
+                    <th colspan="3" style="padding: 12px; background: #fbbf24; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: white;">Actual</th>
+                  </tr>
+                  <tr>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P0</th>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P1</th>
+                    <th style="padding: 8px; background: #fef3c7; border: 1px solid #e2e8f0; text-align: center; font-weight: 600; color: #000;">P2</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${sortedDepts
+                    .map((dept) => {
+                      const openData = openDeptBreakdown[dept.id];
+                      const liveData = liveDeptBreakdown[dept.id];
+                      const deptId = dept.id;
+                      const deptName = dept.name;
+
+                      return `
+                        <tr style="background: #fef3c7;">
+                          <td rowspan="8" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: left;">
+                            <div class="clickable-chart-item" data-filter-type="departmentId" data-filter-value="${deptId}" data-title="Department: ${deptName}" data-initiative-type="Project" style="cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='transparent'">${deptName}</div>
+                          </td>
+                          <td rowspan="4" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: center;">Open</td>
+                          <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #3b82f6; color: white;">Total Projects</td>
+                          ${renderDataCells(openData, 'qty')}
+                        </tr>
+                        <tr style="background: #fef3c7;">
+                          <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Age Created→Start</td>
+                          ${renderDataCells(openData, 'rec-start')}
+                        </tr>
+                        <tr style="background: #fef3c7;">
+                          <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Cycle Time (Start→End)</td>
+                          ${renderDataCells(openData, 'start-live')}
+                        </tr>
+                        <tr style="background: #fef3c7;">
+                          <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #10b981; color: white;">Avg Total Age</td>
+                          ${renderDataCells(openData, 'total-age')}
+                        </tr>
+                        <tr style="background: #fef3c7;">
+                          <td rowspan="4" style="padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-weight: 600; vertical-align: middle; text-align: center;">Closed</td>
+                          <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #3b82f6; color: white;">Total Projects</td>
+                          ${renderDataCells(liveData, 'qty')}
+                        </tr>
+                        <tr style="background: #fef3c7;">
+                          <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Age Created→Start</td>
+                          ${renderDataCells(liveData, 'rec-start')}
+                        </tr>
+                        <tr style="background: #fef3c7;">
+                          <td style="padding: 8px 12px; font-weight: 600; text-align: left; border: 1px solid #e2e8f0; background: #fef3c7;">Avg Cycle Time (Start→End)</td>
+                          ${renderDataCells(liveData, 'start-live')}
+                        </tr>
+                        <tr style="background: #fef3c7;">
+                          <td style="padding: 8px 12px; font-weight: 700; text-align: left; border: 1px solid #e2e8f0; background: #10b981; color: white;">Avg Total Age</td>
+                          ${renderDataCells(liveData, 'total-age')}
+                        </tr>
+                      `;
+                    })
+                    .join('')}
+                </tbody>
+              </table>
+            `;
+          })()}
+        </div>
+        <div style="margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 6px; font-size: 12px; color: var(--muted);">
+          <strong>Note:</strong> Days (Actual) uses Create Date, Actual Start Date, and Actual End Date. Rec-Start = Avg Age Created → Start. Start-Live = Avg Cycle Time (Start → End/Live).
         </div>
       </div>
     </div>
     <div class="grid" style="margin-top:24px">
-      <div class="card">
-        <h3>Project Milestone Timeline (Based on Daily Logs)</h3>
-        <div style="margin-top: 16px; max-height: 500px; overflow-y: auto;">
-          ${d.milestoneDurations.map(project => `
-            <div style="margin-bottom: 20px; padding: 16px; background: #f8fafc; border-radius: 8px; border-left: 4px solid var(--brand);">
-              <div style="font-weight: 700; margin-bottom: 8px; color: var(--brand); font-size: 16px;">${project.name}</div>
-              <div style="font-size: 12px; color: var(--muted); margin-bottom: 12px;">
-                Current: <span class="status-badge status-${project.currentMilestone?.replace(/\s+/g, '-')}">${project.currentMilestone}</span>
-              </div>
-              <div style="display: grid; gap: 8px;">
-                ${project.milestoneDetails.map(milestone => `
-                  <div style="padding: 12px; background: white; border-radius: 6px; border: 1px solid #e2e8f0;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                      <span style="font-weight: 600; color: var(--text);">${milestone.milestone}</span>
-                      <span style="padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; text-transform: uppercase; 
-                        background: ${milestone.status === 'Current' ? '#dbeafe' : '#d1fae5'}; 
-                        color: ${milestone.status === 'Current' ? '#1e40af' : '#065f46'};">
-                        ${milestone.status}
-                      </span>
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-size: 11px; color: var(--muted);">
-                      <div>
-                        <strong>Start:</strong> ${milestone.startDate}
-                      </div>
-                      <div>
-                        <strong>End:</strong> ${milestone.endDate || 'Ongoing'}
-                      </div>
-                      <div>
-                        <strong>Duration:</strong> <span style="color: var(--warning); font-weight: 600;">${milestone.duration} days</span>
-                      </div>
-                    </div>
-                    ${milestone.changedBy ? `
-                      <div style="margin-top: 6px; font-size: 10px; color: var(--muted); border-top: 1px solid #f1f5f9; padding-top: 6px;">
-                        Changed by: ${milestone.changedBy} on ${milestone.changedAt ? milestone.changedAt.slice(0, 10) : 'Unknown'}
-                      </div>
-                    ` : ''}
-                  </div>
-                `).join('')}
-              </div>
+      <div class="card" style="grid-column: 1 / -1;">
+        <div style="display:flex; align-items:flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+          <div>
+            <h3 style="margin-bottom: 6px;">Project Calendar</h3>
+            <div class="muted" style="font-size: 12px;">Plan vs Actual timeline (Gantt-style). X = Month, Y = Project.</div>
+          </div>
+          <div style="display:flex; gap: 12px; align-items:flex-end; flex-wrap: wrap;">
+            <div style="display:flex; flex-direction: column; gap: 6px;">
+              <label style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;">Priority</label>
+              <select id="filter-calendar-priority" style="padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--surface); color: var(--text); cursor: pointer; min-width: 180px;" onchange="updateProjectCalendarPriority()">
+                <option value="" ${selectedCalendarPriority===''?'selected':''}>All</option>
+                <option value="P0" ${selectedCalendarPriority==='P0'?'selected':''}>P0</option>
+                <option value="P1" ${selectedCalendarPriority==='P1'?'selected':''}>P1</option>
+                <option value="P2" ${selectedCalendarPriority==='P2'?'selected':''}>P2</option>
+              </select>
             </div>
-          `).join('')}
+          </div>
         </div>
-      </div>
-      <div class="card">
-        <h3>Department Distribution</h3>
-        <div style="margin-top: 16px;">
-          ${d.byDepartment.map(item => {
-            const deptName = nameById(LOOKUPS.departments, item.departmentId);
-            const deptId = item.departmentId || '';
-            return `
-              <div class="clickable-chart-item" data-filter-type="departmentId" data-filter-value="${deptId}" data-title="Department: ${deptName}" data-initiative-type="Project" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 8px; background: #f8fafc; border-radius: 6px; cursor: pointer;">
-                <span style="font-weight: 500;">${deptName}</span>
-                <span style="font-weight: 600;">${item.c}</span>
-              </div>
-            `;
-          }).join('')}
-        </div>
+        <div id="project-calendar-container" style="margin-top: 16px;"></div>
       </div>
     </div>
   `;
+
+  // Render Project Calendar without refreshing the whole dashboard
+  const projectCalendarState = { priority: String(selectedCalendarPriority || '').toUpperCase().trim() };
+  const renderProjectCalendar = () => {
+    const mount = document.getElementById('project-calendar-container');
+    if (!mount) return;
+
+    const all = Array.isArray(projectsForCalendar) ? projectsForCalendar : [];
+    const prioFilter = String(projectCalendarState.priority || '').toUpperCase().trim();
+    const rows = (prioFilter ? all.filter(p => String(p.priority || '').toUpperCase().trim() === prioFilter) : all)
+      .filter(p => String(p.status || '').toUpperCase().trim() !== 'CANCELLED');
+
+    if (!rows || rows.length === 0) {
+      mount.innerHTML = `<div class="muted" style="padding: 12px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;">No projects found for this filter.</div>`;
+      return;
+    }
+
+    const parseDate = (v) => {
+      if (!v) return null;
+      const d = new Date(String(v));
+      return isNaN(d.getTime()) ? null : d;
+    };
+
+    const today = new Date();
+    const projects = rows
+      .map(p => ({
+        id: p.id,
+        name: String(p.name || 'Untitled'),
+        status: String(p.status || '').toUpperCase().trim(),
+        planStart: parseDate(p.planStartDate),
+        planEnd: parseDate(p.planEndDate),
+        actualStart: parseDate(p.startDate),
+        actualEnd: parseDate(p.endDate),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const allDates = [];
+    projects.forEach(p => {
+      if (p.planStart) allDates.push(p.planStart);
+      if (p.planEnd) allDates.push(p.planEnd);
+      if (p.actualStart) allDates.push(p.actualStart);
+      if (p.actualEnd) allDates.push(p.actualEnd);
+    });
+    const minD = allDates.length ? new Date(Math.min(...allDates.map(d => d.getTime()))) : new Date(today);
+    const maxD = allDates.length ? new Date(Math.max(...allDates.map(d => d.getTime()))) : new Date(today);
+
+    const startMonth = new Date(minD.getFullYear(), minD.getMonth(), 1);
+    const endMonth = new Date(maxD.getFullYear(), maxD.getMonth(), 1);
+    endMonth.setMonth(endMonth.getMonth() + 1);
+
+    const months = [];
+    for (let d = new Date(startMonth); d < endMonth; d.setMonth(d.getMonth() + 1)) {
+      months.push(new Date(d));
+    }
+
+    const statusColors = (status) => {
+      const s = String(status || '').toUpperCase().trim();
+      if (s === 'LIVE') return { fill: '#3b82f6', stroke: '#1d4ed8', label: 'LIVE' };
+      if (s === 'ON TRACK') return { fill: '#10b981', stroke: '#065f46', label: 'ON TRACK' };
+      if (s === 'AT RISK') return { fill: '#f59e0b', stroke: '#b45309', label: 'AT RISK' };
+      if (s === 'DELAYED') return { fill: '#ef4444', stroke: '#991b1b', label: 'DELAYED' };
+      if (s === 'NOT STARTED') return { fill: '#94a3b8', stroke: '#475569', label: 'NOT STARTED' };
+      if (s === 'ON HOLD') return { fill: '#334155', stroke: '#0f172a', label: 'ON HOLD' };
+      return { fill: '#6366f1', stroke: '#4338ca', label: s || 'N/A' };
+    };
+
+    const rowH = 52;     // more room for names (wrap/2 lines)
+    const topPad = 56;   // month header
+    const monthW = 120;  // month column width
+    const rightPad = 16;
+
+    const maxNameLen = Math.max(...projects.map(p => p.name.length), 10);
+    const namesW = Math.max(280, Math.min(620, Math.round(maxNameLen * 7.2 + 56)));
+
+    const timelineW = (months.length * monthW) + rightPad;
+    const height = topPad + (projects.length * rowH) + 16;
+
+    const monthIndex = (d) => (d.getFullYear() * 12 + d.getMonth());
+    const startMonthIdx = monthIndex(months[0]);
+    const daysInMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    const xForDate = (d) => {
+      if (!d) return null;
+      const idx = monthIndex(d) - startMonthIdx;
+      const mStart = new Date(d.getFullYear(), d.getMonth(), 1);
+      const frac = Math.min(0.999, Math.max(0, (d.getTime() - mStart.getTime()) / (daysInMonth(d) * 24 * 60 * 60 * 1000)));
+      return (idx * monthW) + (frac * monthW);
+    };
+
+    const fmt = (d) => (d ? d.toISOString().slice(0, 10) : '-');
+
+    const vLines = months.map((_, i) => {
+      const x = i * monthW;
+      return `<line x1="${x}" y1="${topPad}" x2="${x}" y2="${height}" stroke="#e2e8f0" stroke-width="1" />`;
+    }).join('');
+
+    const hLines = projects.map((_, i) => {
+      const y = topPad + i * rowH;
+      return `<line x1="0" y1="${y}" x2="${timelineW}" y2="${y}" stroke="#f1f5f9" stroke-width="1" />`;
+    }).join('');
+
+    const monthLabels = months.map((m, i) => {
+      const x = i * monthW + (monthW / 2);
+      const label = m.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      return `<text x="${x}" y="28" text-anchor="middle" font-size="12" fill="#475569" font-weight="700">${label}</text>`;
+    }).join('');
+
+    const bars = projects.map((p, i) => {
+      const yRowTop = topPad + i * rowH;
+      const yCenter = yRowTop + (rowH / 2);
+      const planH = 14;
+      const actH = 10;
+
+      const planStartX = xForDate(p.planStart);
+      const planEndX = xForDate(p.planEnd);
+      const actStartX = xForDate(p.actualStart);
+      const actEndX = xForDate(p.actualEnd || (p.actualStart ? today : null));
+      const actIsOngoing = !!(p.actualStart && !p.actualEnd);
+
+      const colors = statusColors(p.status);
+
+      const parts = [];
+      if (planStartX !== null && planEndX !== null) {
+        const x = Math.min(planStartX, planEndX);
+        const w = Math.max(3, Math.abs(planEndX - planStartX));
+        parts.push(
+          `<rect x="${x}" y="${yCenter - planH / 2}" width="${w}" height="${planH}" rx="7" fill="${colors.fill}" stroke="${colors.stroke}" stroke-width="1.5" opacity="0.28"
+            style="cursor: pointer;"
+            onclick="location.hash='#view/${p.id}'">
+            <title>${escapeHtml(p.name)} (${colors.label}) (Plan)\n${fmt(p.planStart)} → ${fmt(p.planEnd)}</title>
+          </rect>`
+        );
+      }
+      if (actStartX !== null && actEndX !== null) {
+        const x = Math.min(actStartX, actEndX);
+        const w = Math.max(3, Math.abs(actEndX - actStartX));
+        parts.push(
+          `<rect x="${x}" y="${yCenter - actH / 2}" width="${w}" height="${actH}" rx="7" fill="${colors.fill}" stroke="${colors.stroke}" stroke-width="1.5" opacity="0.95" ${actIsOngoing ? 'stroke-dasharray="4,3"' : ''}
+            style="cursor: pointer;"
+            onclick="location.hash='#view/${p.id}'">
+            <title>${escapeHtml(p.name)} (${colors.label}) (Actual)\n${fmt(p.actualStart)} → ${actIsOngoing ? fmt(today) + ' (ongoing)' : fmt(p.actualEnd)}</title>
+          </rect>`
+        );
+      }
+      return parts.join('');
+    }).join('');
+
+    const nameRows = projects.map((p, i) => {
+      const y = topPad + i * rowH;
+      const badge = statusColors(p.status);
+      return `
+        <div style="height:${rowH}px; display:flex; align-items:center; gap:10px; padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
+          <span style="width:10px; height:10px; border-radius: 3px; background:${badge.fill}; flex: 0 0 auto;"></span>
+          <div style="flex: 1; min-width: 0; cursor: pointer;" onclick="location.hash='#view/${p.id}'" title="${escapeHtml(p.name)}">
+            <div style="font-weight: 700; color:#0f172a; font-size: 12px; line-height: 1.2; display:-webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+              ${escapeHtml(p.name)}
+            </div>
+            <div style="font-size: 10px; color:#64748b; margin-top: 2px;">${escapeHtml(badge.label)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    mount.innerHTML = `
+      <div style="overflow:auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+        <div style="display:grid; grid-template-columns: ${namesW}px ${timelineW}px; min-width: ${namesW + timelineW}px;">
+          <div style="position: sticky; left: 0; z-index: 2; background: #ffffff; border-right: 1px solid #e2e8f0;">
+            <div style="height:${topPad}px; position: sticky; top: 0; z-index: 3; background: #ffffff; border-bottom: 1px solid #e2e8f0; display:flex; align-items:center; padding: 0 12px; font-weight: 800; color:#334155;">
+              Project
+            </div>
+            ${nameRows}
+          </div>
+          <div>
+            <svg width="${timelineW}" height="${height}" style="display:block; min-width:${timelineW}px;">
+              <rect x="0" y="0" width="${timelineW}" height="${height}" fill="#ffffff" />
+              ${vLines}
+              ${hLines}
+              ${monthLabels}
+              ${bars}
+              <line x1="0" y1="${topPad}" x2="${timelineW}" y2="${topPad}" stroke="#cbd5e1" stroke-width="2"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top: 14px; display:flex; gap: 14px; flex-wrap: wrap; align-items: center; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;">
+        <div style="display:flex; align-items:center; gap: 8px;">
+          <span style="display:inline-block; width: 18px; height: 10px; background:#64748b; border: 1.5px solid #334155; border-radius: 6px; opacity: 0.28;"></span>
+          <span style="font-size: 12px; color:#334155; font-weight: 700;">Plan (lighter)</span>
+        </div>
+        <div style="display:flex; align-items:center; gap: 8px;">
+          <span style="display:inline-block; width: 12px; height: 10px; background:#64748b; border: 1.5px solid #334155; border-radius: 6px;"></span>
+          <span style="font-size: 12px; color:#334155; font-weight: 700;">Actual (solid)</span>
+        </div>
+        <div style="height: 14px; width: 1px; background: #cbd5e1;"></div>
+        <div style="display:flex; align-items:center; gap: 8px;"><span style="display:inline-block; width: 10px; height: 10px; background:#3b82f6; border-radius: 3px;"></span><span style="font-size: 12px; color:#334155; font-weight: 700;">LIVE</span></div>
+        <div style="display:flex; align-items:center; gap: 8px;"><span style="display:inline-block; width: 10px; height: 10px; background:#10b981; border-radius: 3px;"></span><span style="font-size: 12px; color:#334155; font-weight: 700;">ON TRACK</span></div>
+        <div style="display:flex; align-items:center; gap: 8px;"><span style="display:inline-block; width: 10px; height: 10px; background:#f59e0b; border-radius: 3px;"></span><span style="font-size: 12px; color:#334155; font-weight: 700;">AT RISK</span></div>
+        <div style="display:flex; align-items:center; gap: 8px;"><span style="display:inline-block; width: 10px; height: 10px; background:#ef4444; border-radius: 3px;"></span><span style="font-size: 12px; color:#334155; font-weight: 700;">DELAYED</span></div>
+        <div style="display:flex; align-items:center; gap: 8px;"><span style="display:inline-block; width: 10px; height: 10px; background:#94a3b8; border-radius: 3px;"></span><span style="font-size: 12px; color:#334155; font-weight: 700;">NOT STARTED</span></div>
+        <div style="display:flex; align-items:center; gap: 8px;"><span style="display:inline-block; width: 10px; height: 10px; background:#334155; border-radius: 3px;"></span><span style="font-size: 12px; color:#334155; font-weight: 700;">ON HOLD</span></div>
+        <div class="muted" style="font-size: 12px;">Tip: hover a bar to see dates. Actual with dashed border means ongoing (no actual end date).</div>
+      </div>
+    `;
+  };
+
+  window.updateProjectCalendarPriority = () => {
+    projectCalendarState.priority = String(document.getElementById('filter-calendar-priority')?.value || '').toUpperCase().trim();
+    renderProjectCalendar();
+  };
+
+  renderProjectCalendar();
   
   // Add event listeners for clickable cards
   document.querySelectorAll('.clickable-card[data-filter-type]').forEach(card => {
@@ -5136,15 +6273,20 @@ async function renderDashboard() {
     const departmentId = document.getElementById('filter-department')?.value || '';
     const itPmId = document.getElementById('filter-itpm')?.value || '';
     const teamMemberId = document.getElementById('filter-team-member')?.value || '';
-    const params = new URLSearchParams();
-    if (departmentId) params.set('departmentId', departmentId);
-    if (itPmId) params.set('itPmId', itPmId);
-    if (teamMemberId) params.set('teamMemberId', teamMemberId);
+    const params = new URLSearchParams(location.search);
+    if (departmentId) params.set('departmentId', departmentId); else params.delete('departmentId');
+    if (itPmId) params.set('itPmId', itPmId); else params.delete('itPmId');
+    if (teamMemberId) params.set('teamMemberId', teamMemberId); else params.delete('teamMemberId');
+    // Preserve calendar priority filter (calPriority)
     location.search = params.toString();
   };
   
   window.clearDashboardFilters = () => {
-    location.search = '';
+    const params = new URLSearchParams(location.search);
+    params.delete('departmentId');
+    params.delete('itPmId');
+    params.delete('teamMemberId');
+    location.search = params.toString();
   };
 }
 
@@ -5678,6 +6820,7 @@ async function renderAdminUsers() {
                 <option value="">None</option>
                 <option value="IC (Individual Contributor)">IC (Individual Contributor)</option>
                 <option value="Manager">Manager</option>
+                <option value="Management">Management</option>
               </select>
             </div>
             <div class="form-row">
@@ -5835,9 +6978,25 @@ async function renderAdminUsers() {
     
     document.getElementById('user-form').onsubmit = async (e) => {
       e.preventDefault();
-      const fd = new FormData(e.target);
+      const formEl = e.target;
+      const fd = new FormData(formEl);
       const id = fd.get('id');
       const data = Object.fromEntries(fd.entries());
+
+      // Ensure checkboxes are always sent (unchecked checkboxes are omitted by FormData)
+      const getCb = (name, fallback = false) => {
+        const el = formEl.querySelector(`input[name="${name}"]`);
+        if (!el) return fallback;
+        return !!el.checked;
+      };
+      data.active = getCb('active', true);
+      data.isAdmin = getCb('isAdmin', false);
+      data.emailActivated = getCb('emailActivated', true);
+
+      // Normalize empty strings to null for optional fields
+      ['role', 'type', 'departmentId'].forEach(k => {
+        if (data[k] === '') data[k] = null;
+      });
       if (!id) {
         // Create
         try {
@@ -5893,6 +7052,7 @@ async function renderAdminRoles() {
     await ensureLookups();
     const users = await fetchJSON('/api/admin/users');
     const roles = await fetchJSON('/api/admin/roles');
+    const accessRules = await fetchJSON('/api/admin/access-rules');
     
     // Group users by role
     const usersByRole = {};
@@ -5913,41 +7073,173 @@ async function renderAdminRoles() {
       return usersB.length - usersA.length; // Sort by count if not in predefined list
     });
     
+    // Helper to build access rule matrix rows for current business rules
+    const defaultRuleRows = () => {
+      // Start from any existing rules in DB; if none, create our 4 main rows
+      if (Array.isArray(accessRules) && accessRules.length > 0) {
+        return accessRules;
+      }
+      return [
+        // External, non-Management: only CR Dashboard + CR List + CR create/edit
+        {
+          id: 'rule-external-non-mgmt',
+          role: null,
+          type: null,
+          emailDomain: '!*@energi-up.com',
+          canViewProjectDashboard: false,
+          canViewProjectList: false,
+          canCreateProject: false,
+          canEditAnyProject: false,
+          restrictProjectVisibilityToOwnTeamOnly: false,
+          restrictProjectEditToOwnTeamOnly: false,
+          canViewCRDashboard: true,
+          canViewCRList: true,
+          canCreateCR: true,
+          canEditCR: true,
+        },
+        // Internal IC
+        {
+          id: 'rule-internal-ic',
+          role: null,
+          type: 'IC (Individual Contributor)',
+          emailDomain: '@energi-up.com',
+          canViewProjectDashboard: false,
+          canViewProjectList: true,
+          canCreateProject: false,
+          canEditAnyProject: false,
+          restrictProjectVisibilityToOwnTeamOnly: true,
+          restrictProjectEditToOwnTeamOnly: true,
+          canViewCRDashboard: true,
+          canViewCRList: true,
+          canCreateCR: true,
+          canEditCR: true,
+        },
+        // Internal Manager
+        {
+          id: 'rule-internal-manager',
+          role: null,
+          type: 'Manager',
+          emailDomain: '@energi-up.com',
+          canViewProjectDashboard: true,
+          canViewProjectList: true,
+          canCreateProject: false,
+          canEditAnyProject: false,
+          restrictProjectVisibilityToOwnTeamOnly: false,
+          restrictProjectEditToOwnTeamOnly: true,
+          canViewCRDashboard: true,
+          canViewCRList: true,
+          canCreateCR: true,
+          canEditCR: true,
+        },
+        // Management (any domain)
+        {
+          id: 'rule-management',
+          role: null,
+          type: 'Management',
+          emailDomain: null,
+          canViewProjectDashboard: true,
+          canViewProjectList: true,
+          canCreateProject: false,
+          canEditAnyProject: true,
+          restrictProjectVisibilityToOwnTeamOnly: false,
+          restrictProjectEditToOwnTeamOnly: false,
+          canViewCRDashboard: true,
+          canViewCRList: true,
+          canCreateCR: true,
+          canEditCR: true,
+        },
+      ];
+    };
+
+    const ruleRows = defaultRuleRows();
+
     app.innerHTML = `
-      <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-          <h2 style="margin: 0;">User Access Roles Management</h2>
-          <div style="font-size: 14px; color: var(--muted);">
-            Total Users: <strong style="color: var(--text);">${users.length}</strong>
+      <div class="card" style="max-width: 1200px; margin: 0 auto;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; gap: 16px; flex-wrap: wrap;">
+          <div>
+            <h2 style="margin: 0;">User Access Management Roles</h2>
+            <div class="muted" style="font-size: 12px; margin-top: 4px;">
+              Configure which menus and actions are allowed per email domain and user type.
+            </div>
+          </div>
+          <div style="font-size: 13px; color: var(--muted); text-align: right;">
+            <div>Total Users: <strong style="color: var(--text);">${users.length}</strong></div>
+            <div style="font-size: 11px;">Changes affect Project/CR access after next login.</div>
           </div>
         </div>
-        <div class="roles-grid" style="margin-top: 24px;">
-          ${sortedRoles.map(([role, roleUsers]) => `
-            <div class="role-card">
-              <div class="role-card-header">
-                <h3 class="role-title">${escapeHtml(role)}</h3>
-                <span class="role-count">${roleUsers.length}</span>
+        <div class="role-card" style="padding: 16px 16px 12px; border-radius: 12px; border: 1px solid var(--border); background: linear-gradient(135deg, #f9fafb 0%, #ffffff 50%, #f9fafb 100%);">
+          <div class="role-card-header" style="margin-bottom: 8px;">
+            <h3 class="role-title">Menu & Action Access Matrix</h3>
+          </div>
+          <div class="table-wrapper" style="max-height: 520px; overflow: auto; margin-top: 4px;">
+            <table class="compact-table" id="access-rules-table">
+                <thead>
+                  <tr>
+                    <th style="min-width: 160px;">Email Domain</th>
+                    <th style="min-width: 140px;">Type</th>
+                    <th>Project Dashboard</th>
+                    <th>Project List</th>
+                    <th>Project Edit Scope</th>
+                    <th>CR Dashboard</th>
+                    <th>CR List</th>
+                    <th>CR Create/Edit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${ruleRows.map((r, idx) => {
+                    const rowId = r.id || `row-${idx}`;
+                    const projEditLabel = r.canEditAnyProject
+                      ? 'Any Project'
+                      : (r.restrictProjectEditToOwnTeamOnly ? 'Only Own Project Team' : 'No Project Edit');
+                    return `
+                      <tr data-rule-id="${rowId}">
+                        <td>
+                          <input type="text" class="access-input" data-field="emailDomain" value="${escapeHtml(r.emailDomain || '')}" style="width: 100%;" />
+                          <div class="muted" style="font-size: 11px;">e.g. <code>@energi-up.com</code> or <code>!*@energi-up.com</code></div>
+                        </td>
+                        <td>
+                          <input type="text" class="access-input" data-field="type" value="${escapeHtml(r.type || '')}" style="width: 100%;" />
+                        </td>
+                        <td style="text-align: center;">
+                          <input type="checkbox" class="access-checkbox" data-field="canViewProjectDashboard" ${r.canViewProjectDashboard ? 'checked' : ''} />
+                        </td>
+                        <td style="text-align: center;">
+                          <input type="checkbox" class="access-checkbox" data-field="canViewProjectList" ${r.canViewProjectList ? 'checked' : ''} />
+                        </td>
+                        <td>
+                          <select class="access-input" data-field="projectEditMode" style="width: 100%;">
+                            <option value="none" ${(!r.canEditAnyProject && !r.restrictProjectEditToOwnTeamOnly) ? 'selected' : ''}>No Project Edit</option>
+                            <option value="own" ${(!r.canEditAnyProject && r.restrictProjectEditToOwnTeamOnly) ? 'selected' : ''}>Only Own Project Team</option>
+                            <option value="any" ${(r.canEditAnyProject) ? 'selected' : ''}>Any Project</option>
+                          </select>
+                        </td>
+                        <td style="text-align: center;">
+                          <input type="checkbox" class="access-checkbox" data-field="canViewCRDashboard" ${r.canViewCRDashboard ? 'checked' : ''} />
+                        </td>
+                        <td style="text-align: center;">
+                          <input type="checkbox" class="access-checkbox" data-field="canViewCRList" ${r.canViewCRList ? 'checked' : ''} />
+                        </td>
+                        <td style="text-align: center;">
+                          <input type="checkbox" class="access-checkbox" data-field="canCreateCR" ${r.canCreateCR ? 'checked' : ''} />
+                          <input type="checkbox" class="access-checkbox" data-field="canEditCR" ${r.canEditCR ? 'checked' : ''} style="margin-left: 4px;" />
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 12px; flex-wrap: wrap;">
+              <div class="muted" style="font-size: 11px; max-width: 460px;">
+                <strong>Note:</strong> Email domain can be exact (e.g. <code>@energi-up.com</code>) or negated (e.g. <code>!*@energi-up.com</code>).
+                Type should match the user <code>Type</code> field (e.g. <code>IC (Individual Contributor)</code>, <code>Manager</code>, <code>Management</code>).
               </div>
-              <div class="role-users-list">
-                ${roleUsers.length > 0 ? roleUsers.map(user => `
-                  <div class="role-user-item">
-                    <div class="role-user-info">
-                      <div class="role-user-name">${escapeHtml(user.name)}</div>
-                      <div class="role-user-email">${escapeHtml(user.email || 'No email')}</div>
-                    </div>
-                    <select class="role-select" onchange="updateUserRole('${user.id}', this.value)" title="Change role">
-                      ${roles.map(r => `<option value="${escapeHtml(r)}" ${r === role ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('')}
-                      <option value="" ${!role ? 'selected' : ''}>Unassigned</option>
-                    </select>
-                  </div>
-                `).join('') : `
-                  <div class="role-empty-state">
-                    <p style="color: var(--muted); font-size: 14px; text-align: center; padding: 20px;">No users assigned</p>
-                  </div>
-                `}
+              <div style="display: flex; gap: 8px;">
+                <button id="btn-reset-access-rules" class="btn-secondary">Reset to Default</button>
+                <button id="btn-save-access-rules" class="primary">Save Access Rules</button>
               </div>
             </div>
-          `).join('')}
+          </div>
         </div>
       </div>
     `;
@@ -5965,6 +7257,67 @@ async function renderAdminRoles() {
         renderAdminRoles(); // Reload to revert
       }
     };
+
+    // Save access rules handler
+    const btnSaveRules = document.getElementById('btn-save-access-rules');
+    if (btnSaveRules) {
+      btnSaveRules.onclick = async () => {
+        const tbody = document.querySelector('#access-rules-table tbody');
+        if (!tbody) return;
+        const rowsEls = Array.from(tbody.querySelectorAll('tr'));
+        const rulesToSave = rowsEls.map(row => {
+          const id = row.dataset.ruleId || crypto.randomUUID?.() || null;
+          const getInputVal = (field) => {
+            const el = row.querySelector(`.access-input[data-field="${field}"]`);
+            return el ? el.value.trim() : '';
+          };
+          const getCheckboxVal = (field) => {
+            const el = row.querySelector(`.access-checkbox[data-field="${field}"]`);
+            return !!(el && el.checked);
+          };
+          const projectEditModeEl = row.querySelector('.access-input[data-field="projectEditMode"]');
+          const projectEditMode = projectEditModeEl ? projectEditModeEl.value : 'none';
+          const canEditAnyProject = projectEditMode === 'any';
+          const restrictProjectEditToOwnTeamOnly = projectEditMode === 'own';
+
+          return {
+            id,
+            role: getInputVal('role') || null,
+            type: getInputVal('type') || null,
+            emailDomain: getInputVal('emailDomain') || null,
+            canViewProjectDashboard: getCheckboxVal('canViewProjectDashboard'),
+            canViewProjectList: getCheckboxVal('canViewProjectList'),
+            canCreateProject: false,
+            canEditAnyProject,
+            restrictProjectVisibilityToOwnTeamOnly: false, // current business rules only use team restriction for IC
+            restrictProjectEditToOwnTeamOnly,
+            canViewCRDashboard: getCheckboxVal('canViewCRDashboard'),
+            canViewCRList: getCheckboxVal('canViewCRList'),
+            canCreateCR: getCheckboxVal('canCreateCR'),
+            canEditCR: getCheckboxVal('canEditCR'),
+          };
+        });
+
+        try {
+          await fetchJSON('/api/admin/access-rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rules: rulesToSave }),
+          });
+          alert('Access rules saved. Changes will apply on next login.');
+        } catch (e) {
+          alert('Error saving access rules: ' + e.message);
+        }
+      };
+    }
+
+    // Reset access rules to default
+    const btnResetRules = document.getElementById('btn-reset-access-rules');
+    if (btnResetRules) {
+      btnResetRules.onclick = () => {
+        renderAdminRoles();
+      };
+    }
   } catch (error) {
     console.error('Admin roles error:', error);
     app.innerHTML = `<div class="error">Error loading roles: ${error.message}</div>`;
@@ -7454,7 +8807,7 @@ function getTimeAgo(date) {
   return `${weeks}w ago`;
 }
 
-function updateNavAuth() {
+async function updateNavAuth() {
   const navAuth = document.getElementById('nav-auth');
   const navProfileMenu = document.getElementById('nav-profile-menu');
   const navNotifications = document.getElementById('nav-notifications');
@@ -7464,6 +8817,9 @@ function updateNavAuth() {
   
   const user = currentUser;
   if (user) {
+    // Compute fine-grained access rules (based on email domain + type)
+    const access = await getUserAccess();
+
     // Show profile menu and notifications, hide login link
     if (navProfileMenu) {
       navProfileMenu.classList.remove('hidden');
@@ -7478,8 +8834,43 @@ function updateNavAuth() {
     if (navAuth) {
       navAuth.classList.add('hidden');
     }
-    // Show protected links when logged in
-    protectedLinks.forEach(link => link.classList.remove('hidden'));
+
+    // Start with all protected links hidden, then enable based on access
+    protectedLinks.forEach(link => link.classList.add('hidden'));
+
+    const navProjectDashboard = document.getElementById('nav-dashboard');
+    const navProjectList = document.getElementById('nav-list');
+    const navCrDashboard = document.getElementById('nav-crdashboard');
+    const navCrList = document.getElementById('nav-crlist');
+    const navUserDashboard = document.getElementById('nav-user-dashboard');
+
+    // User Dashboard is always visible for authenticated users
+    if (navUserDashboard) {
+      navUserDashboard.classList.remove('hidden');
+    }
+
+    // CR Dashboard + CR List per access rules (default true in access)
+    if (navCrDashboard && access?.canViewCRDashboard) {
+      navCrDashboard.classList.remove('hidden');
+    }
+    if (navCrList && access?.canViewCRList) {
+      navCrList.classList.remove('hidden');
+    }
+
+    // Project Dashboard visibility
+    if (navProjectDashboard) {
+      if (access && access.canViewProjectDashboard) {
+        navProjectDashboard.classList.remove('hidden');
+      }
+    }
+
+    // Project List visibility
+    if (navProjectList) {
+      if (access && access.canViewProjectList) {
+        navProjectList.classList.remove('hidden');
+      }
+    }
+
     // Show admin links if user is admin
     if (user.isAdmin) {
       adminLinks.forEach(link => link.classList.remove('hidden'));
