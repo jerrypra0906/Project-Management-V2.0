@@ -68,6 +68,8 @@ async function initializeSchema() {
         "milestone" TEXT,
         "startDate" TEXT,
         "endDate" TEXT,
+        "planStartDate" TEXT,
+        "planEndDate" TEXT,
         "remark" TEXT,
         "documentationLink" TEXT,
         "createdAt" TEXT,
@@ -87,6 +89,8 @@ async function initializeSchema() {
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "milestone" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "startDate" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "endDate" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "planStartDate" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "planEndDate" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "remark" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "documentationLink" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
@@ -254,6 +258,35 @@ async function initializeSchema() {
       ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "commentId" TEXT;
       ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "read" BOOLEAN DEFAULT FALSE;
       ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      CREATE TABLE IF NOT EXISTS "accessRules" (
+        "id" TEXT PRIMARY KEY,
+        "role" TEXT,
+        "type" TEXT,
+        "emailDomain" TEXT,
+        "canViewProjectDashboard" BOOLEAN,
+        "canViewProjectList" BOOLEAN,
+        "canCreateProject" BOOLEAN,
+        "canEditAnyProject" BOOLEAN,
+        "restrictProjectVisibilityToOwnTeamOnly" BOOLEAN,
+        "restrictProjectEditToOwnTeamOnly" BOOLEAN,
+        "canViewCRDashboard" BOOLEAN,
+        "canViewCRList" BOOLEAN,
+        "canCreateCR" BOOLEAN,
+        "canEditCR" BOOLEAN
+      );
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "role" TEXT;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "type" TEXT;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "emailDomain" TEXT;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewProjectDashboard" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewProjectList" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canCreateProject" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canEditAnyProject" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "restrictProjectVisibilityToOwnTeamOnly" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "restrictProjectEditToOwnTeamOnly" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewCRDashboard" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewCRList" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canCreateCR" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canEditCR" BOOLEAN;
     `;
     await client.query(ddl);
   } finally {
@@ -279,6 +312,7 @@ async function read() {
       'tasks',
       'documents',
       'notifications',
+      'accessRules',
     ];
     for (const table of tables) {
       const res = await client.query(`SELECT * FROM "${table}"`);
@@ -324,6 +358,8 @@ async function read() {
           milestone: row.milestone || null,
           startDate: row.startDate || row.startdate || null,
           endDate: row.endDate || row.enddate || null,
+          planStartDate: row.planStartDate || row.planstartdate || null,
+          planEndDate: row.planEndDate || row.planenddate || null,
           remark: row.remark || null,
           documentationLink: row.documentationLink || row.documentationlink || null,
           createdAt: row.createdAt || row.createdat || null,
@@ -342,6 +378,8 @@ async function read() {
           read: row.read !== undefined ? !!row.read : false,
           createdAt: row.createdAt || row.createdat
         }));
+      } else if (table === 'accessRules') {
+        data[table] = res.rows;
       } else {
         data[table] = res.rows;
       }
@@ -434,11 +472,11 @@ async function write(data) {
     const insertInit = `INSERT INTO "initiatives"(
       "id", "type", "name", "ticket", "description", "businessImpact", "priority",
       "businessOwnerId", "businessUserIds", "departmentId", "itPicId", "itPicIds", "itPmId", "itManagerIds",
-      "status", "milestone", "startDate", "endDate", "remark", "documentationLink", "createdAt", "updatedAt"
+      "status", "milestone", "startDate", "endDate", "planStartDate", "planEndDate", "remark", "documentationLink", "createdAt", "updatedAt"
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,
       $8,$9,$10,$11,$12,$13,$14,
-      $15,$16,$17,$18,$19,$20,$21,$22
+      $15,$16,$17,$18,$19,$20,$21,$22,$23,$24
     )`;
     for (const i of data.initiatives || []) {
       // Convert arrays to comma-separated strings for storage
@@ -465,6 +503,8 @@ async function write(data) {
         i.milestone || null,
         i.startDate || null,
         i.endDate || null,
+        i.planStartDate || null,
+        i.planEndDate || null,
         i.remark || null,
         i.documentationLink || null,
         i.createdAt || null,

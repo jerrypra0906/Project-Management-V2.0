@@ -692,30 +692,308 @@ docker exec project_management_frontend nginx -t
 
 #### Step 3: Update Port Mapping (Optional - For Standard HTTP Port 80)
 
-If you want to access the site without specifying a port (`pm.energi-up.com` instead of `pm.energi-up.com:1817`), update the port mapping in `docker-compose.frontend.yml`:
+If you want to access the site without specifying a port (`pm.energi-up.com` instead of `pm.energi-up.com:1817`), you need to update the port mapping to use the standard HTTP port 80.
+
+**Before making changes, check if port 80 is available:**
+
+```bash
+# On frontend server (172.28.80.50)
+# Check if port 80 is already in use
+sudo netstat -tulpn | grep :80
+# or
+sudo ss -tlnp | grep :80
+# or
+sudo lsof -i :80
+
+# If port 80 is in use, you'll see output like:
+# tcp  0  0 0.0.0.0:80  0.0.0.0:*  LISTEN  1234/nginx
+```
+
+**If port 80 is free, proceed with the update:**
+
+**Step 3.1: Edit docker-compose.frontend.yml**
+
+```bash
+cd /opt/Project-Management-V2.0
+
+# Edit the docker-compose.frontend.yml file
+nano docker-compose.frontend.yml
+# or use vi/vim
+vi docker-compose.frontend.yml
+```
+
+**Update the ports section:**
 
 ```yaml
 services:
   frontend:
-    # ... other config ...
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: project_management_frontend
     ports:
       - "80:80"   # Changed from "1817:80" to use standard HTTP port
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
 ```
 
-**Note:** If port 80 is already in use (e.g., by another service), you can:
-- Use port 80 on the domain (standard HTTP)
-- Keep port 1817 and access via `pm.energi-up.com:1817`
-- Set up a reverse proxy on port 80 that forwards to 1817
+**Save the file** (in nano: `Ctrl+O`, then `Enter`, then `Ctrl+X`)
 
-**After changing ports, restart frontend:**
+**Step 3.2: Stop the existing frontend container**
 
 ```bash
+# Stop and remove the existing container
 docker compose -f docker-compose.frontend.yml down
+
+# Verify container is stopped
+docker ps | grep frontend
+# Should return nothing (container stopped)
+```
+
+**Step 3.3: Update firewall rules**
+
+```bash
+# Remove old port 1817 rule (if it exists)
+sudo ufw delete allow 1817/tcp
+
+# Add new port 80 rule
+sudo ufw allow 80/tcp
+
+# Reload firewall
+sudo ufw reload
+
+# Verify firewall rules
+sudo ufw status | grep -E "80|1817"
+# Should show: 80/tcp ALLOW
+```
+
+**Step 3.4: Update AliCloud Security Group**
+
+**Important:** You must also update the AliCloud Security Group to allow port 80:
+
+1. **Go to AliCloud Console:**
+   - Navigate to: **ECS** → **Instances** → Select your frontend instance (172.28.80.50)
+   - Click: **Security Groups** tab → Click on the security group name
+
+2. **Update Inbound Rules:**
+   - Go to: **Inbound Rules** (入站规则)
+   - **Add new rule** (if port 80 rule doesn't exist):
+     - **Authorization Policy**: Allow
+     - **Priority**: 1 (highest priority)
+     - **Protocol Type**: TCP
+     - **Port Range**: `80/80`
+     - **Authorization Object**: `0.0.0.0/0` (allows from anywhere, or specify IP ranges)
+     - **Description**: "Frontend HTTP Access - Port 80"
+   - **Optional:** Remove or disable the old port 1817 rule (if you're no longer using it)
+   - **Click**: Save
+
+3. **Update NAT Gateway DNAT Entry (if using NAT Gateway):**
+   - Go to: **NAT Gateway** → Select your NAT Gateway
+   - Click: **DNAT Entry List** (DNAT条目列表)
+   - **Find the entry for port 1817** (if exists)
+   - **Either:**
+     - **Option A:** Update the existing entry:
+       - Click **Edit** (编辑)
+       - Change **Public Port** from `1817` to `80`
+       - Change **Private Port** from `1817` to `80`
+       - Click **OK**
+     - **Option B:** Create a new entry for port 80:
+       - Click **Create DNAT Entry** (创建DNAT条目)
+       - **Entry Type**: Port (端口)
+       - **Public IP Address**: `147.139.176.70`
+       - **Public Port**: `80`
+       - **Private IP Address**: `172.28.80.50`
+       - **Private Port**: `80`
+       - **Protocol**: TCP
+       - **Entry Name**: `frontend-http-80` (optional)
+       - Click **OK**
+   - **Wait 1-2 minutes** for DNAT entry to take effect
+
+**Step 3.5: Start frontend with new port mapping**
+
+```bash
+cd /opt/Project-Management-V2.0
+
+# Start frontend container with new port 80
 docker compose -f docker-compose.frontend.yml up -d frontend
 
-# Update firewall to allow port 80
-sudo ufw allow 80/tcp
+# Verify container is running
+docker ps | grep frontend
+# Should show: project_management_frontend ... 0.0.0.0:80->80/tcp
+
+# Check container logs for any errors
+docker logs project_management_frontend --tail 50
 ```
+
+**Step 3.6: Verify port 80 is listening**
+
+```bash
+# Check if port 80 is listening
+sudo netstat -tulpn | grep :80
+# Should show: tcp  0  0 0.0.0.0:80  0.0.0.0:*  LISTEN  <PID>/docker-proxy
+
+# Or using ss
+sudo ss -tlnp | grep :80
+
+# Test local access
+curl http://localhost/health
+# Should return: healthy
+
+# Test via private IP
+curl http://172.28.80.50/health
+# Should return: healthy
+```
+
+**Step 3.7: Test domain access**
+
+```bash
+# Test domain resolution
+dig pm.energi-up.com +short
+# Should return: 147.139.176.70
+
+# Test HTTP connection via domain
+curl -v http://pm.energi-up.com/health
+# Should return: healthy
+
+# Test from browser
+# Open: http://pm.energi-up.com
+# Should load the application
+```
+
+**Troubleshooting Port 80 Issues:**
+
+**Issue 1: Port 80 already in use**
+
+If port 80 is already in use by another service:
+
+```bash
+# Find what's using port 80
+sudo lsof -i :80
+# or
+sudo fuser 80/tcp
+
+# Common services using port 80:
+# - Apache (httpd)
+# - Another nginx instance
+# - Other web servers
+
+# Options:
+# A. Stop the conflicting service (if not needed)
+sudo systemctl stop apache2  # Example for Apache
+sudo systemctl stop nginx     # Example for nginx
+
+# B. Keep using port 1817 and access via pm.energi-up.com:1817
+# (No changes needed, skip Step 3)
+
+# C. Use a reverse proxy on port 80 that forwards to 1817
+# (See alternative solution below)
+```
+
+**Issue 2: Container fails to start with port 80**
+
+```bash
+# Check error message
+docker logs project_management_frontend --tail 50
+
+# Common errors:
+# - "bind: address already in use" → Port 80 is in use
+# - "permission denied" → Need to run with sudo or user not in docker group
+
+# Fix permission issue:
+sudo usermod -aG docker $USER
+# Log out and log back in, then try again
+```
+
+**Issue 3: Can't access via domain but IP works**
+
+```bash
+# Check DNS resolution
+nslookup pm.energi-up.com
+dig pm.energi-up.com
+
+# If DNS doesn't resolve:
+# - Wait for DNS propagation (can take up to 48 hours)
+# - Check DNS provider settings
+# - Verify A record is correct
+
+# If DNS resolves but site doesn't load:
+# - Check Security Group allows port 80
+# - Check NAT Gateway DNAT entry for port 80
+# - Check firewall allows port 80
+```
+
+**Alternative Solution: Keep Port 1817, Use Reverse Proxy on Port 80**
+
+If you can't use port 80 directly, you can set up a reverse proxy:
+
+**Option A: Host-level nginx reverse proxy**
+
+```bash
+# Install nginx on the host (if not already installed)
+sudo apt update
+sudo apt install -y nginx
+
+# Create reverse proxy config
+sudo nano /etc/nginx/sites-available/pm.energi-up.com
+```
+
+Add this configuration:
+
+```nginx
+server {
+    listen 80;
+    server_name pm.energi-up.com;
+
+    location / {
+        proxy_pass http://localhost:1817;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+```bash
+# Enable the site
+sudo ln -s /etc/nginx/sites-available/pm.energi-up.com /etc/nginx/sites-enabled/
+
+# Test nginx configuration
+sudo nginx -t
+
+# Reload nginx
+sudo systemctl reload nginx
+
+# Now pm.energi-up.com (port 80) will forward to localhost:1817
+```
+
+**Option B: Keep using port 1817**
+
+If you prefer to keep port 1817, you can access the site via:
+- `http://pm.energi-up.com:1817`
+
+No changes needed to docker-compose.frontend.yml, just ensure:
+- Security Group allows port 1817
+- NAT Gateway DNAT entry exists for port 1817
+- Firewall allows port 1817
+
+**Verification Checklist:**
+
+After completing Step 3, verify:
+
+- [ ] Port 80 is listening: `sudo netstat -tulpn | grep :80`
+- [ ] Container is running: `docker ps | grep frontend`
+- [ ] Local health check works: `curl http://localhost/health`
+- [ ] Private IP access works: `curl http://172.28.80.50/health`
+- [ ] Domain resolves: `dig pm.energi-up.com +short`
+- [ ] Domain access works: `curl http://pm.energi-up.com/health`
+- [ ] Security Group allows port 80
+- [ ] NAT Gateway DNAT entry exists for port 80 (if using NAT Gateway)
+- [ ] Firewall allows port 80: `sudo ufw status | grep 80`
+- [ ] Browser access works: Open `http://pm.energi-up.com` in browser
 
 #### Step 4: Update Backend Environment Variable
 
@@ -788,33 +1066,1071 @@ sudo certbot certonly --standalone -d pm.energi-up.com
 
 **Create SSL-enabled nginx configuration:**
 
-Create `frontend/nginx-ssl.conf`:
+This step creates a new nginx configuration file that enables HTTPS with SSL/TLS certificates.
 
-```nginx
+**Step 6.1: Navigate to project directory**
+
+```bash
+# On frontend server (172.28.80.50)
+cd /opt/Project-Management-V2.0
+
+# Verify you're in the correct directory
+pwd
+# Should show: /opt/Project-Management-V2.0
+
+# List frontend directory to see existing files
+ls -la frontend/
+# Should see: index.html, main.js, styles.css, nginx.conf, Dockerfile
+```
+
+**Step 6.2: Create the SSL nginx configuration file**
+
+```bash
+# Create the SSL nginx configuration file
+nano frontend/nginx-ssl.conf
+# or use vi/vim
+vi frontend/nginx-ssl.conf
+```
+
+**Step 6.3: Add the SSL configuration**
+
+**IMPORTANT:** Copy ONLY the nginx configuration content below. Do NOT copy the markdown code block markers (```nginx and ```). The file should contain only nginx directives, not markdown syntax.
+
+Copy and paste the following configuration into the file (start from `# HTTP Server Block` and end at `resolver_timeout 5s;`):
+
+```
+# HTTP Server Block - Redirects all HTTP traffic to HTTPS
 server {
     listen 80;
     server_name pm.energi-up.com;
     
-    # Redirect HTTP to HTTPS
+    # Redirect all HTTP requests to HTTPS
+    # 301 = Permanent redirect (SEO-friendly)
     return 301 https://$server_name$request_uri;
 }
 
+# HTTPS Server Block - Main SSL-enabled server
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name pm.energi-up.com localhost;
     root /usr/share/nginx/html;
     index index.html;
 
-    # SSL certificates
+    # SSL Certificate Paths
+    # These paths are inside the Docker container, mounted from host
     ssl_certificate /etc/letsencrypt/live/pm.energi-up.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/pm.energi-up.com/privkey.pem;
 
-    # SSL configuration
+    # SSL Protocol Configuration
+    # Only allow modern, secure TLS versions
+    ssl_protocols TLSv1.2 TLSv1.3;
+    
+    # SSL Cipher Suites
+    # HIGH = High security ciphers only
+    # !aNULL = Exclude anonymous ciphers (insecure)
+    # !MD5 = Exclude MD5 ciphers (insecure)
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    
+    # Prefer server cipher order over client preference
+    ssl_prefer_server_ciphers on;
+    
+    # SSL Session Cache
+    # Cache SSL sessions to improve performance
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    
+    # OCSP Stapling (Optional but recommended)
+    # Improves SSL handshake performance
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    ssl_trusted_certificate /etc/letsencrypt/live/pm.energi-up.com/chain.pem;
+    resolver 8.8.8.8 8.8.4.4 valid=300s;
+    resolver_timeout 5s;
+```
+
+**What to copy:**
+- ✅ Start from: `# HTTP Server Block`
+- ✅ End at: `resolver_timeout 5s;`
+- ❌ Do NOT include: ` ```nginx` at the beginning
+- ❌ Do NOT include: ` ``` ` at the end
+
+**Quick verification after pasting:**
+```bash
+# Check first line of file (should NOT start with ```)
+head -1 frontend/nginx-ssl.conf
+# Should show: # HTTP Server Block (NOT ```nginx)
+
+# Check last line of file (should NOT end with ```)
+tail -1 frontend/nginx-ssl.conf
+# Should show: resolver_timeout 5s; (NOT ```)
+```
+
+**Step 6.4: Complete the configuration file**
+
+Continue adding the rest of the configuration:
+
+```nginx
+    # Security Headers
+    # HSTS: Force browsers to use HTTPS for 1 year
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    # Prevent clickjacking attacks
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    
+    # Prevent MIME type sniffing
+    add_header X-Content-Type-Options "nosniff" always;
+    
+    # Enable XSS protection
+    add_header X-XSS-Protection "1; mode=block" always;
+    
+    # Content Security Policy (Optional - adjust as needed)
+    # add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" always;
+
+    # Gzip Compression
+    # Compress text files to reduce bandwidth
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json application/javascript;
+
+    # Cache Control for Static Assets
+    # Cache images, CSS, JS files for 1 year
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # No Cache for HTML Files
+    # Always serve fresh HTML to ensure updates are visible
+    location ~* \.html$ {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+    }
+
+    # Proxy API Requests to Backend
+    # All /api/* requests are forwarded to the backend server
+    location /api/ {
+        # Backend server private IP (faster than public IP)
+        proxy_pass http://172.28.80.51:3000;
+        
+        # HTTP/1.1 for better proxy support
+        proxy_http_version 1.1;
+        
+        # WebSocket support headers
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        
+        # Standard proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;  # Important: tells backend we're using HTTPS
+        
+        # Bypass cache for WebSocket upgrades
+        proxy_cache_bypass $http_upgrade;
+        
+        # Timeout settings (increase for long-running requests)
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Proxy /docs Requests to Backend
+    # Static assets like logos served from backend
+    location /docs/ {
+        proxy_pass http://172.28.80.51:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    # Health Check Endpoint
+    # Used for monitoring and load balancer health checks
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+
+    # SPA Routing - Serve index.html for all non-API routes
+    # This enables client-side routing (hash-based routing)
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+    }
+}
+```
+
+**Step 6.5: Save the file**
+
+```bash
+# In nano: Press Ctrl+O to save, then Enter, then Ctrl+X to exit
+# In vi/vim: Press Esc, then type :wq and press Enter
+```
+
+**Step 6.6: Verify file was created correctly**
+
+```bash
+# Check file exists
+ls -la frontend/nginx-ssl.conf
+# Should show the file with permissions and size
+
+# Verify file content (first 20 lines)
+head -20 frontend/nginx-ssl.conf
+# Should show the HTTP redirect server block
+# IMPORTANT: Should NOT start with ```nginx or ```
+# First line should be: # HTTP Server Block
+
+# Check file syntax (basic check)
+grep -E "server_name|ssl_certificate|proxy_pass" frontend/nginx-ssl.conf
+# Should show key configuration lines
+
+# Count lines to ensure full file was created
+wc -l frontend/nginx-ssl.conf
+# Should show around 150+ lines
+```
+
+**Step 6.7: Test nginx configuration syntax**
+
+Before using this configuration, test it to ensure there are no syntax errors. There are several methods to test the configuration:
+
+**Method 1: Test with Docker (Recommended - Works even without certificates)**
+
+```bash
+# Navigate to project directory
+cd /opt/Project-Management-V2.0
+
+# Get absolute path (more reliable than $(pwd))
+ABSOLUTE_PATH=$(pwd)
+echo "Testing config from: $ABSOLUTE_PATH"
+
+# Test the SSL nginx configuration using Docker
+# NOTE: You will see certificate errors - this is EXPECTED before running certbot
+# The important part is checking if "syntax is ok" appears in the output
+docker run --rm \
+  -v "$ABSOLUTE_PATH/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t 2>&1 | tee /tmp/nginx-test-output.log
+
+# Check the output
+cat /tmp/nginx-test-output.log
+
+# Look for these key phrases:
+# ✅ "syntax is ok" = Configuration syntax is correct!
+# ⚠️  "cannot load certificate" = Expected error (certificates don't exist yet)
+# ⚠️  "http2 directive is deprecated" = Warning (can be ignored or fixed)
+```
+
+**Understanding the Test Output:**
+
+When you run the test, you may see:
+
+1. **Warning about http2 (non-critical):**
+   ```
+   [warn] the "listen ... http2" directive is deprecated, use the "http2" directive instead
+   ```
+   - **Fix:** Update config to use `http2 on;` instead of `listen 443 ssl http2;`
+   - **Status:** This is just a warning, not an error
+
+2. **Error about certificates (EXPECTED - This is NORMAL!):**
+   ```
+   [emerg] cannot load certificate ... No such file or directory
+   nginx: configuration file ... test failed
+   ```
+   - **Why:** Certificates don't exist yet (you'll create them with certbot in Step 6.1)
+   - **Status:** This is EXPECTED and NORMAL before running certbot
+   - **Important:** Even though the test "fails", your configuration syntax is likely correct
+   - **Action:** Use Solution 2 below to test syntax without certificate errors
+
+3. **Success message (only appears if certificates exist):**
+   ```
+   nginx: configuration file ... syntax is ok
+   nginx: configuration file ... test is successful
+   ```
+   - **Status:** ✅ Your configuration syntax is correct!
+   - **Note:** This will only appear after certificates are created OR when using dummy certificates
+
+**Solution: Test Syntax with Dummy Certificates**
+
+Since nginx requires certificates to exist for the test to pass, create temporary dummy certificates:
+
+```bash
+cd /opt/Project-Management-V2.0
+
+# Create dummy certificate directory structure
+mkdir -p /tmp/letsencrypt/live/pm.energi-up.com
+
+# Create dummy certificate files (nginx just checks they exist, not their content)
+echo "-----BEGIN CERTIFICATE-----
+DUMMY
+-----END CERTIFICATE-----" > /tmp/letsencrypt/live/pm.energi-up.com/fullchain.pem
+
+echo "-----BEGIN PRIVATE KEY-----
+DUMMY
+-----END PRIVATE KEY-----" > /tmp/letsencrypt/live/pm.energi-up.com/privkey.pem
+
+echo "-----BEGIN CERTIFICATE-----
+DUMMY
+-----END CERTIFICATE-----" > /tmp/letsencrypt/live/pm.energi-up.com/chain.pem
+
+# Test with dummy certificates mounted
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  -v "/tmp/letsencrypt:/etc/letsencrypt:ro" \
+  nginx:alpine \
+  nginx -t
+
+# Expected output:
+# nginx: the configuration file /etc/nginx/conf.d/default.conf syntax is ok
+# nginx: configuration file /etc/nginx/conf.d/default.conf test is successful
+
+# Clean up dummy certificates
+rm -rf /tmp/letsencrypt
+```
+
+**If you see "syntax is ok" and "test is successful":**
+- ✅ Your nginx configuration syntax is **100% correct**!
+- ✅ You can proceed with the SSL setup
+- ✅ The certificate error will be resolved after running certbot (Step 6.1)
+
+**If you still see errors after using dummy certificates:**
+- Check the error message for actual syntax issues
+- Verify all braces `{` and `}` are matched
+- Check for missing semicolons `;`
+- Review the configuration file for typos
+
+**If Method 1 fails, try with explicit path:**
+
+```bash
+# Use explicit absolute path
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t
+```
+
+**Method 2: Test inside existing frontend container (if running)**
+
+**Important:** This method only works if the frontend container is currently running.
+
+**Step 1: Check if container is running**
+
+```bash
+# Check container status
+docker ps | grep project_management_frontend
+
+# Or check all containers (including stopped)
+docker ps -a | grep project_management_frontend
+```
+
+**If container is running**, proceed with testing:
+
+```bash
+# Copy config to container temporarily
+docker cp frontend/nginx-ssl.conf project_management_frontend:/tmp/nginx-ssl.conf
+
+# Test inside container
+docker exec project_management_frontend nginx -t -c /tmp/nginx-ssl.conf
+
+# Clean up
+docker exec project_management_frontend rm /tmp/nginx-ssl.conf
+```
+
+**If container is NOT running**, you have two options:
+
+**Option A: Start the container first (if you want to test inside it)**
+
+```bash
+# Start the frontend container
+cd /opt/Project-Management-V2.0
+docker compose -f docker-compose.frontend.yml up -d frontend
+
+# Wait a few seconds for container to start
+sleep 5
+
+# Verify container is running
+docker ps | grep frontend
+
+# Now test inside container
+docker cp frontend/nginx-ssl.conf project_management_frontend:/tmp/nginx-ssl.conf
+docker exec project_management_frontend nginx -t -c /tmp/nginx-ssl.conf
+docker exec project_management_frontend rm /tmp/nginx-ssl.conf
+```
+
+**Option B: Use Method 1 instead (Recommended - doesn't require container to be running)**
+
+```bash
+# This is the easiest method and doesn't require the container to be running
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t
+```
+
+**Why Method 1 is better:**
+- Doesn't require the frontend container to be running
+- Uses a fresh nginx container, so no conflicts
+- Automatically cleans up after testing
+- More reliable for syntax testing
+
+**Method 3: Test with nginx installed on host (if available)**
+
+```bash
+# If nginx is installed on the host system
+sudo nginx -t -c /opt/Project-Management-V2.0/frontend/nginx-ssl.conf
+
+# Or test as a configuration snippet (requires full nginx.conf)
+# This is more complex and usually not needed
+```
+
+**Expected output if syntax is correct:**
+```
+nginx: the configuration file /etc/nginx/conf.d/default.conf syntax is ok
+nginx: configuration file /etc/nginx/conf.d/default.conf test is successful
+```
+
+**Common Error Messages and Solutions:**
+
+**Error 1: "No such file or directory"**
+
+```bash
+# Problem: File doesn't exist or path is wrong
+# Solution: Verify file exists and path is correct
+
+# Check if file exists
+ls -la /opt/Project-Management-V2.0/frontend/nginx-ssl.conf
+
+# If file doesn't exist, create it (see Step 6.2-6.4)
+# If path is wrong, use absolute path:
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t
+```
+
+**Error 2: "Permission denied"**
+
+```bash
+# Problem: File permissions issue
+# Solution: Fix file permissions
+
+# Check current permissions
+ls -la frontend/nginx-ssl.conf
+
+# Make file readable
+chmod 644 frontend/nginx-ssl.conf
+
+# Verify permissions
+ls -la frontend/nginx-ssl.conf
+# Should show: -rw-r--r--
+```
+
+**Error 3: "SSL certificate file not found" or "cannot load certificate"**
+
+```bash
+# Problem: Nginx tries to verify SSL certificates during test
+# Error: "cannot load certificate ... No such file or directory"
+# This is EXPECTED if certificates don't exist yet (before running certbot)
+
+# Solution 1: Test syntax only (ignore certificate errors)
+# Create a temporary config without SSL directives for syntax testing
+
+cd /opt/Project-Management-V2.0
+
+# Create a syntax-only test config (temporarily)
+cat > /tmp/nginx-ssl-syntax-test.conf << 'EOF'
+# HTTP Server Block - Redirects all HTTP traffic to HTTPS
+server {
+    listen 80;
+    server_name pm.energi-up.com;
+    return 301 https://$server_name$request_uri;
+}
+
+# HTTPS Server Block - SSL directives commented out for syntax test
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name pm.energi-up.com localhost;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # SSL directives commented out for syntax testing
+    # Uncomment after obtaining certificates
+    # ssl_certificate /etc/letsencrypt/live/pm.energi-up.com/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/pm.energi-up.com/privkey.pem;
+    # ssl_protocols TLSv1.2 TLSv1.3;
+    # ssl_ciphers HIGH:!aNULL:!MD5;
+    # ssl_prefer_server_ciphers on;
+    # ssl_session_cache shared:SSL:10m;
+    # ssl_session_timeout 10m;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json application/javascript;
+
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location ~* \.html$ {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+    }
+
+    location /api/ {
+        proxy_pass http://172.28.80.51:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /docs/ {
+        proxy_pass http://172.28.80.51:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+    }
+}
+EOF
+
+# Test syntax with commented SSL directives
+docker run --rm \
+  -v "/tmp/nginx-ssl-syntax-test.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t
+
+# Clean up
+rm /tmp/nginx-ssl-syntax-test.conf
+```
+
+**Solution 2: Create dummy certificates for testing**
+
+```bash
+# Create dummy certificate files temporarily
+mkdir -p /tmp/letsencrypt/live/pm.energi-up.com
+
+# Create dummy certificate files (nginx just checks they exist, not their content)
+echo "dummy cert" > /tmp/letsencrypt/live/pm.energi-up.com/fullchain.pem
+echo "dummy key" > /tmp/letsencrypt/live/pm.energi-up.com/privkey.pem
+echo "dummy chain" > /tmp/letsencrypt/live/pm.energi-up.com/chain.pem
+
+# Test with dummy certificates mounted
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  -v "/tmp/letsencrypt:/etc/letsencrypt:ro" \
+  nginx:alpine \
+  nginx -t
+
+# Clean up dummy files
+rm -rf /tmp/letsencrypt
+```
+
+**Solution 3: Ignore certificate errors (if syntax is OK)**
+
+```bash
+# If you see "cannot load certificate" but also see "syntax is ok", 
+# the configuration syntax is actually correct!
+# The certificate error is expected before running certbot.
+
+# Look for this in the output:
+# "nginx: configuration file ... syntax is ok"
+# If you see this, your syntax is correct!
+
+# The certificate error will be resolved after you:
+# 1. Run certbot to obtain certificates (Step 6.1)
+# 2. Mount the certificates in docker-compose (Step 6.9)
+```
+
+**Important Notes:**
+- **Certificate errors are EXPECTED** before running `certbot`
+- **If you see "syntax is ok"**, your configuration syntax is correct
+- **The certificate error will be resolved** after obtaining real certificates
+- **You can proceed** with the SSL setup even if you see certificate errors during testing
+
+**Error 4: "unknown directive" - Markdown syntax in file (```nginx)**
+
+```bash
+# Problem: File contains markdown code block markers (```nginx or ```)
+# Error: "unknown directive "```nginx" in /etc/nginx/conf.d/default.conf:3"
+# This happens when you copy the markdown code block instead of just the nginx config
+
+# Solution: Remove markdown syntax from the file
+
+# Check if file contains markdown syntax
+head -5 frontend/nginx-ssl.conf
+# If you see "```nginx" or "```", that's the problem
+
+# Fix: Remove markdown code block markers
+cd /opt/Project-Management-V2.0
+
+# Method 1: Use sed to remove markdown markers
+sed -i '/^```/d' frontend/nginx-ssl.conf
+sed -i '/^```nginx/d' frontend/nginx-ssl.conf
+
+# Method 2: Manual fix with editor
+nano frontend/nginx-ssl.conf
+# Remove any lines that start with ``` or ```nginx
+# The file should start with: # HTTP Server Block
+# The file should end with: }
+
+# Method 3: Recreate file correctly (if too many issues)
+# Backup the file first
+cp frontend/nginx-ssl.conf frontend/nginx-ssl.conf.backup
+
+# Create clean file
+cat > frontend/nginx-ssl.conf << 'NGINX_EOF'
+# HTTP Server Block - Redirects all HTTP traffic to HTTPS
+server {
+    listen 80;
+    server_name pm.energi-up.com;
+    return 301 https://$server_name$request_uri;
+}
+
+# HTTPS Server Block - Main SSL-enabled server
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name pm.energi-up.com localhost;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    ssl_certificate /etc/letsencrypt/live/pm.energi-up.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pm.energi-up.com/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    ssl_trusted_certificate /etc/letsencrypt/live/pm.energi-up.com/chain.pem;
+    resolver 8.8.8.8 8.8.4.4 valid=300s;
+    resolver_timeout 5s;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json application/javascript;
+
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location ~* \.html$ {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+    }
+
+    location /api/ {
+        proxy_pass http://172.28.80.51:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /docs/ {
+        proxy_pass http://172.28.80.51:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+    }
+}
+NGINX_EOF
+
+# Verify file is clean
+head -3 frontend/nginx-ssl.conf
+# Should show: # HTTP Server Block (NOT ```nginx)
+
+tail -3 frontend/nginx-ssl.conf
+# Should show: } (NOT ```)
+
+# Now test again
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t
+```
+
+**Error 5: "unknown directive" or "invalid number of arguments" (other syntax errors)**
+
+```bash
+# Problem: Syntax error in configuration
+# Solution: Check for common syntax errors
+
+# Check for missing semicolons
+grep -n "[^;]$" frontend/nginx-ssl.conf | grep -v "^#" | grep -v "^$" | grep -v "{" | grep -v "}"
+
+# Check for unmatched braces
+OPEN_BRACES=$(grep -o '{' frontend/nginx-ssl.conf | wc -l)
+CLOSE_BRACES=$(grep -o '}' frontend/nginx-ssl.conf | wc -l)
+echo "Opening braces: $OPEN_BRACES"
+echo "Closing braces: $CLOSE_BRACES"
+# These should match
+
+# Check for common typos
+grep -i "server_name\|ssl_certificate\|proxy_pass\|location" frontend/nginx-ssl.conf
+# Verify all directives are spelled correctly
+
+# Validate specific problematic lines
+# The error message will tell you which line has the issue
+# Example: "unknown directive 'ssl_certificat' on line 87"
+# Check line 87 for typo
+sed -n '87p' frontend/nginx-ssl.conf
+```
+
+**Error 5: "container is not running"**
+
+```bash
+# Problem: Trying to test inside a container that's not running
+# Error message: "Error response from daemon: container ... is not running"
+
+# Solution 1: Use Method 1 instead (recommended)
+# Method 1 doesn't require the container to be running
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t
+
+# Solution 2: Start the container first
+cd /opt/Project-Management-V2.0
+docker compose -f docker-compose.frontend.yml up -d frontend
+
+# Wait for container to start
+sleep 5
+
+# Verify it's running
+docker ps | grep frontend
+
+# Then test inside container
+docker cp frontend/nginx-ssl.conf project_management_frontend:/tmp/nginx-ssl.conf
+docker exec project_management_frontend nginx -t -c /tmp/nginx-ssl.conf
+docker exec project_management_frontend rm /tmp/nginx-ssl.conf
+
+# Solution 3: Check why container is not running
+docker ps -a | grep frontend
+# If container exists but is stopped, check logs:
+docker logs project_management_frontend --tail 50
+# If container doesn't exist, you may need to create it first
+```
+
+**Error 6: "bind() to 0.0.0.0:80 failed (98: Address already in use)"**
+
+```bash
+# Problem: Port conflict (not a syntax error, but test might fail)
+# Solution: This is OK - it means syntax is correct but port is in use
+# The important part is "syntax is ok"
+
+# If you see this, the configuration syntax is actually correct
+# You just need to stop the service using port 80 first, or
+# ignore this error as it's not a syntax issue
+```
+
+**Error 7: "the "ssl" parameter requires ngx_http_ssl_module"**
+
+```bash
+# Problem: Nginx image doesn't have SSL module
+# Solution: Use nginx:alpine (which includes SSL module)
+
+# Verify you're using the correct image
+docker run --rm nginx:alpine nginx -V 2>&1 | grep -i ssl
+# Should show: --with-http_ssl_module
+
+# If not showing, use nginx:alpine explicitly:
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t
+```
+
+**Comprehensive Testing Script:**
+
+Create a test script to check everything:
+
+```bash
+# Create test script
+cat > /tmp/test-nginx-ssl-config.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "=== Testing nginx-ssl.conf ==="
+echo ""
+
+cd /opt/Project-Management-V2.0
+
+# Check 1: File exists
+echo "1. Checking if file exists..."
+if [ ! -f "frontend/nginx-ssl.conf" ]; then
+    echo "   ❌ ERROR: frontend/nginx-ssl.conf not found!"
+    exit 1
+fi
+echo "   ✅ File exists"
+echo ""
+
+# Check 2: File is readable
+echo "2. Checking file permissions..."
+if [ ! -r "frontend/nginx-ssl.conf" ]; then
+    echo "   ⚠️  File is not readable, fixing permissions..."
+    chmod 644 frontend/nginx-ssl.conf
+fi
+echo "   ✅ File is readable"
+echo ""
+
+# Check 3: Basic syntax checks
+echo "3. Checking basic syntax..."
+OPEN_BRACES=$(grep -o '{' frontend/nginx-ssl.conf | wc -l)
+CLOSE_BRACES=$(grep -o '}' frontend/nginx-ssl.conf | wc -l)
+if [ "$OPEN_BRACES" != "$CLOSE_BRACES" ]; then
+    echo "   ❌ ERROR: Unmatched braces! Opening: $OPEN_BRACES, Closing: $CLOSE_BRACES"
+    exit 1
+fi
+echo "   ✅ Braces are balanced"
+echo ""
+
+# Check 4: Required directives exist
+echo "4. Checking required directives..."
+REQUIRED=("server_name" "ssl_certificate" "ssl_certificate_key" "proxy_pass")
+for directive in "${REQUIRED[@]}"; do
+    if ! grep -q "$directive" frontend/nginx-ssl.conf; then
+        echo "   ❌ ERROR: Missing required directive: $directive"
+        exit 1
+    fi
+done
+echo "   ✅ All required directives present"
+echo ""
+
+# Check 5: Docker nginx test
+echo "5. Testing with Docker nginx..."
+if docker run --rm \
+  -v "$(pwd)/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t 2>&1 | grep -q "syntax is ok"; then
+    echo "   ✅ Nginx syntax test passed!"
+else
+    echo "   ❌ ERROR: Nginx syntax test failed!"
+    echo "   Running test again to show full error:"
+    docker run --rm \
+      -v "$(pwd)/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+      nginx:alpine \
+      nginx -t
+    exit 1
+fi
+echo ""
+
+echo "=== All tests passed! ==="
+EOF
+
+# Make script executable
+chmod +x /tmp/test-nginx-ssl-config.sh
+
+# Run the test script
+/tmp/test-nginx-ssl-config.sh
+```
+
+**Quick Fix Commands:**
+
+If the test fails, try these in order:
+
+```bash
+cd /opt/Project-Management-V2.0
+
+# 1. Verify file exists
+ls -la frontend/nginx-ssl.conf
+
+# 2. Check file permissions
+chmod 644 frontend/nginx-ssl.conf
+
+# 3. Verify Docker is running
+docker ps
+
+# 4. Test with absolute path
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t
+
+# 5. If still failing, check the actual error message
+docker run --rm \
+  -v "/opt/Project-Management-V2.0/frontend/nginx-ssl.conf:/etc/nginx/conf.d/default.conf:ro" \
+  nginx:alpine \
+  nginx -t 2>&1 | tee /tmp/nginx-test-error.log
+
+# Review the error log
+cat /tmp/nginx-test-error.log
+```
+
+**If you see errors:**
+- Check for missing semicolons (`;`) at end of directives
+- Check for unmatched braces `{` and `}`
+- Verify all paths are correct (especially certificate paths)
+- Check for typos in directive names
+- Ensure file encoding is UTF-8 (not Windows line endings)
+- Verify Docker volume mount syntax is correct
+
+**Step 6.8: Understanding the Configuration**
+
+**HTTP Server Block (Port 80):**
+- Listens on port 80 (standard HTTP)
+- Catches all HTTP requests to `pm.energi-up.com`
+- Automatically redirects to HTTPS (port 443)
+- Uses 301 permanent redirect (good for SEO)
+
+**HTTPS Server Block (Port 443):**
+- Listens on port 443 with SSL/TLS
+- Uses HTTP/2 for better performance
+- Serves the actual application
+- Handles all API proxying and static file serving
+
+**SSL Certificate Paths:**
+- `/etc/letsencrypt/live/pm.energi-up.com/fullchain.pem` - Full certificate chain
+- `/etc/letsencrypt/live/pm.energi-up.com/privkey.pem` - Private key
+- These paths are inside the Docker container
+- They will be mounted from the host at `/etc/letsencrypt`
+
+**Security Features:**
+- **HSTS**: Forces browsers to use HTTPS for 1 year
+- **TLS 1.2/1.3 only**: Blocks insecure TLS 1.0/1.1
+- **Strong ciphers**: Only allows high-security cipher suites
+- **Security headers**: XSS protection, clickjacking prevention, etc.
+
+**Troubleshooting Configuration Issues:**
+
+**Issue 1: File not found when testing**
+
+```bash
+# Verify file exists and is readable
+ls -la frontend/nginx-ssl.conf
+
+# Check file permissions
+chmod 644 frontend/nginx-ssl.conf
+
+# Verify file content
+cat frontend/nginx-ssl.conf | head -30
+```
+
+**Issue 2: Syntax errors in configuration**
+
+```bash
+# Check for common syntax errors
+# Missing semicolons
+grep -n "[^;]$" frontend/nginx-ssl.conf | grep -v "^#" | grep -v "^$"
+
+# Unmatched braces
+grep -o '{' frontend/nginx-ssl.conf | wc -l  # Count opening braces
+grep -o '}' frontend/nginx-ssl.conf | wc -l  # Count closing braces
+# These should match
+
+# Check for typos in directive names
+nginx -t 2>&1 | grep -i "unknown\|invalid\|directive"
+```
+
+**Issue 3: Certificate paths incorrect**
+
+```bash
+# Verify certificate files exist on host
+ls -la /etc/letsencrypt/live/pm.energi-up.com/
+# Should show: fullchain.pem, privkey.pem, chain.pem
+
+# Check certificate validity
+sudo openssl x509 -in /etc/letsencrypt/live/pm.energi-up.com/fullchain.pem -text -noout | grep -E "Subject:|Issuer:|Not Before|Not After"
+```
+
+**Issue 4: Backend proxy not working**
+
+```bash
+# Test backend connectivity from frontend server
+curl http://172.28.80.51:3000/health
+# Should return: {"ok":true}
+
+# Check if backend IP is correct in nginx-ssl.conf
+grep "proxy_pass" frontend/nginx-ssl.conf
+# Should show: proxy_pass http://172.28.80.51:3000;
+```
+
+**Next Steps:**
+
+After creating the SSL configuration file, you'll need to:
+1. Update `docker-compose.frontend.yml` to use this configuration
+2. Mount the SSL certificates into the container
+3. Update firewall to allow port 443
+4. Restart the frontend container
+
+See the next section for these steps.
 
     # Security headers
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
@@ -1182,24 +2498,87 @@ You can also integrate these checks into AliCloud CloudMonitor or your own monit
 On the backend server, create a backup directory:
 
 ```bash
-sudo mkdir -p /var/backups/project_management
-sudo chown $USER:$USER /var/backups/project_management
+sudo mkdir -p /opt/backups/Project-Management-V2.0
+sudo chown $USER:$USER /opt/backups/Project-Management-V2.0
 ```
 
-Add a daily cron job to dump the DB (run `crontab -e`):
+**Backup Schedule:**
+- Daily backups at **7:00 PM GMT+7 (Jakarta time)** = **12:00 PM UTC (noon)**
+- Backups stored in: `/opt/backups/Project-Management-V2.0/`
+- Backup files older than **14 days** are automatically deleted
+
+Add daily cron jobs to dump the DB and clean up old backups (run `crontab -e`):
 
 ```cron
-0 2 * * * docker exec project_management_db pg_dump -U postgres project_management_v2 > /var/backups/project_management/pm_$(date +\%F).sql
+# Daily database backup at 7PM GMT+7 (12:00 UTC)
+0 12 * * * docker exec project_management_db pg_dump -U postgres project_management_v2 > /opt/backups/Project-Management-V2.0/pm_$(date +\%Y\%m\%d_\%H\%M\%S).sql 2>&1
+
+# Clean up backups older than 14 days (runs 5 minutes after backup)
+5 12 * * * find /opt/backups/Project-Management-V2.0 -name "pm_*.sql" -type f -mtime +14 -delete
 ```
 
-Rotate / clean up old backups periodically (e.g. via another cron or logrotate).
+**Explanation:**
+- `0 12 * * *` = Runs daily at 12:00 UTC (7:00 PM GMT+7)
+- Backup filename includes timestamp: `pm_YYYYMMDD_HHMMSS.sql`
+- `-mtime +14` = Files modified more than 14 days ago
+- `-delete` = Removes matching files
+
+**Verify cron jobs are set:**
+```bash
+crontab -l
+```
+
+**Test backup manually:**
+```bash
+# Test backup creation
+docker exec project_management_db pg_dump -U postgres project_management_v2 > /opt/backups/Project-Management-V2.0/pm_test_$(date +\%Y\%m\%d_\%H\%M\%S).sql
+
+# Verify backup file was created
+ls -lh /opt/backups/Project-Management-V2.0/
+
+# Test cleanup (dry run - shows what would be deleted)
+find /opt/backups/Project-Management-V2.0 -name "pm_*.sql" -type f -mtime +14 -ls
+
+# Test cleanup (actual deletion - use with caution)
+find /opt/backups/Project-Management-V2.0 -name "pm_*.sql" -type f -mtime +14 -delete
+```
+
+**Check backup logs:**
+```bash
+# View cron job execution logs
+grep CRON /var/log/syslog | grep "pg_dump\|find.*backups"
+
+# Or check system logs
+journalctl -u cron | grep "pg_dump\|backups"
+```
 
 ### 6.2. Restoring from backup
 
-Copy the chosen `.sql` file to the backend server (if not already there), then:
-
+**List available backups:**
 ```bash
-docker exec -i project_management_db psql -U postgres -d project_management_v2 < /path/to/backup.sql
+ls -lh /opt/backups/Project-Management-V2.0/
+```
+
+**Restore from a backup file:**
+
+If the backup file is already on the server:
+```bash
+docker exec -i project_management_db psql -U postgres -d project_management_v2 < /opt/backups/Project-Management-V2.0/pm_YYYYMMDD_HHMMSS.sql
+```
+
+If you need to copy a backup file to the server first:
+```bash
+# Copy backup file to server (from your local machine)
+scp /path/to/backup.sql user@172.28.80.51:/opt/backups/Project-Management-V2.0/
+
+# Then restore it
+docker exec -i project_management_db psql -U postgres -d project_management_v2 < /opt/backups/Project-Management-V2.0/backup.sql
+```
+
+**Important:** Before restoring, consider backing up the current database state:
+```bash
+# Create a pre-restore backup
+docker exec project_management_db pg_dump -U postgres project_management_v2 > /opt/backups/Project-Management-V2.0/pm_pre_restore_$(date +\%Y\%m\%d_\%H\%M\%S).sql
 ```
 
 ### 6.3. Code rollback

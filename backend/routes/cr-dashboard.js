@@ -16,38 +16,24 @@ async function calculateWeeklyTrend(type = 'CR', filteredCRs = null) {
   // Use filtered CRs if provided, otherwise use all CRs
   const allCRs = filteredCRs || data.initiatives.filter(i => i.type === type);
   
-  if (allCRs.length === 0) {
-    return [];
+  // Generate the last 12 consecutive weeks from today going backwards
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const currentWeekKey = getWeekKey(todayStr);
+  
+  // Build array of 12 consecutive week keys (current week + 11 previous weeks)
+  const weekKeys = [];
+  for (let i = 0; i < 12; i++) {
+    const weekDate = new Date(currentWeekKey);
+    weekDate.setDate(weekDate.getDate() - (i * 7)); // Go back i weeks
+    weekKeys.push(getWeekKey(weekDate.toISOString().slice(0, 10)));
   }
   
-  // Get all unique weeks from CRs' createdAt dates
-  const weeks = new Set();
+  // Reverse to get chronological order (oldest to newest)
+  weekKeys.reverse();
   
-  // Add current week
-  const today = new Date().toISOString().slice(0, 10);
-  weeks.add(getWeekKey(today));
-  
-  // Add weeks from createdAt dates
-  allCRs.forEach(cr => {
-    if (cr.createdAt && cr.createdAt !== '' && cr.createdAt !== null) {
-      const weekKey = getWeekKey(cr.createdAt.slice(0, 10));
-      weeks.add(weekKey);
-    }
-  });
-  
-  // Add weeks from endDate dates (for LIVE CRs)
-  allCRs.forEach(cr => {
-    if (cr.endDate && cr.endDate !== '' && cr.endDate !== null) {
-      const weekKey = getWeekKey(cr.endDate.slice(0, 10));
-      weeks.add(weekKey);
-    }
-  });
-  
-  // Sort weeks chronologically
-  const sortedWeeks = Array.from(weeks).sort();
-  
-  // Calculate metrics for each week (cumulative)
-  const weeklyData = sortedWeeks.map((weekKey, index) => {
+  // Calculate metrics for each of the 12 consecutive weeks
+  const weeklyData = weekKeys.map((weekKey) => {
     const weekStartStr = weekKey;
     const weekEndStr = getWeekEnd(weekKey);
     
@@ -90,8 +76,8 @@ async function calculateWeeklyTrend(type = 'CR', filteredCRs = null) {
     };
   });
   
-  // Return only the last 12 weeks (about 3 months)
-  return weeklyData.slice(-12);
+  // Return all 12 consecutive weeks
+  return weeklyData;
 }
 
 /**
@@ -118,6 +104,235 @@ function getWeekEnd(weekKey) {
   const friday = new Date(monday);
   friday.setDate(monday.getDate() + 4); // Friday is 4 days after Monday
   return friday.toISOString().slice(0, 10);
+}
+
+/**
+ * Calculate weekly open CR burndown by priority
+ * Open = status not LIVE and not CANCELLED at week end
+ * @param {Array} crInitiatives - Filtered CR initiatives
+ * @returns {Array} Array of weekly burndown data
+ */
+function calculateOpenBurndown(crInitiatives) {
+  if (!crInitiatives || crInitiatives.length === 0) {
+    return [];
+  }
+
+  // Reuse the same 12-week window as calculateWeeklyTrend
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const currentWeekKey = getWeekKey(todayStr);
+
+  const weekKeys = [];
+  for (let i = 0; i < 12; i++) {
+    const weekDate = new Date(currentWeekKey);
+    weekDate.setDate(weekDate.getDate() - i * 7);
+    weekKeys.push(getWeekKey(weekDate.toISOString().slice(0, 10)));
+  }
+  weekKeys.reverse();
+
+  const weeklyData = weekKeys.map((weekKey) => {
+    const weekEndStr = getWeekEnd(weekKey);
+
+    // Open = created on/before week end AND (no endDate or endDate after week end)
+    // AND status is not LIVE and not CANCELLED
+    const openCRs = crInitiatives.filter((cr) => {
+      try {
+        const status = (cr.status || '').toUpperCase();
+        if (status === 'LIVE' || status === 'CANCELLED') return false;
+
+        if (!cr.createdAt) return false;
+        const createdDateStr = cr.createdAt.slice(0, 10);
+        if (createdDateStr > weekEndStr) return false;
+
+        if (cr.endDate && cr.endDate !== '' && cr.endDate !== null) {
+          const endDateStr = cr.endDate.slice(0, 10);
+          if (endDateStr <= weekEndStr) return false;
+        }
+
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    const counts = openCRs.reduce(
+      (acc, cr) => {
+        const priority = (cr.priority || 'P2').toUpperCase();
+        if (priority === 'P0') acc.P0 += 1;
+        else if (priority === 'P1') acc.P1 += 1;
+        else if (priority === 'P2') acc.P2 += 1;
+        acc.Total = acc.P0 + acc.P1 + acc.P2;
+        return acc;
+      },
+      { P0: 0, P1: 0, P2: 0, Total: 0 }
+    );
+
+    const mondayDate = new Date(weekKey);
+    const fridayDate = new Date(weekEndStr);
+    const weekLabel = `${mondayDate.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })} - ${fridayDate.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })}`;
+
+    return {
+      weekStart: weekKey,
+      weekEnd: weekEndStr,
+      weekLabel,
+      ...counts,
+    };
+  });
+
+  return weeklyData;
+}
+
+/**
+ * Calculate Go Live Rate (3M Moving Average) by priority
+ * Based on CRs with Actual End Date (endDate field)
+ * @param {Array} crInitiatives - Filtered CR initiatives
+ * @returns {Array} Array of monthly data with 3M moving averages
+ */
+function calculateGoLiveRate(crInitiatives) {
+  try {
+    // Filter CRs with actual end date
+    const crsWithEndDate = crInitiatives.filter(cr => 
+      cr && cr.endDate && cr.endDate !== '' && cr.endDate !== null
+    );
+
+    if (crsWithEndDate.length === 0) {
+      return [];
+    }
+
+    // Get date range (from oldest endDate to today)
+    const endDates = crsWithEndDate
+      .map(cr => {
+        try {
+          return cr.endDate ? cr.endDate.slice(0, 10) : null;
+        } catch (e) {
+          return null;
+        }
+      })
+      .filter(date => date && date.length === 10)
+      .sort();
+    
+    if (endDates.length === 0) {
+      return [];
+    }
+    
+    const oldestDate = new Date(endDates[0]);
+    if (isNaN(oldestDate.getTime())) {
+      return [];
+    }
+    
+    const today = new Date();
+    
+    // Generate monthly buckets (YYYY-MM format)
+    const monthlyData = {};
+    const currentDate = new Date(oldestDate);
+    currentDate.setDate(1); // Start of month
+    
+    while (currentDate <= today) {
+      const monthKey = currentDate.toISOString().slice(0, 7); // YYYY-MM
+      monthlyData[monthKey] = {
+        month: monthKey,
+        date: new Date(currentDate),
+        P0: 0,
+        P1: 0,
+        P2: 0,
+        Total: 0
+      };
+      
+      // Move to next month
+      currentDate.setMonth(currentDate.getMonth() + 1);
+    }
+
+    // Count CRs by month and priority
+    crsWithEndDate.forEach(cr => {
+      try {
+        if (!cr || !cr.endDate) return;
+        const endDateStr = cr.endDate.slice(0, 10);
+        if (!endDateStr || endDateStr.length !== 10) return;
+        
+        const monthKey = endDateStr.slice(0, 7); // YYYY-MM
+        
+        if (monthlyData[monthKey]) {
+          const priority = (cr.priority || 'P2').toUpperCase();
+          
+          if (priority === 'P0') {
+            monthlyData[monthKey].P0++;
+            monthlyData[monthKey].Total++;
+          } else if (priority === 'P1') {
+            monthlyData[monthKey].P1++;
+            monthlyData[monthKey].Total++;
+          } else if (priority === 'P2') {
+            monthlyData[monthKey].P2++;
+            monthlyData[monthKey].Total++;
+          }
+        }
+      } catch (e) {
+        // Skip invalid entries
+        console.warn('Error processing CR for Go Live Rate:', e.message);
+      }
+    });
+
+    // Convert to array and sort by date
+    const monthlyArray = Object.values(monthlyData).sort((a, b) => 
+      a.date.getTime() - b.date.getTime()
+    );
+
+    // Calculate 2-month moving average
+    const result = monthlyArray.map((month, index) => {
+      const movingAvg = {
+        P0: 0,
+        P1: 0,
+        P2: 0,
+        Total: 0
+      };
+
+      // Get previous 1 month + current month (2 months total)
+      const startIdx = Math.max(0, index - 1);
+      const monthsForAvg = monthlyArray.slice(startIdx, index + 1);
+      const monthCount = monthsForAvg.length;
+
+      monthsForAvg.forEach(m => {
+        movingAvg.P0 += m.P0;
+        movingAvg.P1 += m.P1;
+        movingAvg.P2 += m.P2;
+        movingAvg.Total += m.Total;
+      });
+
+      // Calculate average
+      movingAvg.P0 = monthCount > 0 ? Math.round((movingAvg.P0 / monthCount) * 10) / 10 : 0;
+      movingAvg.P1 = monthCount > 0 ? Math.round((movingAvg.P1 / monthCount) * 10) / 10 : 0;
+      movingAvg.P2 = monthCount > 0 ? Math.round((movingAvg.P2 / monthCount) * 10) / 10 : 0;
+      movingAvg.Total = monthCount > 0 ? Math.round((movingAvg.Total / monthCount) * 10) / 10 : 0;
+
+      return {
+        month: month.month,
+        monthKey: month.month, // Add monthKey for easier matching
+        date: month.date.toISOString().slice(0, 10),
+        monthLabel: month.date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        actual: {
+          P0: month.P0,
+          P1: month.P1,
+          P2: month.P2,
+          Total: month.Total
+        },
+        movingAvg2M: movingAvg
+      };
+    });
+
+    // Display window: start x-axis from Sep 2025 onwards (keep earlier months for MA calc above)
+    const START_MONTH = '2025-09'; // YYYY-MM
+    return result.filter(r => r && typeof r.month === 'string' && r.month >= START_MONTH);
+  } catch (error) {
+    console.error('Error calculating Go Live Rate:', error);
+    return [];
+  }
 }
 
 router.get('/', async (req, res) => {
@@ -152,6 +367,47 @@ router.get('/', async (req, res) => {
   const crsWithMilestone = crInitiatives.filter(i => i.milestone && i.milestone.trim() !== '');
   const byMilestone = Object.entries(crsWithMilestone.reduce((acc, i) => { acc[i.milestone] = (acc[i.milestone]||0)+1; return acc; }, {})).map(([k,v]) => ({ milestone: k, c: v }));
   
+  // Calculate breakdowns
+  // 1. Status breakdown by Priority (P0, P1, P2)
+  const byStatusBreakdown = {};
+  byStatus.forEach(statusItem => {
+    const status = statusItem.status;
+    const breakdown = { P0: 0, P1: 0, P2: 0 };
+    crInitiatives.filter(cr => cr.status === status).forEach(cr => {
+      const priority = cr.priority || 'P2';
+      if (breakdown[priority] !== undefined) {
+        breakdown[priority]++;
+      }
+    });
+    byStatusBreakdown[status] = breakdown;
+  });
+  
+  // 2. Priority breakdown by Status
+  const byPriorityBreakdown = {};
+  byPriority.forEach(priorityItem => {
+    const priority = priorityItem.priority;
+    const breakdown = {};
+    crInitiatives.filter(cr => cr.priority === priority).forEach(cr => {
+      const status = cr.status || 'N/A';
+      breakdown[status] = (breakdown[status] || 0) + 1;
+    });
+    byPriorityBreakdown[priority] = breakdown;
+  });
+  
+  // 3. Milestone breakdown by Priority (P0, P1, P2)
+  const byMilestoneBreakdown = {};
+  byMilestone.forEach(milestoneItem => {
+    const milestone = milestoneItem.milestone;
+    const breakdown = { P0: 0, P1: 0, P2: 0 };
+    crInitiatives.filter(cr => cr.milestone === milestone).forEach(cr => {
+      const priority = cr.priority || 'P2';
+      if (breakdown[priority] !== undefined) {
+        breakdown[priority]++;
+      }
+    });
+    byMilestoneBreakdown[milestone] = breakdown;
+  });
+  
   const year = new Date().getFullYear();
   const liveYTD = crInitiatives.filter(i => (i.status && i.status.toUpperCase() === 'LIVE') && (i.updatedAt||'').startsWith(String(year))).length;
   // Count all Live CRs (not just YTD) - case insensitive
@@ -183,7 +439,13 @@ router.get('/', async (req, res) => {
   
   // Calculate weekly trend data for CRs (using filtered CRs)
   const weeklyTrendData = await calculateWeeklyTrend('CR', crInitiatives);
-  
+
+  // Calculate Go Live Rate (2M Moving Average) by priority
+  const goLiveRateData = calculateGoLiveRate(crInitiatives);
+
+  // Calculate weekly open CR burndown by priority
+  const openBurndownData = calculateOpenBurndown(crInitiatives);
+
   // Calculate week boundaries (Monday to Sunday)
   const today = new Date();
   const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
@@ -247,15 +509,86 @@ router.get('/', async (req, res) => {
     insights.recommendations.push(`✨ All CRs are on track. Keep up the good work!`);
   }
   
+  // Calculate monthly open CRs for forecasting
+  const monthlyOpenCRs = calculateMonthlyOpenCRs(crInitiatives);
+
   res.json({ 
     crs, byStatus, byPriority, byDepartment, byMilestone, liveYTD, liveCount,
+    byStatusBreakdown,
+    byPriorityBreakdown,
+    byMilestoneBreakdown,
     avgAgeSinceCreated,
     crAging,
     milestoneDurations,
     weeklyTrendData,
+    goLiveRateData,
+    openBurndownData,
+    monthlyOpenCRs,
     insights
   });
 });
+
+/**
+ * Calculate monthly open CRs (status != Live and != Cancelled) at end of each month
+ * @param {Array} crInitiatives - Filtered CR initiatives
+ * @returns {Array} Array of monthly open CR data
+ */
+function calculateMonthlyOpenCRs(crInitiatives) {
+  if (!crInitiatives || crInitiatives.length === 0) {
+    return [];
+  }
+
+  // Generate months from Dec 2025 to current month
+  const startDate = new Date('2025-12-01');
+  const currentDate = new Date();
+  const months = [];
+  
+  for (let d = new Date(startDate); d <= currentDate; d.setMonth(d.getMonth() + 1)) {
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    const monthEnd = new Date(year, month + 1, 0); // Last day of month
+    const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const monthLabel = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    const monthEndStr = monthEnd.toISOString().slice(0, 10);
+    
+    // Count open CRs at end of month (status != Live and != Cancelled)
+    // Use the same logic as calculateOpenBurndown
+    const openCRs = crInitiatives.filter((cr) => {
+      try {
+        const status = (cr.status || '').toUpperCase();
+        if (status === 'LIVE' || status === 'CANCELLED') return false;
+
+        if (!cr.createdAt) return false;
+        const createdDateStr = cr.createdAt.slice(0, 10);
+        // CR must be created on or before month end
+        if (createdDateStr > monthEndStr) return false;
+
+        // If CR has an endDate, it must be after month end (not closed yet)
+        if (cr.endDate && cr.endDate !== '' && cr.endDate !== null) {
+          const endDateStr = cr.endDate.slice(0, 10);
+          // If endDate is on or before month end, CR is closed
+          if (endDateStr <= monthEndStr) return false;
+        }
+
+        return true;
+      } catch (err) {
+        console.error('Error calculating open CRs for month:', monthEndStr, err);
+        return false;
+      }
+    }).length;
+    
+    months.push({
+      year,
+      month: month + 1,
+      monthKey,
+      monthLabel,
+      monthEnd: monthEndStr,
+      openCRs
+    });
+  }
+  
+  return months;
+}
 
 export default router;
 

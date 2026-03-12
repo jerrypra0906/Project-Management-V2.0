@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import store from '../store.js';
 import crypto from 'crypto';
 import { authenticateToken } from '../middleware/auth.js';
+import { sendCRCreationEmail } from '../services/email.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,6 +93,69 @@ router.post('/', authenticateToken, upload.single('file'), async (req, res) => {
   if (!data.documents) data.documents = [];
   data.documents.push(document);
   await store.write(data);
+
+  // Check if this is a CR and send email with documents (only once)
+  try {
+    const initiative = data.initiatives.find(i => i.id === initiativeId);
+    if (initiative && initiative.type === 'CR') {
+      // Check if CR was created recently (within 10 minutes) to send email with documents
+      const crCreatedAt = new Date(initiative.createdAt);
+      const now = new Date();
+      const minutesSinceCreation = (now - crCreatedAt) / (1000 * 60);
+      
+      // Only send email if CR was created recently (to avoid sending emails for old CRs when documents are added later)
+      if (minutesSinceCreation <= 10) {
+        // Get all documents for this CR
+        const allDocuments = (data.documents || []).filter(d => d.initiativeId === initiativeId);
+        
+        // Check if email was already sent for this CR
+        const emailFlag = `cr_email_pending_${initiativeId}`;
+        const flag = global[emailFlag];
+        
+        // Only send email if it hasn't been sent yet
+        if (flag && !flag.sent) {
+          // Get user lookups for email addresses
+          const userLookups = data.users.map(u => ({
+            id: u.id,
+            name: u.name,
+            email: u.email || null
+          }));
+          
+          // Prepare CR data for email
+          const crData = {
+            name: initiative.name,
+            description: initiative.description,
+            businessImpact: initiative.businessImpact,
+            priority: initiative.priority,
+            businessOwnerId: initiative.businessOwnerId,
+            businessUserIds: initiative.businessUserIds,
+            itPicId: initiative.itPicId,
+            itPicIds: initiative.itPicIds,
+            itManagerIds: initiative.itManagerIds
+          };
+          
+          console.log(`[CR EMAIL] Sending email for CR ${initiative.name} with ${allDocuments.length} document(s)`);
+          
+          // Mark as sent before sending to prevent duplicates
+          flag.sent = true;
+          
+          // Send email with all documents (asynchronously, don't block response)
+          sendCRCreationEmail(crData, userLookups, allDocuments).then(() => {
+            console.log(`[CR EMAIL] Email sent successfully for CR ${initiative.name}`);
+            delete global[emailFlag];
+          }).catch(error => {
+            console.error('[EMAIL ERROR] Failed to send CR creation email with documents:', error);
+            flag.sent = false; // Reset flag on error so we can retry
+          });
+        } else if (!flag) {
+          console.log(`[CR EMAIL] Email already sent or CR is older than 10 minutes for ${initiative.name}`);
+        }
+      }
+    }
+  } catch (emailError) {
+    console.error('[EMAIL ERROR] Error sending CR creation email:', emailError);
+    // Don't fail the document upload if email fails
+  }
 
   res.status(201).json(document);
 });

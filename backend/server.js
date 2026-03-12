@@ -4,6 +4,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import http from 'http';
 import dbStore from './store.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,8 +16,12 @@ app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
 
 // Serve docs folder for static assets (logo, etc)
-// Note: Frontend is now served by the separate frontend container (nginx)
 app.use('/docs', express.static(path.join(__dirname, '..', 'docs')));
+
+// Serve frontend static files (for local development)
+// In production, frontend is served by the separate frontend container (nginx)
+const frontendPath = path.join(__dirname, '..', 'frontend');
+app.use(express.static(frontendPath));
 
 // API routes
 import initiativesRouter from './routes/initiatives.js';
@@ -36,13 +41,13 @@ import { authenticateToken } from './middleware/auth.js';
 
 // Public routes
 app.use('/api/auth', authRouter);
+app.use('/api/lookups', lookupsRouter);
 
 // Protected routes (require authentication)
 app.use('/api/initiatives', authenticateToken, initiativesRouter);
 app.use('/api/dashboard', authenticateToken, dashboardRouter);
 app.use('/api/cr-dashboard', authenticateToken, crDashboardRouter);
 app.use('/api/daily-snapshots', authenticateToken, dailySnapshotsRouter);
-app.use('/api/lookups', authenticateToken, lookupsRouter);
 app.use('/api/user-dashboard', userDashboardRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/comments', commentsRouter);
@@ -81,9 +86,12 @@ app.use((req, res) => {
 // This backend only serves API endpoints and /docs static assets
 
 const PORT = process.env.PORT || 3000;
+const FRONTEND_PORT = process.env.FRONTEND_PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0'; // Listen on all network interfaces
+
+// Start backend API server
 app.listen(PORT, HOST, () => {
-  console.log(`Server listening on:`);
+  console.log(`Backend API server listening on:`);
   console.log(`  - Local:   http://localhost:${PORT}`);
   console.log(`  - Network: http://172.30.18.102:${PORT}`);
 
@@ -92,6 +100,57 @@ app.listen(PORT, HOST, () => {
     await m.initializeDailySnapshots();
   });
 });
+
+// Start frontend server on port 8080 (for local development)
+// This creates a separate Express server that serves the frontend and proxies API calls
+if (process.env.NODE_ENV !== 'production' || process.env.SERVE_FRONTEND === 'true') {
+  const frontendApp = express();
+  frontendApp.use(express.json());
+  frontendApp.use(cors());
+  
+  // Proxy API requests to backend
+  frontendApp.use('/api', (req, res) => {
+    const options = {
+      hostname: 'localhost',
+      port: PORT,
+      path: req.originalUrl,
+      method: req.method,
+      headers: { ...req.headers, host: `localhost:${PORT}` },
+    };
+    
+    const proxyReq = http.request(options, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res);
+    });
+    
+    proxyReq.on('error', (err) => {
+      console.error('Proxy error:', err);
+      res.status(500).json({ error: 'Backend server not available' });
+    });
+    
+    if (req.body && Object.keys(req.body).length > 0) {
+      proxyReq.write(JSON.stringify(req.body));
+    }
+    proxyReq.end();
+  });
+  
+  // Serve frontend static files
+  frontendApp.use(express.static(frontendPath));
+  frontendApp.use('/docs', express.static(path.join(__dirname, '..', 'docs')));
+  
+  // SPA routing - serve index.html for all non-API routes
+  frontendApp.get('*', (req, res) => {
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/docs')) {
+      res.sendFile(path.join(frontendPath, 'index.html'));
+    }
+  });
+  
+  frontendApp.listen(FRONTEND_PORT, HOST, () => {
+    console.log(`Frontend server listening on:`);
+    console.log(`  - Local:   http://localhost:${FRONTEND_PORT}`);
+    console.log(`  - Network: http://172.30.18.102:${FRONTEND_PORT}`);
+  });
+}
 
 // Daily snapshot creation - runs every 24 hours to track milestone durations
 setInterval(async () => {

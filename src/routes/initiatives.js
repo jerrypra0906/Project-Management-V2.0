@@ -60,9 +60,16 @@ router.get('/', (req, res) => {
     rows = rows.filter(r => departmentIdValues.includes(r.departmentId));
   }
   
-  // Single-value filters (kept for backward compatibility)
-  if (itPicId) rows = rows.filter(r => r.itPicId === itPicId);
-  if (businessOwnerId) rows = rows.filter(r => r.businessOwnerId === businessOwnerId);
+  // Multi-value filters for IT PIC and Business Owner (OR logic)
+  const itPicIdValues = parseMultiValue(itPicId);
+  if (itPicIdValues && itPicIdValues.length > 0) {
+    rows = rows.filter(r => itPicIdValues.includes(r.itPicId));
+  }
+  
+  const businessOwnerIdValues = parseMultiValue(businessOwnerId);
+  if (businessOwnerIdValues && businessOwnerIdValues.length > 0) {
+    rows = rows.filter(r => businessOwnerIdValues.includes(r.businessOwnerId));
+  }
   
   console.log(`API returned ${rows.length} rows after filtering (total initiatives: ${data.initiatives.length})`);
   rows = rows.sort((a,b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));

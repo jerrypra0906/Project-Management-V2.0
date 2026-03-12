@@ -259,10 +259,13 @@ function commonFields() {
     formRow('Milestone', `<select name="milestone">
       <option>Pre-grooming</option><option>Grooming</option><option>Tech Assessment</option><option>Planning</option><option>Development</option><option>Testing</option><option>Live</option>
     </select>`),
-    formRow('Start Date', `<input type="date" name="startDate" required />`),
+    formRow('Start Date', `<input type="date" name="startDate" />`),
     formRow('End Date', `<input type="date" name="endDate" />`),
     formRow('Remark', `<input name="remark" />`),
-    formRow('Project Doc Link', `<input name="documentationLink" type="url" />`)
+    formRow('Project Doc Link', `<input name="documentationLink" type="url" />`),
+    formRow('Documents', `<input type="file" name="documents" id="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg" />
+      <div id="filePreview" style="margin-top: 10px;"></div>
+      <small style="color: #666;">You can select multiple files. Max 10MB per file.</small>`)
   ].join('');
 }
 
@@ -307,6 +310,170 @@ async function renderNew() {
     crBox.style.display = typeEl.value === 'CR' ? 'block' : 'none';
   };
   typeEl.onchange();
+  // Compression function for images
+  async function compressImage(file, maxSizeKB = 500) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          let quality = 0.9;
+          
+          // Calculate initial dimensions to get close to target size
+          const maxDimension = 2000; // Max width/height
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = (height / width) * maxDimension;
+              width = maxDimension;
+            } else {
+              width = (width / height) * maxDimension;
+              height = maxDimension;
+            }
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // Try to compress to target size
+          const tryCompress = (q) => {
+            canvas.toBlob((blob) => {
+              if (!blob) {
+                resolve(file); // Fallback to original
+                return;
+              }
+              
+              const sizeKB = blob.size / 1024;
+              if (sizeKB <= maxSizeKB || q <= 0.1) {
+                // Create a new File object with the compressed blob
+                const compressedFile = new File([blob], file.name, {
+                  type: file.type,
+                  lastModified: Date.now()
+                });
+                resolve(compressedFile);
+              } else {
+                // Reduce quality and try again
+                tryCompress(Math.max(0.1, q - 0.1));
+              }
+            }, file.type, q);
+          };
+          
+          tryCompress(quality);
+        };
+        img.onerror = () => resolve(file); // Fallback to original on error
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(file); // Fallback to original on error
+      reader.readAsDataURL(file);
+    });
+  }
+  
+  // Compress file if needed
+  async function compressFileIfNeeded(file) {
+    const maxSizeKB = 500;
+    const fileSizeKB = file.size / 1024;
+    
+    // Only compress if file is larger than 500KB
+    if (fileSizeKB <= maxSizeKB) {
+      return file;
+    }
+    
+    // Check if it's an image
+    const imageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (imageTypes.includes(file.type.toLowerCase())) {
+      return await compressImage(file, maxSizeKB);
+    }
+    
+    // For non-image files, return as-is (could add other compression methods later)
+    return file;
+  }
+  
+  // File preview functionality
+  const fileInput = document.getElementById('documents');
+  const filePreview = document.getElementById('filePreview');
+  const selectedFiles = [];
+  const compressionInfo = []; // Track compression info (parallel array to selectedFiles)
+  
+    fileInput.onchange = async (e) => {
+    const files = Array.from(e.target.files);
+    selectedFiles.length = 0;
+    compressionInfo.length = 0;
+    
+    // Process and compress files
+    filePreview.innerHTML = '<div style="margin-top: 8px;"><strong>Processing files...</strong></div>';
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const originalSize = file.size;
+      const compressed = await compressFileIfNeeded(file);
+      selectedFiles.push(compressed);
+      
+      if (compressed.size < originalSize) {
+        compressionInfo.push({ original: originalSize, compressed: compressed.size });
+      } else {
+        compressionInfo.push(null);
+      }
+    }
+    
+    // Display file preview
+    if (selectedFiles.length > 0) {
+      filePreview.innerHTML = '<div style="margin-top: 8px;"><strong>Selected files:</strong></div>' +
+        selectedFiles.map((file, index) => {
+          const compInfo = compressionInfo[index];
+          const sizeDisplay = compInfo 
+            ? `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #28a745;">(compressed from ${(compInfo.original / 1024).toFixed(1)} KB)</span></span>`
+            : `<span style="color: #666; font-size: 0.9em;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
+          
+          return `
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px; background: #f5f5f5; border-radius: 4px;">
+              <span>📄 ${file.name}</span>
+              ${sizeDisplay}
+              <button type="button" onclick="removeFile(${index})" style="margin-left: auto; background: #ff4444; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer;">Remove</button>
+            </div>
+          `;
+        }).join('');
+    } else {
+      filePreview.innerHTML = '';
+    }
+  };
+  
+  // Global function to remove files
+  window.removeFile = (index) => {
+    // Remove from arrays (parallel arrays stay in sync)
+    selectedFiles.splice(index, 1);
+    compressionInfo.splice(index, 1);
+    
+    // Update file input
+    const dt = new DataTransfer();
+    selectedFiles.forEach(file => dt.items.add(file));
+    fileInput.files = dt.files;
+    
+    // Rebuild preview display
+    if (selectedFiles.length > 0) {
+      filePreview.innerHTML = '<div style="margin-top: 8px;"><strong>Selected files:</strong></div>' +
+        selectedFiles.map((file, newIndex) => {
+          const compInfo = compressionInfo[newIndex];
+          const sizeDisplay = compInfo 
+            ? `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #28a745;">(compressed from ${(compInfo.original / 1024).toFixed(1)} KB)</span></span>`
+            : `<span style="color: #666; font-size: 0.9em;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
+          
+          return `
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px; background: #f5f5f5; border-radius: 4px;">
+              <span>📄 ${file.name}</span>
+              ${sizeDisplay}
+              <button type="button" onclick="removeFile(${newIndex})" style="margin-left: auto; background: #ff4444; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer;">Remove</button>
+            </div>
+          `;
+        }).join('');
+    } else {
+      filePreview.innerHTML = '';
+    }
+  };
+  
   f.onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(f);
@@ -341,7 +508,45 @@ async function renderNew() {
       };
     }
     try {
-      await fetchJSON('/api/initiatives', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      // Create the initiative first
+      const result = await fetchJSON('/api/initiatives', { 
+        method:'POST', 
+        headers:{'Content-Type':'application/json'}, 
+        body: JSON.stringify(payload) 
+      });
+      
+      const initiativeId = result.id;
+      
+      // Upload documents if any files were selected
+      if (selectedFiles.length > 0) {
+        const token = localStorage.getItem('token');
+        const uploadPromises = selectedFiles.map(async (file) => {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('initiativeId', initiativeId);
+          
+          const uploadRes = await fetch('/api/documents', {
+            method: 'POST',
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            body: formData
+          });
+          
+          if (!uploadRes.ok) {
+            const errorText = await uploadRes.text().catch(() => '');
+            throw new Error(`Failed to upload ${file.name}: ${errorText || uploadRes.statusText}`);
+          }
+          
+          return uploadRes.json();
+        });
+        
+        try {
+          await Promise.all(uploadPromises);
+        } catch (uploadError) {
+          console.error('Error uploading documents:', uploadError);
+          alert(`Initiative created successfully, but some documents failed to upload: ${uploadError.message}`);
+        }
+      }
+      
       location.hash = '#list';
       renderList();
     } catch (e) {
