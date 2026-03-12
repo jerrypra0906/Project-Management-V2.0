@@ -4856,6 +4856,17 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
   console.log('showInitiativesModal called:', filterType, filterValue, title, initiativeType);
   const apiQs = new URLSearchParams();
   apiQs.set('type', initiativeType);
+
+  // Preserve current dashboard filters for Project drilldowns
+  const urlParams = new URLSearchParams(location.search || '');
+  if (initiativeType === 'Project') {
+    const depId = urlParams.get('departmentId') || '';
+    const itPmId = urlParams.get('itPmId') || '';
+    const teamMemberId = urlParams.get('teamMemberId') || '';
+    if (depId) apiQs.set('departmentId', depId);
+    if (itPmId) apiQs.set('itPmId', itPmId);
+    if (teamMemberId) apiQs.set('teamMemberId', teamMemberId);
+  }
   
   if (filterType === 'status') {
     apiQs.set('status', filterValue);
@@ -4867,11 +4878,15 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
     apiQs.set('departmentId', filterValue);
   } else if (filterType === 'all') {
     // Show all projects
+  } else if (filterType === 'allExCancelled') {
+    // Show all projects excluding CANCELLED (client-side filter)
   } else if (filterType === 'open') {
     // For "open" CRs, we'll fetch all and filter out LIVE ones
     // Don't set any status filter, we'll filter client-side
   } else if (filterType === 'inProgress') {
     // For "In Progress Projects", we'll fetch all projects and filter client-side
+  } else if (filterType === 'deptGroup') {
+    // Department Group breakdown: filter client-side by group + status bucket
   }
   
   try {
@@ -4885,11 +4900,61 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
       });
     }
 
+    // Filter out CANCELLED projects for "allExCancelled"
+    if (filterType === 'allExCancelled' && initiativeType === 'Project') {
+      initiatives = initiatives.filter(i => {
+        const status = (i.status || '').toUpperCase().trim();
+        return status !== 'CANCELLED';
+      });
+    }
+
     // Filter to only in-progress project statuses for "inProgress" filter
     if (filterType === 'inProgress' && initiativeType === 'Project') {
       initiatives = initiatives.filter(i => {
         const status = (i.status || '').toUpperCase().trim();
         return status === 'ON TRACK' || status === 'AT RISK' || status === 'DELAYED';
+      });
+    }
+
+    // Filter by Department Group when requested
+    if (filterType === 'deptGroup' && initiativeType === 'Project') {
+      const [groupKeyRaw, bucketRaw] = String(filterValue || '').split('|');
+      const groupKey = (groupKeyRaw || '').trim() || 'Support';
+      const bucket = (bucketRaw || 'TOTAL').toUpperCase().trim();
+
+      const normalizeDeptName = (name) => {
+        const n = String(name || '').trim();
+        if (!n) return n;
+        const low = n.toLowerCase();
+        if (low === 'operation') return 'Industrial';
+        if (low === 'trader') return 'Commercial';
+        return n;
+      };
+      const departmentGroup = (deptName) => {
+        const n = normalizeDeptName(deptName);
+        const low = String(n || '').trim().toLowerCase();
+        if (!low) return 'Support';
+        if (low === 'industrial') return 'Industrial';
+        if (low === 'commercial') return 'Commercial';
+        if (low === 'logistic') return 'Logistic';
+        if (low === 'exim') return 'EXIM';
+        if (low === 'fabtic') return 'FABTIC';
+        if (low === 'procurement' || low === 'hc' || low === 'sustainability') return 'Support';
+        return 'Support';
+      };
+      const deptNameById = (id) => normalizeDeptName(nameById(LOOKUPS.departments || [], id));
+      const statusU = (s) => String(s || '').toUpperCase().trim();
+
+      initiatives = initiatives.filter(p => {
+        const grp = departmentGroup(deptNameById(p.departmentId));
+        if (grp !== groupKey) return false;
+        const s = statusU(p.status);
+        if (bucket === 'TOTAL') return s !== 'CANCELLED';
+        if (bucket === 'LIVE') return s === 'LIVE';
+        if (bucket === 'IN_PROGRESS') return s === 'ON TRACK' || s === 'AT RISK' || s === 'DELAYED';
+        if (bucket === 'NOT_STARTED') return s === 'NOT STARTED';
+        if (bucket === 'ON_HOLD') return s === 'ON HOLD';
+        return true;
       });
     }
     
@@ -5327,7 +5392,7 @@ async function renderDashboard() {
       .reduce((sum, s) => sum + (s.c || 0), 0);
   };
   const notStartedProjects = statusCount('NOT STARTED');
-  const liveProjects = d.liveCount || statusCount('LIVE') || 0;
+  const liveProjects = statusCount('LIVE') || 0;
   const cancelledProjects = statusCount('CANCELLED');
   const onHoldProjects = statusCount('ON HOLD');
   const onTrackProjects = statusCount('ON TRACK');
@@ -5335,6 +5400,57 @@ async function renderDashboard() {
   const delayedProjects = statusCount('DELAYED');
   const inProgressProjects = onTrackProjects + atRiskProjects + delayedProjects;
   const totalProjectsExCancelled = (d.projects || 0) - cancelledProjects;
+
+  // Department Group breakdowns for the Project Summary KPIs (computed from filtered initiatives)
+  const normalizeDeptName = (name) => {
+    const n = String(name || '').trim();
+    if (!n) return n;
+    const low = n.toLowerCase();
+    if (low === 'operation') return 'Industrial';
+    if (low === 'trader') return 'Commercial';
+    return n;
+  };
+  const departmentGroup = (deptName) => {
+    const n = normalizeDeptName(deptName);
+    const low = String(n || '').trim().toLowerCase();
+    if (!low) return 'Support';
+    if (low === 'industrial') return 'Industrial';
+    if (low === 'commercial') return 'Commercial';
+    if (low === 'logistic') return 'Logistic';
+    if (low === 'exim') return 'EXIM';
+    if (low === 'fabtic') return 'FABTIC';
+    if (low === 'procurement' || low === 'hc' || low === 'sustainability') return 'Support';
+    return 'Support';
+  };
+  const deptNameById = (id) => normalizeDeptName(nameById(LOOKUPS.departments || [], id));
+  const initGroupCounts = () => ({
+    Industrial: 0,
+    Commercial: 0,
+    Logistic: 0,
+    EXIM: 0,
+    FABTIC: 0,
+    Support: 0,
+  });
+  const groupCountsFor = (projects, predicate) => {
+    const counts = initGroupCounts();
+    (projects || []).forEach(p => {
+      if (!predicate(p)) return;
+      const grp = departmentGroup(deptNameById(p.departmentId));
+      counts[grp] = (counts[grp] || 0) + 1;
+    });
+    return counts;
+  };
+  const statusU = (p) => String(p?.status || '').toUpperCase().trim();
+  const kpiProjects = Array.isArray(projectsForCalendar) ? projectsForCalendar : [];
+  const breakdownTotal = groupCountsFor(kpiProjects, p => statusU(p) !== 'CANCELLED');
+  const breakdownLive = groupCountsFor(kpiProjects, p => statusU(p) === 'LIVE');
+  const breakdownInProgress = groupCountsFor(kpiProjects, p => {
+    const s = statusU(p);
+    return s === 'ON TRACK' || s === 'AT RISK' || s === 'DELAYED';
+  });
+  const breakdownNotStarted = groupCountsFor(kpiProjects, p => statusU(p) === 'NOT STARTED');
+  const breakdownOnHold = groupCountsFor(kpiProjects, p => statusU(p) === 'ON HOLD');
+  const getGroup = (counts, groupName) => (counts && counts[groupName] ? counts[groupName] : 0);
 
   // Normalize status labels for Status Distribution (combine different casings)
   const combinedStatusMap = {};
@@ -5364,40 +5480,181 @@ async function renderDashboard() {
         ` : ''}
       </div>
     </div>
-    <div class="kpis">
-      <div class="card clickable-card" data-filter-type="all" data-filter-value="" data-title="All Projects" data-initiative-type="Project" style="cursor: pointer;">
-        <div class="muted">Total Projects</div>
-        <div style="font-size:32px;font-weight:700;color: var(--brand)">${totalProjectsExCancelled}</div>
-      </div>
-      <div class="card clickable-card" data-filter-type="status" data-filter-value="LIVE" data-title="Live Projects" style="cursor: pointer;">
-        <div class="muted">Live Projects</div>
-        <div style="font-size:32px;font-weight:700;color: #3b82f6">${d.liveCount || 0}</div>
-      </div>
-      <div class="card clickable-card" data-filter-type="inProgress" data-filter-value="" data-title="In Progress Projects" data-initiative-type="Project" style="cursor: pointer; border-left: 4px solid var(--success);">
-        <div class="muted">In Progress Projects</div>
-        <div style="font-size:32px;font-weight:700;color: var(--success)">${inProgressProjects}</div>
-        <div class="muted" style="margin-top: 6px; font-size: 12px;">
-          On Track + At Risk + Delayed
+    <div class="card" style="margin-bottom: 24px;">
+      <div style="display:flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+        <div>
+          <div style="display:flex; align-items:center; gap: 10px;">
+            <div style="width: 10px; height: 10px; border-radius: 50%; background: var(--brand);"></div>
+            <h3 style="margin: 0;">Project Summary</h3>
+          </div>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">
+            Click any metric to drill down to the project list.
+          </div>
+        </div>
+        <div style="display:flex; gap: 10px; align-items:center; flex-wrap: wrap;">
+          <div style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 999px; background: #f8fafc; font-size: 12px; color: var(--muted);">
+            Excludes <strong style="color: var(--text);">CANCELLED</strong> from Total
+          </div>
         </div>
       </div>
-      <div class="card clickable-card" data-filter-type="status" data-filter-value="NOT STARTED" data-title="Not Started Projects" style="cursor: pointer;">
-        <div class="muted">Not Started Projects</div>
-        <div style="font-size:32px;font-weight:700;color: var(--muted)">${notStartedProjects}</div>
+
+      <div style="margin-top: 16px; display:grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: stretch;">
+        <div style="display:grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 12px;">
+          ${(() => {
+            const tile = ({ label, value, color, bg, border, filterType, filterValue, title }) => `
+              <div class="clickable-card"
+                   data-filter-type="${filterType}"
+                   data-filter-value="${filterValue || ''}"
+                   data-title="${escapeHtml(title)}"
+                   data-initiative-type="Project"
+                   style="cursor:pointer; border: 1px solid ${border}; background: ${bg}; border-radius: 12px; padding: 14px 14px 12px; transition: transform .12s ease, box-shadow .12s ease; display:flex; flex-direction:column; min-height: 170px;">
+                <div style="display:flex; justify-content: space-between; align-items: center; gap: 10px;">
+                  <div class="muted" style="font-size: 12px; font-weight: 700; letter-spacing: .2px;">${label}</div>
+                  <div style="width: 10px; height: 10px; border-radius: 3px; background: ${color};"></div>
+                </div>
+                <div style="margin-top: 10px; margin-bottom: 8px; font-size: 30px; font-weight: 900; color: ${color}; line-height: 1;">${value}</div>
+                <div class="muted" style="margin-top:auto; font-size: 11px; line-height: 1.3;">
+                  Click to drill down
+                </div>
+              </div>
+            `;
+
+            return [
+              tile({
+                label: 'Total',
+                value: totalProjectsExCancelled,
+                color: 'var(--brand)',
+                bg: '#eff6ff',
+                border: '#bfdbfe',
+                filterType: 'allExCancelled',
+                filterValue: '',
+                title: 'All Projects (Excl. Cancelled)',
+              }),
+              tile({
+                label: 'Live',
+                value: liveProjects,
+                color: '#3b82f6',
+                bg: '#eff6ff',
+                border: '#bfdbfe',
+                filterType: 'status',
+                filterValue: 'LIVE',
+                title: 'Live Projects',
+              }),
+              tile({
+                label: 'In Progress',
+                value: inProgressProjects,
+                color: 'var(--success)',
+                bg: '#ecfdf5',
+                border: '#bbf7d0',
+                filterType: 'inProgress',
+                filterValue: '',
+                title: 'In Progress Projects',
+              }),
+              tile({
+                label: 'Not Started',
+                value: notStartedProjects,
+                color: '#64748b',
+                bg: '#f8fafc',
+                border: '#e2e8f0',
+                filterType: 'status',
+                filterValue: 'NOT STARTED',
+                title: 'Not Started Projects',
+              }),
+              tile({
+                label: 'On Hold',
+                value: onHoldProjects,
+                color: '#334155',
+                bg: '#f1f5f9',
+                border: '#e2e8f0',
+                filterType: 'status',
+                filterValue: 'ON HOLD',
+                title: 'On Hold Projects',
+              }),
+            ].join('');
+          })()}
+        </div>
+
+        <div style="border: 1px solid #fed7aa; background: linear-gradient(135deg, #fff7ed 0%, #ffffff 60%); border-radius: 12px; padding: 14px;">
+          <div style="display:flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <div class="muted" style="font-size: 12px; font-weight: 800; letter-spacing: .2px;">Avg Project Aging (Working Days)</div>
+            <div style="width: 10px; height: 10px; border-radius: 3px; background: var(--warning);"></div>
+          </div>
+          <div style="display:flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 10px;">
+            <div>
+              <div style="font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
+              <div style="font-size: 36px; font-weight: 950; color: var(--warning); line-height: 1;">${projectAgingMetrics.avgTotalAge}</div>
+            </div>
+            <div style="font-size: 12px; color: var(--muted); text-align: right; line-height: 1.5;">
+              <div><strong style="color: var(--text);">${projectAgingMetrics.avgAgeCreatedToStart}</strong> Created→Start</div>
+              <div><strong style="color: var(--text);">${projectAgingMetrics.avgCycleTime}</strong> Start→End/Now</div>
+            </div>
+          </div>
+          <div class="muted" style="margin-top: 10px; font-size: 12px;">
+            Total Age = (Create→Start) + (Start→End/Now).
+          </div>
+        </div>
       </div>
-      <div class="card" style="border-left: 4px solid var(--warning);">
-        <div class="muted">Average Project Aging (Days)</div>
-        <div style="display:flex; align-items:baseline; justify-content: space-between; gap: 12px; margin-top: 6px;">
+
+      <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px;">
+        <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;">
           <div>
-            <div style="font-size:12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
-            <div style="font-size:34px;font-weight:800;color: var(--warning); line-height: 1;">${projectAgingMetrics.avgTotalAge}</div>
-          </div>
-          <div style="font-size: 12px; color: var(--muted); text-align: right;">
-            <div><strong>${projectAgingMetrics.avgAgeCreatedToStart}</strong> Avg Age Created→Start</div>
-            <div><strong>${projectAgingMetrics.avgCycleTime}</strong> Avg Cycle Time (Start→End)</div>
+            <div style="font-size: 12px; font-weight: 900; color: var(--text);">By Department Group</div>
+            <div class="muted" style="font-size: 11px; margin-top: 2px;">Counts are based on the current dashboard filters.</div>
           </div>
         </div>
-        <div class="muted" style="margin-top: 10px; font-size: 12px;">
-          Total Age = (Create→Start) + (Start→End/Now). For ongoing projects, End uses today.
+        <div class="table-wrapper" style="margin-top: 10px; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 12px;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:left; padding: 10px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); background: #f8fafc;">Department Group</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #b91c1c; border-bottom: 1px solid var(--border); background: #fef2f2;">Total</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #1d4ed8; border-bottom: 1px solid var(--border); background: #eff6ff;">Live</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #047857; border-bottom: 1px solid var(--border); background: #ecfdf5;">In Progress</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #475569; border-bottom: 1px solid var(--border); background: #f8fafc;">Not Started</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #0f172a; border-bottom: 1px solid var(--border); background: #f1f5f9;">On Hold</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(() => {
+                const groups = [
+                  { key: 'Industrial', label: 'Industrial' },
+                  { key: 'Commercial', label: 'Commercial' },
+                  { key: 'Logistic', label: 'Logistic' },
+                  { key: 'EXIM', label: 'EXIM' },
+                  { key: 'FABTIC', label: 'FABTIC' },
+                  { key: 'Support', label: 'Support (Procurement, HC, Sustainability)' },
+                ];
+
+                const row = (g, i) => {
+                  const bg = i % 2 === 0 ? '#ffffff' : '#fbfdff';
+                  const makeCell = (value, bucket, color) => `
+                    <td style="padding: 10px 12px; border-bottom: 1px solid var(--border); text-align:right; font-size: 13px; font-weight: 950; color: ${color};">
+                      <span class="clickable-chart-item"
+                            data-filter-type="deptGroup"
+                            data-filter-value="${g.key}|${bucket}"
+                            data-title="${g.label} - ${bucket.replace('_', ' ')}"
+                            data-initiative-type="Project"
+                            style="cursor:pointer;">
+                        ${value}
+                      </span>
+                    </td>
+                  `;
+                  return `
+                    <tr style="background: ${bg};">
+                      <td style="padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 800; color: #0f172a;">${g.label}</td>
+                      ${makeCell(getGroup(breakdownTotal, g.key), 'TOTAL', '#b91c1c')}
+                      ${makeCell(getGroup(breakdownLive, g.key), 'LIVE', '#1d4ed8')}
+                      ${makeCell(getGroup(breakdownInProgress, g.key), 'IN_PROGRESS', '#047857')}
+                      ${makeCell(getGroup(breakdownNotStarted, g.key), 'NOT_STARTED', '#475569')}
+                      ${makeCell(getGroup(breakdownOnHold, g.key), 'ON_HOLD', '#0f172a')}
+                    </tr>
+                  `;
+                };
+
+                return groups.map(row).join('');
+              })()}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -6057,17 +6314,46 @@ async function renderDashboard() {
     };
 
     const today = new Date();
+    const normalizeDeptNameForCal = (name) => {
+      const n = String(name || '').trim();
+      if (!n) return n;
+      const low = n.toLowerCase();
+      if (low === 'operation') return 'Industrial';
+      if (low === 'trader') return 'Commercial';
+      return n;
+    };
+    const departmentGroupForCal = (deptName) => {
+      const n = normalizeDeptNameForCal(deptName);
+      const low = String(n || '').trim().toLowerCase();
+      if (!low) return 'Support';
+      if (low === 'industrial') return 'Industrial';
+      if (low === 'commercial') return 'Commercial';
+      if (low === 'logistic') return 'Logistic';
+      if (low === 'exim') return 'EXIM';
+      if (low === 'fabtic') return 'FABTIC';
+      if (low === 'procurement' || low === 'hc' || low === 'sustainability') return 'Support';
+      return 'Support';
+    };
+    const deptNameByIdCal = (id) => normalizeDeptNameForCal(nameById(LOOKUPS.departments || [], id));
+
     const projects = rows
-      .map(p => ({
-        id: p.id,
-        name: String(p.name || 'Untitled'),
-        status: String(p.status || '').toUpperCase().trim(),
-        planStart: parseDate(p.planStartDate),
-        planEnd: parseDate(p.planEndDate),
-        actualStart: parseDate(p.startDate),
-        actualEnd: parseDate(p.endDate),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map(p => {
+        const group = departmentGroupForCal(deptNameByIdCal(p.departmentId));
+        return {
+          id: p.id,
+          name: String(p.name || 'Untitled'),
+          status: String(p.status || '').toUpperCase().trim(),
+          planStart: parseDate(p.planStartDate),
+          planEnd: parseDate(p.planEndDate),
+          actualStart: parseDate(p.startDate),
+          actualEnd: parseDate(p.endDate),
+          deptGroup: group,
+        };
+      })
+      .sort((a, b) => {
+        if (a.deptGroup === b.deptGroup) return a.name.localeCompare(b.name);
+        return a.deptGroup.localeCompare(b.deptGroup);
+      });
 
     const allDates = [];
     projects.forEach(p => {
@@ -6105,7 +6391,7 @@ async function renderDashboard() {
     const rightPad = 16;
 
     const maxNameLen = Math.max(...projects.map(p => p.name.length), 10);
-    const namesW = Math.max(280, Math.min(620, Math.round(maxNameLen * 7.2 + 56)));
+    const namesW = Math.max(340, Math.min(680, Math.round(maxNameLen * 7.2 + 56)));
 
     const timelineW = (months.length * monthW) + rightPad;
     const height = topPad + (projects.length * rowH) + 16;
@@ -6182,9 +6468,14 @@ async function renderDashboard() {
     const nameRows = projects.map((p, i) => {
       const y = topPad + i * rowH;
       const badge = statusColors(p.status);
+      const showGroup = i === 0 || projects[i - 1].deptGroup !== p.deptGroup;
+      const groupLabel = showGroup ? escapeHtml(p.deptGroup) : '';
       return `
         <div style="height:${rowH}px; display:flex; align-items:center; gap:10px; padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
-          <span style="width:10px; height:10px; border-radius: 3px; background:${badge.fill}; flex: 0 0 auto;"></span>
+          <div style="width: 110px; flex: 0 0 auto; font-size: 11px; font-weight: 700; color:#334155; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${groupLabel}">
+            ${groupLabel}
+          </div>
+          <span style="width:8px; height:8px; border-radius: 3px; background:${badge.fill}; flex: 0 0 auto;"></span>
           <div style="flex: 1; min-width: 0; cursor: pointer;" onclick="location.hash='#view/${p.id}'" title="${escapeHtml(p.name)}">
             <div style="font-weight: 700; color:#0f172a; font-size: 12px; line-height: 1.2; display:-webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
               ${escapeHtml(p.name)}
@@ -6200,7 +6491,7 @@ async function renderDashboard() {
         <div style="display:grid; grid-template-columns: ${namesW}px ${timelineW}px; min-width: ${namesW + timelineW}px;">
           <div style="position: sticky; left: 0; z-index: 2; background: #ffffff; border-right: 1px solid #e2e8f0;">
             <div style="height:${topPad}px; position: sticky; top: 0; z-index: 3; background: #ffffff; border-bottom: 1px solid #e2e8f0; display:flex; align-items:center; padding: 0 12px; font-weight: 800; color:#334155;">
-              Project
+              Dept Group / Project
             </div>
             ${nameRows}
           </div>

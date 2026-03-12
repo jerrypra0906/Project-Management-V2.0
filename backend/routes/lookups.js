@@ -14,7 +14,15 @@ router.get('/', async (_req, res) => {
     role: u.role || null,
     type: u.type || null
   }));
-  const departments = data.departments.map(d => ({ id: d.id, name: d.name }));
+  // Department display normalization (UI naming)
+  const normalizeDepartmentName = (name) => {
+    const n = String(name || '').trim();
+    if (!n) return n;
+    if (n.toLowerCase() === 'operation') return 'Industrial';
+    if (n.toLowerCase() === 'trader') return 'Commercial';
+    return n;
+  };
+  const departments = data.departments.map(d => ({ id: d.id, name: normalizeDepartmentName(d.name) }));
   res.json({ users, departments });
 });
 

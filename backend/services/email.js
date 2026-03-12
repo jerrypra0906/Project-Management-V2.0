@@ -140,15 +140,14 @@ export async function sendCRCreationEmail(crData, userLookups, documents = []) {
     });
   }
   
-  // Add stevanus.kurniawan@energi-up.com
-  if (!ccEmails.includes('stevanus.kurniawan@energi-up.com')) {
-    ccEmails.push('stevanus.kurniawan@energi-up.com');
-  }
-  
-  // Add jerry.hakim@energi-up.com
-  if (!ccEmails.includes('jerry.hakim@energi-up.com')) {
-    ccEmails.push('jerry.hakim@energi-up.com');
-  }
+  // Static CC recipients (distribution list)
+  const staticCc = [
+    'it-project@energi-up.com',
+    'irawaty.tjie@energi-up.com',
+  ];
+  staticCc.forEach(addr => {
+    if (addr && !ccEmails.includes(addr)) ccEmails.push(addr);
+  });
   
   // Filter out invalid email addresses
   const validCCEmails = filterValidEmails(ccEmails);
