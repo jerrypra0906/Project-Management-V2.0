@@ -247,5 +247,53 @@ router.post('/users/bulk-update-roles', async (req, res) => {
   }
 });
 
+// --- Access Rules Management (for User Access Management Roles) ---
+
+// Get all access rules
+router.get('/access-rules', async (req, res) => {
+  try {
+    const data = await store.read();
+    const rules = data.accessRules || [];
+    return res.json(rules);
+  } catch (e) {
+    console.error('Get access rules error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// Replace all access rules (admin can edit matrix)
+router.post('/access-rules', async (req, res) => {
+  try {
+    const { rules } = req.body || {};
+    if (!Array.isArray(rules)) {
+      return res.status(400).json({ error: 'Rules must be an array' });
+    }
+
+    const data = await store.read();
+    data.accessRules = rules.map(r => ({
+      id: r.id || crypto.randomUUID(),
+      role: r.role || null,
+      type: r.type || null,
+      emailDomain: r.emailDomain || null,
+      canViewProjectDashboard: !!r.canViewProjectDashboard,
+      canViewProjectList: !!r.canViewProjectList,
+      canCreateProject: !!r.canCreateProject,
+      canEditAnyProject: !!r.canEditAnyProject,
+      restrictProjectVisibilityToOwnTeamOnly: !!r.restrictProjectVisibilityToOwnTeamOnly,
+      restrictProjectEditToOwnTeamOnly: !!r.restrictProjectEditToOwnTeamOnly,
+      canViewCRDashboard: !!r.canViewCRDashboard,
+      canViewCRList: !!r.canViewCRList,
+      canCreateCR: !!r.canCreateCR,
+      canEditCR: !!r.canEditCR,
+    }));
+
+    await store.write(data);
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('Save access rules error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 export default router;
 

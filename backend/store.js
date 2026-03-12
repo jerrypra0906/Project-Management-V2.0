@@ -258,6 +258,35 @@ async function initializeSchema() {
       ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "commentId" TEXT;
       ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "read" BOOLEAN DEFAULT FALSE;
       ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      CREATE TABLE IF NOT EXISTS "accessRules" (
+        "id" TEXT PRIMARY KEY,
+        "role" TEXT,
+        "type" TEXT,
+        "emailDomain" TEXT,
+        "canViewProjectDashboard" BOOLEAN,
+        "canViewProjectList" BOOLEAN,
+        "canCreateProject" BOOLEAN,
+        "canEditAnyProject" BOOLEAN,
+        "restrictProjectVisibilityToOwnTeamOnly" BOOLEAN,
+        "restrictProjectEditToOwnTeamOnly" BOOLEAN,
+        "canViewCRDashboard" BOOLEAN,
+        "canViewCRList" BOOLEAN,
+        "canCreateCR" BOOLEAN,
+        "canEditCR" BOOLEAN
+      );
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "role" TEXT;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "type" TEXT;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "emailDomain" TEXT;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewProjectDashboard" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewProjectList" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canCreateProject" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canEditAnyProject" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "restrictProjectVisibilityToOwnTeamOnly" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "restrictProjectEditToOwnTeamOnly" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewCRDashboard" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewCRList" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canCreateCR" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canEditCR" BOOLEAN;
     `;
     await client.query(ddl);
   } finally {
@@ -283,6 +312,7 @@ async function read() {
       'tasks',
       'documents',
       'notifications',
+      'accessRules',
     ];
     for (const table of tables) {
       const res = await client.query(`SELECT * FROM "${table}"`);
@@ -348,6 +378,8 @@ async function read() {
           read: row.read !== undefined ? !!row.read : false,
           createdAt: row.createdAt || row.createdat
         }));
+      } else if (table === 'accessRules') {
+        data[table] = res.rows;
       } else {
         data[table] = res.rows;
       }

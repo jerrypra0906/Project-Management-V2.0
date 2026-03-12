@@ -90,8 +90,8 @@ function validateCommon(body) {
 }
 
 router.get('/', async (req, res) => {
-  const { q, type, status, milestone, priority, departmentId, itPicId, businessOwnerId, active } = req.query;
-  console.log('API filter params:', { q, type, status, milestone, priority, departmentId, active });
+  const { q, type, status, milestone, priority, departmentId, itPicId, itPmId, businessOwnerId, active } = req.query;
+  console.log('API filter params:', { q, type, status, milestone, priority, departmentId, itPicId, itPmId, active });
   const data = await store.read();
   let rows = data.initiatives;
   
@@ -160,6 +160,12 @@ router.get('/', async (req, res) => {
   const businessOwnerIdValues = parseMultiValue(businessOwnerId);
   if (businessOwnerIdValues && businessOwnerIdValues.length > 0) {
     rows = rows.filter(r => businessOwnerIdValues.includes(r.businessOwnerId));
+  }
+
+  // Multi-value filter for IT PM (OR logic, case-sensitive on id)
+  const itPmIdValues = parseMultiValue(itPmId);
+  if (itPmIdValues && itPmIdValues.length > 0) {
+    rows = rows.filter(r => itPmIdValues.includes(r.itPmId));
   }
   
   console.log(`API returned ${rows.length} rows after filtering (total initiatives: ${data.initiatives.length})`);
