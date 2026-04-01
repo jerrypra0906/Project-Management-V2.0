@@ -54,24 +54,27 @@ function createEmailTransporter() {
   const fromEmail = process.env.EMAIL_FROM || 'noreply@energi-up.com';
 
   // If SMTP is not configured, return null (will fall back to console logging)
-  if (!smtpHost || !smtpUser || !smtpPassword) {
+  // Allow unauthenticated SMTP (useful for local Mailpit/Mailhog)
+  if (!smtpHost) {
     console.log('[EMAIL] SMTP not configured. Email will be logged to console.');
     return null;
   }
 
-  return nodemailer.createTransport({
+  const transportOptions = {
     host: smtpHost,
     port: smtpPort,
     secure: smtpSecure, // true for 465, false for other ports
-    auth: {
-      user: smtpUser,
-      pass: smtpPassword,
-    },
     // Optional: Add TLS options if needed
     tls: {
       rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== 'false',
     },
-  });
+  };
+
+  if (smtpUser && smtpPassword) {
+    transportOptions.auth = { user: smtpUser, pass: smtpPassword };
+  }
+
+  return nodemailer.createTransport(transportOptions);
 }
 
 export async function sendCRCreationEmail(crData, userLookups, documents = []) {

@@ -17,22 +17,25 @@ function createEmailTransporter() {
   const smtpPassword = process.env.SMTP_PASSWORD;
   const smtpSecure = process.env.SMTP_SECURE === 'true' || smtpPort === 465;
 
-  if (!smtpHost || !smtpUser || !smtpPassword) {
+  // Allow unauthenticated SMTP (useful for local Mailpit/Mailhog)
+  if (!smtpHost) {
     return null;
   }
 
-  return nodemailer.createTransport({
+  const transportOptions = {
     host: smtpHost,
     port: smtpPort,
     secure: smtpSecure,
-    auth: {
-      user: smtpUser,
-      pass: smtpPassword,
-    },
     tls: {
       rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== 'false',
     },
-  });
+  };
+
+  if (smtpUser && smtpPassword) {
+    transportOptions.auth = { user: smtpUser, pass: smtpPassword };
+  }
+
+  return nodemailer.createTransport(transportOptions);
 }
 
 async function findUserByEmail(email) {

@@ -344,6 +344,10 @@ router.get('/', async (req, res) => {
   // Only count CR-type initiatives for distributions
   let crInitiatives = data.initiatives.filter(i => i.type === 'CR');
   
+  const normStatus = (s) => String(s || '').toUpperCase().trim();
+  const normPriority = (p) => String(p || '').toUpperCase().trim();
+  const normMilestone = (m) => String(m || '').trim();
+
   // Apply filters
   if (departmentId) {
     crInitiatives = crInitiatives.filter(i => i.departmentId === departmentId);
@@ -358,54 +362,53 @@ router.get('/', async (req, res) => {
   
   // Count CRs after filtering
   const crs = crInitiatives.length;
-  const countBy = (key) => Object.entries(crInitiatives.reduce((acc, i) => { acc[i[key]] = (acc[i[key]]||0)+1; return acc; }, {})).map(([k,v]) => ({ [key]: k, c: v }));
-  const byStatus = countBy('status');
-  const byPriority = countBy('priority');
+  const countBy = (key, normFn = (v) => v) => {
+    const acc = crInitiatives.reduce((m, i) => {
+      const raw = i[key];
+      const k = normFn(raw);
+      if (!k) return m;
+      m[k] = (m[k] || 0) + 1;
+      return m;
+    }, {});
+    return Object.entries(acc).map(([k, v]) => ({ [key]: k, c: v }));
+  };
+  // Status should be case-insensitive (normalize to avoid duplicates like "LIVE" vs "Live")
+  const byStatus = countBy('status', normStatus);
+  const byPriority = countBy('priority', normPriority);
   const byDepartment = countBy('departmentId');
   
   // Milestone distribution - only count CRs with non-blank milestones
-  const crsWithMilestone = crInitiatives.filter(i => i.milestone && i.milestone.trim() !== '');
-  const byMilestone = Object.entries(crsWithMilestone.reduce((acc, i) => { acc[i.milestone] = (acc[i.milestone]||0)+1; return acc; }, {})).map(([k,v]) => ({ milestone: k, c: v }));
+  const crsWithMilestone = crInitiatives.filter(i => normMilestone(i.milestone) !== '');
+  const byMilestone = Object.entries(crsWithMilestone.reduce((acc, i) => {
+    const k = normMilestone(i.milestone);
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {})).map(([k, v]) => ({ milestone: k, c: v }));
   
-  // Calculate breakdowns
-  // 1. Status breakdown by Priority (P0, P1, P2)
+  // Breakdowns (for dashboard charts) - normalized to match aggregated keys
   const byStatusBreakdown = {};
-  byStatus.forEach(statusItem => {
-    const status = statusItem.status;
-    const breakdown = { P0: 0, P1: 0, P2: 0 };
-    crInitiatives.filter(cr => cr.status === status).forEach(cr => {
-      const priority = cr.priority || 'P2';
-      if (breakdown[priority] !== undefined) {
-        breakdown[priority]++;
-      }
-    });
-    byStatusBreakdown[status] = breakdown;
-  });
-  
-  // 2. Priority breakdown by Status
   const byPriorityBreakdown = {};
-  byPriority.forEach(priorityItem => {
-    const priority = priorityItem.priority;
-    const breakdown = {};
-    crInitiatives.filter(cr => cr.priority === priority).forEach(cr => {
-      const status = cr.status || 'N/A';
-      breakdown[status] = (breakdown[status] || 0) + 1;
-    });
-    byPriorityBreakdown[priority] = breakdown;
-  });
-  
-  // 3. Milestone breakdown by Priority (P0, P1, P2)
   const byMilestoneBreakdown = {};
-  byMilestone.forEach(milestoneItem => {
-    const milestone = milestoneItem.milestone;
-    const breakdown = { P0: 0, P1: 0, P2: 0 };
-    crInitiatives.filter(cr => cr.milestone === milestone).forEach(cr => {
-      const priority = cr.priority || 'P2';
-      if (breakdown[priority] !== undefined) {
-        breakdown[priority]++;
-      }
-    });
-    byMilestoneBreakdown[milestone] = breakdown;
+
+  crInitiatives.forEach(cr => {
+    const status = normStatus(cr.status);
+    const priority = normPriority(cr.priority) || 'P2';
+    const milestone = normMilestone(cr.milestone);
+
+    if (status) {
+      if (!byStatusBreakdown[status]) byStatusBreakdown[status] = { P0: 0, P1: 0, P2: 0 };
+      if (byStatusBreakdown[status][priority] !== undefined) byStatusBreakdown[status][priority] += 1;
+    }
+
+    if (priority) {
+      if (!byPriorityBreakdown[priority]) byPriorityBreakdown[priority] = {};
+      if (status) byPriorityBreakdown[priority][status] = (byPriorityBreakdown[priority][status] || 0) + 1;
+    }
+
+    if (milestone) {
+      if (!byMilestoneBreakdown[milestone]) byMilestoneBreakdown[milestone] = { P0: 0, P1: 0, P2: 0 };
+      if (byMilestoneBreakdown[milestone][priority] !== undefined) byMilestoneBreakdown[milestone][priority] += 1;
+    }
   });
   
   const year = new Date().getFullYear();
