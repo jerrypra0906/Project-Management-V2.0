@@ -273,7 +273,17 @@ function getColumnVisibility(viewType = 'list') {
   const saved = localStorage.getItem(key);
   if (saved) {
     try {
-      return JSON.parse(saved);
+      const vis = JSON.parse(saved);
+      // CR list used to share class "col-date" for three columns; body cells use col-start-date / col-create-date / col-end-date.
+      if (viewType === 'crlist' && vis && Object.prototype.hasOwnProperty.call(vis, 'col-date')) {
+        const dv = vis['col-date'];
+        if (vis['col-start-date'] === undefined) vis['col-start-date'] = dv;
+        if (vis['col-create-date'] === undefined) vis['col-create-date'] = dv;
+        if (vis['col-end-date'] === undefined) vis['col-end-date'] = dv;
+        delete vis['col-date'];
+        localStorage.setItem(key, JSON.stringify(vis));
+      }
+      return vis;
     } catch {
       return null;
     }
@@ -285,6 +295,84 @@ function getColumnVisibility(viewType = 'list') {
 function saveColumnVisibility(viewType, visibility) {
   const key = `pm_column_visibility_${viewType}`;
   localStorage.setItem(key, JSON.stringify(visibility));
+}
+
+/** Column metadata for CR list (must match initiativeRow cell classes and order). */
+function crListColumnDefinitions() {
+  return [
+    { key: 'ticket', class: 'col-ticket', label: 'Ticket', sortable: true },
+    { key: 'name', class: 'col-name', label: 'CR Name', sortable: true },
+    { key: 'priority', class: 'col-priority', label: 'Priority', sortable: true },
+    { key: 'status', class: 'col-status', label: 'Status', sortable: true },
+    { key: 'milestone', class: 'col-milestone', label: 'Milestone', sortable: true },
+    { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
+    { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
+    { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
+    { key: 'startDate', class: 'col-start-date', label: 'Actual Start Date', sortable: true },
+    { key: 'createdAt', class: 'col-create-date', label: 'Create Date', sortable: true },
+    { key: 'endDate', class: 'col-end-date', label: 'Actual End Date', sortable: true },
+    { key: 'planStartDate', class: 'col-plan-start-date', label: 'Plan Start Date', sortable: true },
+    { key: 'planEndDate', class: 'col-plan-end-date', label: 'Plan End Date', sortable: true },
+    { key: 'ageCreatedToStart', class: 'col-age-created-to-start', label: 'Age Created to Start', sortable: false },
+    { key: 'cycleTime', class: 'col-cycle-time', label: 'Cycle Time (Age Start to End)', sortable: false },
+    { key: 'description', class: 'col-description', label: 'Description', sortable: true },
+    { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
+    { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
+    { key: 'documentationLink', class: 'col-doc', label: 'CR Doc Link', sortable: true },
+    { key: 'actions', class: 'col-actions', label: 'Actions', sortable: false }
+  ];
+}
+
+window.showColumnSettings = (viewType) => {
+  const modalId = viewType === 'crlist' ? 'column-settings-modal-cr' : 'column-settings-modal';
+  const modal = document.getElementById(modalId);
+  if (modal) modal.classList.remove('hidden');
+};
+
+window.closeColumnSettings = () => {
+  document.getElementById('column-settings-modal')?.classList.add('hidden');
+  document.getElementById('column-settings-modal-cr')?.classList.add('hidden');
+};
+
+window.saveColumnSettings = (viewType) => {
+  const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+  const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
+  const visibility = {};
+  checkboxes.forEach((cb) => {
+    visibility[cb.dataset.col] = cb.checked;
+  });
+  visibility['col-actions'] = true;
+  saveColumnVisibility(viewType, visibility);
+  window.closeColumnSettings();
+  if (viewType === 'list') {
+    renderList();
+  } else if (viewType === 'crlist') {
+    renderCRList();
+  }
+};
+
+window.checkAllColumns = (viewType) => {
+  const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+  document.querySelectorAll(`${checkboxId} input[type="checkbox"]`).forEach((cb) => {
+    cb.checked = true;
+  });
+};
+
+window.uncheckAllColumns = (viewType) => {
+  const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+  document.querySelectorAll(`${checkboxId} input[type="checkbox"]`).forEach((cb) => {
+    cb.checked = false;
+  });
+};
+
+if (typeof window !== 'undefined' && !window.__pmColumnModalBackdropBound) {
+  window.__pmColumnModalBackdropBound = true;
+  document.addEventListener('click', (e) => {
+    const id = e.target?.id;
+    if (id === 'column-settings-modal' || id === 'column-settings-modal-cr') {
+      window.closeColumnSettings();
+    }
+  });
 }
 
 // Column width management (persist per viewType)
@@ -1042,6 +1130,125 @@ function initScrollableTables() {
   });
 }
 
+/** Sync a top horizontal scrollbar with `.table-wrapper` (used on Project + CR lists). */
+function initTableScrollPairs() {
+  document.querySelectorAll('.table-scroll-pair').forEach((pair) => {
+    const top = pair.querySelector('.table-scroll-top');
+    const inner = pair.querySelector('.table-scroll-top-inner');
+    const wrap = pair.querySelector('.table-wrapper');
+    if (!top || !inner || !wrap) return;
+
+    const syncInnerWidth = () => {
+      inner.style.width = `${Math.max(wrap.scrollWidth, wrap.clientWidth)}px`;
+    };
+
+    let syncing = false;
+    const onTopScroll = () => {
+      if (syncing) return;
+      syncing = true;
+      wrap.scrollLeft = top.scrollLeft;
+      syncing = false;
+    };
+    const onWrapScroll = () => {
+      if (syncing) return;
+      syncing = true;
+      top.scrollLeft = wrap.scrollLeft;
+      syncing = false;
+      const { scrollLeft, scrollWidth, clientWidth } = wrap;
+      wrap.classList.toggle('has-left-shadow', scrollLeft > 1);
+      wrap.classList.toggle('has-right-shadow', scrollWidth - clientWidth - scrollLeft > 1);
+    };
+
+    top.addEventListener('scroll', onTopScroll);
+    wrap.addEventListener('scroll', onWrapScroll);
+
+    syncInnerWidth();
+    const ro = new ResizeObserver(() => syncInnerWidth());
+    ro.observe(wrap);
+    const table = wrap.querySelector('table');
+    if (table) ro.observe(table);
+
+    onWrapScroll();
+  });
+}
+
+function escapeCsvField(val) {
+  const t = String(val ?? '').replace(/"/g, '""');
+  if (/[",\n\r]/.test(t)) return `"${t}"`;
+  return t;
+}
+
+function exportCellValueForCR(i, key) {
+  switch (key) {
+    case 'departmentId':
+      return nameById(LOOKUPS.departments, i.departmentId);
+    case 'businessOwnerId':
+      return nameById(LOOKUPS.users, i.businessOwnerId);
+    case 'itPicId':
+      return nameById(LOOKUPS.users, i.itPicId);
+    case 'startDate':
+    case 'endDate':
+    case 'createdAt':
+    case 'planStartDate':
+    case 'planEndDate':
+      return (i[key] || '').toString().slice(0, 10);
+    case 'ageCreatedToStart': {
+      if (!i.createdAt || !i.startDate) return '';
+      const c = new Date(i.createdAt);
+      const s = new Date(i.startDate);
+      if (isNaN(c.getTime()) || isNaN(s.getTime())) return '';
+      const d = calculateWorkingDays(c, s);
+      return d !== null && d !== undefined ? String(d) : '';
+    }
+    case 'cycleTime': {
+      if (!i.startDate) return '';
+      const startDate = new Date(i.startDate);
+      if (isNaN(startDate.getTime())) return '';
+      if (i.endDate) {
+        const endDate = new Date(i.endDate);
+        if (isNaN(endDate.getTime())) return '';
+        const endInclusive = new Date(endDate);
+        endInclusive.setDate(endInclusive.getDate() + 1);
+        const d = calculateWorkingDays(startDate, endInclusive);
+        return d !== null && d !== undefined ? String(d) : '';
+      }
+      const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const d = calculateWorkingDays(startDate, tomorrow);
+      return d !== null && d !== undefined ? String(d) : '';
+    }
+    default:
+      return (i[key] ?? '').toString();
+  }
+}
+
+window.exportCRListToExcel = function exportCRListToExcel() {
+  const pack = window.__crListExport;
+  if (!pack || !Array.isArray(pack.rows) || pack.rows.length === 0) {
+    alert('No CR rows to export. Apply filters or refresh the list.');
+    return;
+  }
+  const colVisibility = pack.colVisibility || getDefaultColumns('crlist');
+  const columns = crListColumnDefinitions().filter(
+    (c) => c.key !== 'actions' && colVisibility[c.class] !== false
+  );
+  const header = columns.map((c) => escapeCsvField(c.label)).join(',');
+  const rows = pack.rows.map(({ initiative: i }) =>
+    columns.map((c) => escapeCsvField(exportCellValueForCR(i, c.key))).join(',')
+  );
+  const bom = '\uFEFF';
+  const blob = new Blob([bom + header + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `CR_List_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
 async function renderList() {
   console.log('renderList called');
   setActive('#list');
@@ -1558,20 +1765,23 @@ async function renderList() {
         </div>
       </div>
     </div>
-    <div class="table-wrapper">
-      <table id="initiatives-table">
-        <thead>
-          <tr>
-            ${columns.map(col => {
-              const visible = colVisibility[col.class] !== false;
-              const sortClass = col.sortable ? 'sortable' : '';
-              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-            }).join('')}
-          </tr>
-        </thead>
-        <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
-      </table>
+    <div class="table-scroll-pair">
+      <div class="table-scroll-top" aria-hidden="true"><div class="table-scroll-top-inner"></div></div>
+      <div class="table-wrapper">
+        <table id="initiatives-table">
+          <thead>
+            <tr>
+              ${columns.map(col => {
+                const visible = colVisibility[col.class] !== false;
+                const sortClass = col.sortable ? 'sortable' : '';
+                const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+                return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+              }).join('')}
+            </tr>
+          </thead>
+          <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
+        </table>
+      </div>
     </div>
     <div id="column-settings-modal" class="modal hidden">
       <div class="modal-content column-settings-modal">
@@ -1599,7 +1809,8 @@ async function renderList() {
 
   // Initialize horizontal scroll affordance for the main initiatives table.
   initScrollableTables();
-  
+  initTableScrollPairs();
+
   // Multi-select dropdown handlers (for checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
@@ -1739,66 +1950,6 @@ async function renderList() {
       }
     });
   }
-  // Column settings functions
-  window.showColumnSettings = (viewType) => {
-    const modalId = viewType === 'crlist' ? 'column-settings-modal-cr' : 'column-settings-modal';
-    const modal = document.getElementById(modalId);
-    if (modal) modal.classList.remove('hidden');
-  };
-  
-  window.saveColumnSettings = (viewType) => {
-    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
-    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
-    const visibility = {};
-    checkboxes.forEach(cb => {
-      visibility[cb.dataset.col] = cb.checked;
-    });
-    // Always keep actions visible
-    visibility['col-actions'] = true;
-    saveColumnVisibility(viewType, visibility);
-    closeColumnSettings();
-    if (viewType === 'list') {
-      renderList();
-    } else if (viewType === 'crlist') {
-      renderCRList();
-    }
-  };
-  
-  window.closeColumnSettings = () => {
-    const modal = document.getElementById('column-settings-modal');
-    const modalCr = document.getElementById('column-settings-modal-cr');
-    if (modal) modal.classList.add('hidden');
-    if (modalCr) modalCr.classList.add('hidden');
-  };
-  
-  window.checkAllColumns = (viewType) => {
-    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
-    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
-    checkboxes.forEach(cb => {
-      cb.checked = true;
-    });
-  };
-  
-  window.uncheckAllColumns = (viewType) => {
-    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
-    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
-    checkboxes.forEach(cb => {
-      cb.checked = false;
-    });
-  };
-  
-  // Close modal when clicking backdrop
-  setTimeout(() => {
-    const modals = document.querySelectorAll('.modal');
-    modals.forEach(modal => {
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-          closeColumnSettings();
-        }
-      });
-    });
-  }, 100);
-  
   // Add resize handles to ALL columns (not just sortable) - Project List
   document.querySelectorAll('thead th').forEach(th => {
     // Skip actions column
@@ -1897,8 +2048,12 @@ async function renderList() {
   document.querySelectorAll('button.delete').forEach(btn => {
     btn.onclick = async () => {
       if (!confirm('Delete this initiative?')) return;
-      await fetch(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
-      renderList();
+      try {
+        await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        renderList();
+      } catch (e) {
+        alert('Failed to delete initiative: ' + (e.message || String(e)));
+      }
     };
   });
   document.querySelectorAll('button.view').forEach(btn => {
@@ -4366,31 +4521,12 @@ async function renderCRList() {
   
   // Get column visibility preferences
   const colVisibility = getColumnVisibility('crlist') || getDefaultColumns('crlist');
-  
-  // Column definitions for CR List
-  const columns = [
-    { key: 'ticket', class: 'col-ticket', label: 'Ticket', sortable: true },
-    { key: 'name', class: 'col-name', label: 'CR Name', sortable: true },
-    { key: 'priority', class: 'col-priority', label: 'Priority', sortable: true },
-    { key: 'status', class: 'col-status', label: 'Status', sortable: true },
-    { key: 'milestone', class: 'col-milestone', label: 'Milestone', sortable: true },
-    { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
-    { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
-    { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
-    { key: 'startDate', class: 'col-date', label: 'Start Date', sortable: true },
-    { key: 'createdAt', class: 'col-date', label: 'Create Date', sortable: true },
-    { key: 'endDate', class: 'col-date', label: 'End Date', sortable: true },
-    { key: 'planStartDate', class: 'col-plan-start-date', label: 'Plan Start Date', sortable: true },
-    { key: 'planEndDate', class: 'col-plan-end-date', label: 'Plan End Date', sortable: true },
-    { key: 'ageCreatedToStart', class: 'col-age-created-to-start', label: 'Age Created to Start', sortable: false },
-    { key: 'cycleTime', class: 'col-cycle-time', label: 'Cycle Time (Age Start to End)', sortable: false },
-    { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
-    { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
-    { key: 'documentationLink', class: 'col-doc', label: 'CR Doc Link', sortable: true },
-    { key: 'actions', class: 'col-actions', label: 'Actions', sortable: false }
-  ];
+
+  const columns = crListColumnDefinitions();
   const access = await getUserAccess();
   const canCreateCR = !access || access.canCreateCR !== false || access.isAdmin;
+
+  window.__crListExport = { rows: dataWithCR, colVisibility };
 
   app.innerHTML = `
     <div class="milestone-graph">
@@ -4560,25 +4696,29 @@ async function renderCRList() {
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('crlist')" title="Column Settings" class="icon-btn">⚙️</button>
+          <button type="button" class="btn-secondary" onclick="exportCRListToExcel()" title="Download filtered rows as CSV (opens in Microsoft Excel)">Export Excel</button>
           <button id="apply-filters-btn" class="primary" onclick="applyFiltersCR()">Apply Filters</button>
           ${canCreateCR ? '<a href="#new/CR"><button class="primary">+ New CR</button></a>' : ''}
         </div>
       </div>
     </div>
-    <div class="table-wrapper">
-      <table id="cr-table">
-        <thead>
-          <tr>
-            ${columns.map(col => {
-              const visible = colVisibility[col.class] !== false;
-              const sortClass = col.sortable ? 'sortable' : '';
-              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-            }).join('')}
-          </tr>
-        </thead>
-        <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
-      </table>
+    <div class="table-scroll-pair">
+      <div class="table-scroll-top" aria-hidden="true"><div class="table-scroll-top-inner"></div></div>
+      <div class="table-wrapper">
+        <table id="cr-table">
+          <thead>
+            <tr>
+              ${columns.map(col => {
+                const visible = colVisibility[col.class] !== false;
+                const sortClass = col.sortable ? 'sortable' : '';
+                const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+                return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+              }).join('')}
+            </tr>
+          </thead>
+          <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
+        </table>
+      </div>
     </div>
     <div id="column-settings-modal-cr" class="modal hidden">
       <div class="modal-content column-settings-modal">
@@ -4603,6 +4743,10 @@ async function renderCRList() {
       </div>
     </div>
   `;
+
+  initScrollableTables();
+  initTableScrollPairs();
+
   // Multi-select dropdown handlers (checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
@@ -4822,8 +4966,12 @@ async function renderCRList() {
   document.querySelectorAll('button.delete').forEach(btn => {
     btn.onclick = async () => {
       if (!confirm('Delete this CR?')) return;
-      await fetch(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
-      renderCRList();
+      try {
+        await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        renderCRList();
+      } catch (e) {
+        alert('Failed to delete CR: ' + (e.message || String(e)));
+      }
     };
   });
   document.querySelectorAll('button.view').forEach(btn => {
