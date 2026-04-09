@@ -3,6 +3,10 @@ import store from '../store.js';
 import crypto from 'crypto';
 import { sendCRCreationEmail } from '../services/email.js';
 import fs from 'fs/promises';
+import {
+  CR_TASK_DEFINITIONS,
+  getCrAssigneeIdFromBody,
+} from '../crTaskTemplates.js';
 
 const router = express.Router();
 
@@ -182,6 +186,38 @@ router.get('/', async (req, res) => {
   res.json(rows.slice(0,500));
 });
 
+/** Last N change-history entries for initiatives of a given type (Project | CR). */
+router.get('/recent-activity', async (req, res) => {
+  const { type } = req.query;
+  const limitRaw = parseInt(String(req.query.limit || '20'), 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(100, Math.max(1, limitRaw)) : 20;
+  if (type !== 'Project' && type !== 'CR') {
+    return res.status(400).json({ error: 'Query parameter "type" must be Project or CR' });
+  }
+  const data = await store.read();
+  const allowedIds = new Set(
+    (data.initiatives || []).filter((i) => i.type === type).map((i) => i.id)
+  );
+  const byId = Object.fromEntries((data.initiatives || []).map((i) => [i.id, i]));
+  const items = (data.changeHistory || [])
+    .filter((h) => h.initiativeId && allowedIds.has(h.initiativeId))
+    .map((h) => {
+      const init = byId[h.initiativeId];
+      return {
+        id: h.id,
+        initiativeId: h.initiativeId,
+        initiativeName: init?.name || '',
+        initiativeTicket: init?.ticket || '',
+        timestamp: h.timestamp,
+        changedBy: h.changedBy,
+        changes: Array.isArray(h.changes) ? h.changes : [],
+      };
+    })
+    .sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))
+    .slice(0, limit);
+  res.json(items);
+});
+
 router.get('/:id', async (req, res) => {
   const data = await store.read();
   const i = data.initiatives.find(x => x.id === req.params.id);
@@ -257,25 +293,43 @@ router.post('/', async (req, res) => {
     });
   }
   
-  // Auto-create tasks: 1 task per milestone
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
+  // Auto-create tasks: CR workflow tasks (IT PIC) or Project milestone tasks
   if (!data.tasks) data.tasks = [];
-  milestones.forEach(m => {
-    const taskId = uuid();
-    data.tasks.push({
-      id: taskId,
-      initiativeId: id,
-      name: `${m} Task`,
-      description: `Task for ${m} milestone`,
-      startDate: null,
-      endDate: null,
-      assigneeId: null,
-      status: 'Not Started',
-      milestone: m,
-      createdAt,
-      updatedAt: null
+  if (type === 'CR') {
+    const assigneeId = getCrAssigneeIdFromBody(req.body);
+    CR_TASK_DEFINITIONS.forEach(({ name, milestone }) => {
+      data.tasks.push({
+        id: uuid(),
+        initiativeId: id,
+        name,
+        description: null,
+        startDate: null,
+        endDate: null,
+        assigneeId,
+        status: 'not started',
+        milestone,
+        createdAt,
+        updatedAt: null,
+      });
     });
-  });
+  } else {
+    const milestones = ['Preparation', 'Business Requirement', 'Tech Assessment', 'Planning', 'Development', 'Testing', 'Live'];
+    milestones.forEach((m) => {
+      data.tasks.push({
+        id: uuid(),
+        initiativeId: id,
+        name: `${m} Task`,
+        description: `Task for ${m} milestone`,
+        startDate: null,
+        endDate: null,
+        assigneeId: null,
+        status: 'Not Started',
+        milestone: m,
+        createdAt,
+        updatedAt: null,
+      });
+    });
+  }
   
   await store.write(data);
   

@@ -4,20 +4,49 @@ const BASE_URL = 'http://localhost:3000';
 const TEST_TIMEOUT = 10000; // 10 seconds
 
 // Test utilities
-async function fetchJSON(url) {
-  const response = await fetch(url);
+let AUTH_TOKEN = null;
+
+async function fetchJSON(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (AUTH_TOKEN && !headers.Authorization) {
+    headers.Authorization = `Bearer ${AUTH_TOKEN}`;
+  }
+  const response = await fetch(url, { ...options, headers });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const body = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${body || response.statusText}`);
   }
   return response.json();
 }
 
-async function fetchText(url) {
-  const response = await fetch(url);
+async function fetchText(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (AUTH_TOKEN && !headers.Authorization) {
+    headers.Authorization = `Bearer ${AUTH_TOKEN}`;
+  }
+  const response = await fetch(url, { ...options, headers });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const body = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${body || response.statusText}`);
   }
   return response.text();
+}
+
+async function loginIfNeeded() {
+  if (AUTH_TOKEN) return AUTH_TOKEN;
+  const email = process.env.TEST_EMAIL || 'jerry.pratama@energi-up.com';
+  const password = process.env.TEST_PASSWORD || 'Password123';
+  const res = await fetchJSON(`${BASE_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  const token = res?.token || res?.accessToken || null;
+  if (!token) {
+    throw new Error('Login succeeded but token missing in response');
+  }
+  AUTH_TOKEN = token;
+  return token;
 }
 
 // Test cases
@@ -38,8 +67,17 @@ const tests = [
   },
   
   {
+    name: 'Auth Login',
+    async run() {
+      await loginIfNeeded();
+      return '✅ Login succeeded and token acquired';
+    }
+  },
+
+  {
     name: 'API Endpoints Available',
     async run() {
+      await loginIfNeeded();
       const endpoints = [
         '/api/initiatives',
         '/api/lookups',
@@ -47,7 +85,9 @@ const tests = [
       ];
       
       for (const endpoint of endpoints) {
-        const response = await fetch(`${BASE_URL}${endpoint}`);
+        const response = await fetch(`${BASE_URL}${endpoint}`, {
+          headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+        });
         if (!response.ok) {
           throw new Error(`Endpoint ${endpoint} failed: ${response.status}`);
         }
@@ -59,6 +99,7 @@ const tests = [
   {
     name: 'Project Data Loading',
     async run() {
+      await loginIfNeeded();
       const data = await fetchJSON(`${BASE_URL}/api/initiatives?type=Project`);
       if (!Array.isArray(data)) {
         throw new Error('Project data is not an array');
@@ -82,6 +123,7 @@ const tests = [
   {
     name: 'CR Data Loading',
     async run() {
+      await loginIfNeeded();
       const data = await fetchJSON(`${BASE_URL}/api/initiatives?type=CR`);
       if (!Array.isArray(data)) {
         throw new Error('CR data is not an array');
@@ -105,6 +147,7 @@ const tests = [
   {
     name: 'CR Timeline Data',
     async run() {
+      await loginIfNeeded();
       const crData = await fetchJSON(`${BASE_URL}/api/initiatives?type=CR`);
       if (crData.length === 0) {
         throw new Error('No CR data to test timeline');
@@ -138,6 +181,7 @@ const tests = [
   {
     name: 'Lookup Data',
     async run() {
+      await loginIfNeeded();
       const lookups = await fetchJSON(`${BASE_URL}/api/lookups`);
       if (!lookups.users || !Array.isArray(lookups.users)) {
         throw new Error('Users lookup missing');
@@ -159,6 +203,7 @@ const tests = [
   {
     name: 'Dashboard Data',
     async run() {
+      await loginIfNeeded();
       const dashboard = await fetchJSON(`${BASE_URL}/api/dashboard`);
       if (typeof dashboard.projects !== 'number') {
         throw new Error('Dashboard missing project count');

@@ -948,6 +948,195 @@ function nameById(arr, id) {
   return m ? m.name : id || '';
 }
 
+/** Calendar days between task start and end (inclusive span); both dates required (YYYY-MM-DD). */
+function computeTaskAgingDays(startDateStr, endDateStr) {
+  if (!startDateStr || !endDateStr) return null;
+  const s = new Date(String(startDateStr).slice(0, 10));
+  const e = new Date(String(endDateStr).slice(0, 10));
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null;
+  const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24));
+  return days >= 0 ? days : null;
+}
+
+// CR milestone UI labels (new) → canonical initiative milestone (old)
+const CR_MILESTONE_UI_TO_CANONICAL = {
+  'User Initiate': 'Preparation',
+  'CR Created': 'Preparation',
+  'CR Signed Sec 2 and 3': 'Preparation',
+  'FSD': 'Tech Assessment',
+  'Development': 'Development',
+  'Changes': 'Development',
+  'Signed Changes': 'Development',
+  'Development - Extended': 'Development',
+  'SIT': 'Testing',
+  'UAT': 'Testing',
+  'Live': 'Live',
+};
+
+const CR_MILESTONE_UI_OPTIONS = Object.keys(CR_MILESTONE_UI_TO_CANONICAL);
+
+function canonicalMilestoneToCrUiLabel(canonical) {
+  const v = String(canonical || '').trim().toLowerCase();
+  // Representative UI label per canonical value (Preparation is many-to-one)
+  if (v === 'preparation') return 'User Initiate';
+  if (v === 'tech assessment') return 'FSD';
+  if (v === 'development') return 'Development';
+  if (v === 'testing') return 'SIT';
+  if (v === 'live') return 'Live';
+  return canonical || '';
+}
+
+function normalizeCrMilestoneForDisplay(initiative) {
+  if (!initiative || initiative.type !== 'CR') return initiative?.milestone || '';
+  return canonicalMilestoneToCrUiLabel(initiative.milestone);
+}
+
+/** Shared formatters for change-history (recent activity FAB + view page). */
+function formatActivityFieldLabelGlobal(field) {
+  if (!field) return '';
+  const mapping = {
+    businessOwnerId: 'Business Owner / Requestor',
+    businessUserIds: 'Business Users',
+    departmentId: 'Department',
+    itPicId: 'IT PIC',
+    itPicIds: 'IT PIC',
+    itPmId: 'IT PM',
+    itManagerIds: 'IT Manager',
+    startDate: 'Actual Start Date',
+    endDate: 'Actual End Date',
+    planStartDate: 'Plan Start Date',
+    planEndDate: 'Plan End Date',
+    documentationLink: 'Project Doc Link',
+  };
+  if (mapping[field]) return mapping[field];
+  return String(field).charAt(0).toUpperCase() + String(field).slice(1).replace(/([A-Z])/g, ' $1').trim();
+}
+
+function formatActivityValueGlobal(field, raw) {
+  if (raw === null || raw === undefined || raw === '') return '(empty)';
+  if (field === 'businessOwnerId' || field === 'itPicId' || field === 'itPmId' || field === 'changedBy') {
+    const name = nameById(LOOKUPS.users, raw);
+    return name || String(raw);
+  }
+  if (field === 'departmentId') {
+    return nameById(LOOKUPS.departments, raw) || String(raw);
+  }
+  if (field === 'businessUserIds' || field === 'itPicIds' || field === 'itManagerIds') {
+    let ids = [];
+    if (Array.isArray(raw)) {
+      ids = raw;
+    } else {
+      const str = String(raw).trim();
+      if (str.startsWith('[') && str.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(str);
+          if (Array.isArray(parsed)) ids = parsed;
+        } catch {
+          /* ignore */
+        }
+      }
+      if (ids.length === 0) {
+        const cleaned = str.replace(/[\[\]"]/g, '');
+        ids = cleaned.split(',').map((v) => v.trim()).filter(Boolean);
+      }
+    }
+    const names = ids.map((id) => nameById(LOOKUPS.users, id)).filter(Boolean);
+    return names.length > 0 ? names.join(', ') : ids.length > 0 ? ids.join(', ') : String(raw);
+  }
+  return String(raw);
+}
+
+function formatRecentActivityHtml(items) {
+  if (!items || items.length === 0) {
+    return '<p class="muted" style="padding:16px;">No recent changes recorded yet.</p>';
+  }
+  return items
+    .map((h) => {
+      const ts = h.timestamp ? new Date(h.timestamp) : null;
+      const when =
+        ts && !isNaN(ts.getTime())
+          ? `${ts.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} ${ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+          : '';
+      const who = escapeHtml(formatActivityValueGlobal('changedBy', h.changedBy));
+      const title = escapeHtml(h.initiativeName || 'Unknown');
+      const ticket = h.initiativeTicket ? escapeHtml(String(h.initiativeTicket)) : '';
+      const link = h.initiativeId ? `#view/${escapeHtml(h.initiativeId)}` : '#';
+      const changes = (h.changes || [])
+        .map((c) => {
+          const fl = escapeHtml(formatActivityFieldLabelGlobal(c.field));
+          const ov = escapeHtml(formatActivityValueGlobal(c.field, c.oldValue));
+          const nv = escapeHtml(formatActivityValueGlobal(c.field, c.newValue));
+          return `<li><span class="muted">${fl}:</span> <span style="text-decoration:line-through;color:#b91c1c;">${ov}</span> → <span style="color:#047857;">${nv}</span></li>`;
+        })
+        .join('');
+      return `
+      <article class="recent-activity-item">
+        <div class="recent-activity-item-header">
+          <a href="${link}">${title}</a>${ticket ? ` <span class="muted">(${ticket})</span>` : ''}
+        </div>
+        <div class="recent-activity-item-meta muted">${escapeHtml(when)} · ${who}</div>
+        <ul class="recent-activity-changes">${changes || '<li class="muted">(no field details)</li>'}</ul>
+      </article>`;
+    })
+    .join('');
+}
+
+function recentActivityFabMarkup(initiativeType) {
+  const t = initiativeType === 'CR' ? 'CR' : 'Project';
+  return `
+    <div class="recent-activity-root" data-initiative-type="${t}">
+      <button type="button" class="recent-activity-fab" title="Last 20 recent changes" aria-expanded="false">📋</button>
+      <div class="recent-activity-backdrop hidden" aria-hidden="true"></div>
+      <aside class="recent-activity-panel hidden" role="dialog" aria-label="Recent activity">
+        <div class="recent-activity-panel-header">
+          <h3>Recent activity</h3>
+          <button type="button" class="recent-activity-close" aria-label="Close">×</button>
+        </div>
+        <div class="recent-activity-panel-body"></div>
+      </aside>
+    </div>`;
+}
+
+function wireRecentActivityFab() {
+  const root = document.querySelector('.recent-activity-root');
+  if (!root) return;
+  const initiativeType = root.dataset.initiativeType || 'Project';
+  const btn = root.querySelector('.recent-activity-fab');
+  const panel = root.querySelector('.recent-activity-panel');
+  const backdrop = root.querySelector('.recent-activity-backdrop');
+  const closeBtn = root.querySelector('.recent-activity-close');
+  const bodyEl = root.querySelector('.recent-activity-panel-body');
+  if (!btn || !panel || !backdrop || !closeBtn || !bodyEl) return;
+
+  const close = () => {
+    panel.classList.add('hidden');
+    backdrop.classList.add('hidden');
+    btn.setAttribute('aria-expanded', 'false');
+  };
+
+  const open = async () => {
+    panel.classList.remove('hidden');
+    backdrop.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+    bodyEl.innerHTML = '<div class="muted" style="padding:16px;">Loading…</div>';
+    try {
+      const items = await fetchJSON(
+        `/api/initiatives/recent-activity?type=${encodeURIComponent(initiativeType)}&limit=20`
+      );
+      bodyEl.innerHTML = formatRecentActivityHtml(items);
+    } catch (e) {
+      bodyEl.innerHTML = `<div class="error" style="padding:16px;">Failed to load: ${escapeHtml(e.message || String(e))}</div>`;
+    }
+  };
+
+  btn.onclick = () => {
+    if (panel.classList.contains('hidden')) open();
+    else close();
+  };
+  closeBtn.onclick = close;
+  backdrop.onclick = close;
+}
+
 function initiativeRow(i, crData = null, colVisibility = null) {
   const dep = nameById(LOOKUPS.departments, i.departmentId);
   const itpic = nameById(LOOKUPS.users, i.itPicId);
@@ -1071,7 +1260,7 @@ function initiativeRow(i, crData = null, colVisibility = null) {
     <td class="col-name" style="display: ${colVisibility['col-name'] !== false ? 'table-cell' : 'none'}"><strong><a href="#view/${i.id}">${i.name}</a></strong></td>
     <td class="col-priority" style="display: ${colVisibility['col-priority'] !== false ? 'table-cell' : 'none'}"><span class="priority-badge priority-${priorityClass}">${i.priority}</span></td>
     <td class="col-status" style="display: ${colVisibility['col-status'] !== false ? 'table-cell' : 'none'}"><span class="status-badge status-${statusClass}">${i.status}</span></td>
-    <td class="col-milestone" style="display: ${colVisibility['col-milestone'] !== false ? 'table-cell' : 'none'}">${i.milestone}</td>
+    <td class="col-milestone" style="display: ${colVisibility['col-milestone'] !== false ? 'table-cell' : 'none'}">${escapeHtml(normalizeCrMilestoneForDisplay(i))}</td>
     <td class="col-department" style="display: ${colVisibility['col-department'] !== false ? 'table-cell' : 'none'}">${dep}</td>
     <td class="col-owner" style="display: ${colVisibility['col-owner'] !== false ? 'table-cell' : 'none'}">${bo}</td>
     <td class="col-pic" style="display: ${colVisibility['col-pic'] !== false ? 'table-cell' : 'none'}">${itpic}</td>
@@ -1805,11 +1994,13 @@ async function renderList() {
         </div>
       </div>
     </div>
+    ${recentActivityFabMarkup('Project')}
   `;
 
   // Initialize horizontal scroll affordance for the main initiatives table.
   initScrollableTables();
   initTableScrollPairs();
+  wireRecentActivityFab();
 
   // Multi-select dropdown handlers (for checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
@@ -2318,6 +2509,10 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
   
   // Determine selected type: from initiative if exists, otherwise from defaultType
   const selectedType = initiative ? initiative.type : defaultType;
+  const currentMilestone = initiative?.milestone || '';
+  const selectedCrUiMilestone = selectedType === 'CR'
+    ? canonicalMilestoneToCrUiLabel(currentMilestone)
+    : currentMilestone;
   
   const fields = [
     formRow('Type', `<select name="type" id="typeSelect" required><option value="Project" ${selectedType === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${selectedType === 'CR' ? 'selected' : ''}>CR</option></select>`),
@@ -2332,7 +2527,11 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
     formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, initiative?.itPmId || '', 'Select...', true)),
     formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, initiative?.itManagerIds || [])),
     formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => option(s, s, initiative?.status === s)).join('')}</select>`),
-    formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, initiative?.milestone === m)).join('')}</select>`),
+    formRow('Milestone', `<select name="milestone">${
+      selectedType === 'CR'
+        ? CR_MILESTONE_UI_OPTIONS.map(m => option(m, m, selectedCrUiMilestone === m)).join('')
+        : ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, currentMilestone === m)).join('')
+    }</select>`),
     formRow('Actual Start Date', `<input type="date" name="startDate" value="${initiative?.startDate?.slice(0,10) || ''}" />`),
     formRow('Actual End Date', `<input type="date" name="endDate" value="${initiative?.endDate?.slice(0,10) || ''}" />`),
     formRow('Plan Start Date', `<input type="date" name="planStartDate" value="${initiative?.planStartDate?.slice(0,10) || ''}" required />`),
@@ -2606,7 +2805,9 @@ async function renderNew(defaultType = 'Project') {
       itPmId: obj.itPmId || null,
       itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
       status: obj.status,
-      milestone: obj.milestone,
+      milestone: obj.type === 'CR'
+        ? (CR_MILESTONE_UI_TO_CANONICAL[obj.milestone] || obj.milestone)
+        : obj.milestone,
       startDate: obj.startDate,
       endDate: obj.endDate || null,
       planStartDate: obj.planStartDate || null,
@@ -2697,19 +2898,30 @@ async function renderView(id) {
   }
   
   // Sort tasks by Milestone and Start Date (Ascending)
-  // Milestone order: None -> Business Requirement -> Tech Assessment -> Planning -> Development -> Testing -> Live Preparation
-  const milestoneOrder = {
+  const baseMilestoneOrder = {
     '': 0,
     'none': 0,
-    'business requirement': 1,
-    'tech assessment': 2,
-    'planning': 3,
-    'development': 4,
-    'testing': 5,
-    'live preparation': 6,
-    'live': 6,
-    'preparation': 0
+    preparation: 1,
+    'business requirement': 2,
+    'tech assessment': 3,
+    planning: 4,
+    development: 5,
+    testing: 6,
+    'live preparation': 7,
+    live: 8,
   };
+  const crPhaseMilestoneOrder = {
+    'user initiate': 10,
+    'cr created': 20,
+    'cr signed sec 2 and 3': 30,
+    fsd: 40,
+    development: 50,
+    sit: 60,
+    uat: 70,
+    live: 80,
+  };
+  const milestoneOrder =
+    i.type === 'CR' ? { ...baseMilestoneOrder, ...crPhaseMilestoneOrder } : baseMilestoneOrder;
   
   tasks.sort((a, b) => {
     // First sort by milestone
@@ -2911,7 +3123,7 @@ async function renderView(id) {
         <div><div class="muted">Priority</div><div><span class="priority-badge priority-${i.priority}">${i.priority}</span></div></div>
         <div><div class="muted">Status</div><div><span class="status-badge status-${i.status?.replace(/\s+/g, '-')}">${i.status}</span></div></div>
         <div><div class="muted">% Completion</div><div><strong>${completionPercent}%</strong></div></div>
-        <div><div class="muted">Milestone</div><div>${i.milestone}</div></div>
+        <div><div class="muted">Milestone</div><div>${escapeHtml(normalizeCrMilestoneForDisplay(i))}</div></div>
         <div><div class="muted">Department</div><div>${depName}</div></div>
         <div><div class="muted">Actual Start Date</div><div>${i.startDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">Actual End Date</div><div>${i.endDate?.slice(0,10) || ''}</div></div>
@@ -3104,16 +3316,19 @@ async function renderView(id) {
               <th>Status</th>
               <th>Start Date</th>
               <th>End Date</th>
+              <th>Aging</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            ${tasks.length === 0 ? '<tr><td colspan="7" class="muted" style="text-align: center; padding: 20px;">No tasks yet</td></tr>' : ''}
+            ${tasks.length === 0 ? '<tr><td colspan="8" class="muted" style="text-align: center; padding: 20px;">No tasks yet</td></tr>' : ''}
             ${tasks.map(t => {
               const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
               const taskStatus = (t.status || 'not started').toLowerCase();
               const taskStatusLabels = { 'not started': 'Not Started', 'in progress': 'In Progress', 'at risk': 'At Risk', 'cancel': 'Cancelled', 'done': 'Done' };
               const taskStatusLabel = taskStatusLabels[taskStatus] || t.status || 'Not Started';
+              const agingDays = computeTaskAgingDays(t.startDate, t.endDate);
+              const agingCell = agingDays !== null ? `${agingDays} day${agingDays === 1 ? '' : 's'}` : '—';
               return `
                 <tr>
                   <td><strong>${t.name}</strong>${t.description ? `<br><small class="muted">${t.description}</small>` : ''}</td>
@@ -3122,6 +3337,7 @@ async function renderView(id) {
                   <td><span class="status-badge status-${taskStatus.replace(/\s+/g, '-')}">${taskStatusLabel}</span></td>
                   <td>${t.startDate ? t.startDate.slice(0,10) : '-'}</td>
                   <td>${t.endDate ? t.endDate.slice(0,10) : '-'}</td>
+                  <td>${agingCell}</td>
                   <td>
                     <button class="edit-task-btn" data-id="${t.id}" style="margin-right: 4px;">Edit</button>
                     <button class="delete-task-btn" data-id="${t.id}" style="color: var(--danger);">Delete</button>
@@ -4742,10 +4958,12 @@ async function renderCRList() {
         </div>
       </div>
     </div>
+    ${recentActivityFabMarkup('CR')}
   `;
 
   initScrollableTables();
   initTableScrollPairs();
+  wireRecentActivityFab();
 
   // Multi-select dropdown handlers (checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
