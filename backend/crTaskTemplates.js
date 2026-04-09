@@ -17,6 +17,8 @@ export const CR_INITIATIVE_MILESTONE_MAP = {
   'user initiate': 'Preparation',
   'cr created': 'Preparation',
   'cr signed sec 2 and 3': 'Preparation',
+  'cr signed sec 2': 'Preparation',
+  'cr signed sec 3': 'Preparation',
   'fsd': 'Tech Assessment',
   'development': 'Development',
   'changes': 'Development',
@@ -45,12 +47,29 @@ export function mapCrInitiativeMilestone(raw) {
 export const CR_TASK_DEFINITIONS = [
   { name: 'User Initiate', milestone: 'User Initiate' },
   { name: 'CR Created', milestone: 'CR Created' },
-  { name: 'CR Signed Sec 2 and 3', milestone: 'CR Signed Sec 2 and 3' },
+  { name: 'CR Signed sec 2', milestone: 'CR Signed sec 2' },
+  { name: 'CR Signed Sec 3', milestone: 'CR Signed Sec 3' },
   { name: 'FSD', milestone: 'FSD' },
   { name: 'Development', milestone: 'Development' },
   { name: 'SIT', milestone: 'SIT' },
   { name: 'UAT', milestone: 'UAT' },
   { name: 'Live', milestone: 'Live' },
+];
+
+// CR milestone phase labels (new values shown in UI and distribution)
+export const CR_MILESTONE_PHASES = [
+  'User Initiate',
+  'CR Created',
+  'CR Signed sec 2',
+  'CR Signed Sec 3',
+  'FSD',
+  'Development',
+  'Changes',
+  'Signed Changes',
+  'Development - Extended',
+  'SIT',
+  'UAT',
+  'Live',
 ];
 
 export const CR_IN_PROGRESS_STATUSES = new Set(['ON TRACK', 'AT RISK', 'DELAYED']);

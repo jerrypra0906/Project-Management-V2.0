@@ -14,6 +14,7 @@ import {
   CR_BACKFILL_TASK_STATUSES,
   getCrAssigneeIdFromInitiative,
 } from './crTaskTemplates.js';
+import { CR_MILESTONE_PHASES } from './crTaskTemplates.js';
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
@@ -35,6 +36,24 @@ async function main() {
       cr.milestone = nextMilestone;
       cr.updatedAt = now();
       milestoneUpdates += 1;
+    }
+
+    // Ensure a detailed CR milestone phase exists (cannot recover original phase; use representative label)
+    if (cr.crMilestonePhase === 'CR Signed Sec 2 and 3') {
+      cr.crMilestonePhase = 'CR Signed sec 2';
+      cr.updatedAt = now();
+    }
+    if (!cr.crMilestonePhase) {
+      const canon = String(cr.milestone || '').trim().toLowerCase();
+      const rep =
+        canon === 'preparation' ? 'User Initiate'
+          : canon === 'tech assessment' ? 'FSD'
+          : canon === 'testing' ? 'SIT'
+          : canon === 'live' ? 'Live'
+          : canon === 'development' ? 'Development'
+          : 'User Initiate';
+      cr.crMilestonePhase = CR_MILESTONE_PHASES.includes(rep) ? rep : 'User Initiate';
+      cr.updatedAt = now();
     }
 
     const statusU = String(cr.status || '').toUpperCase().trim();

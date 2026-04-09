@@ -7,6 +7,7 @@ import {
   CR_TASK_DEFINITIONS,
   getCrAssigneeIdFromBody,
 } from '../crTaskTemplates.js';
+import { CR_MILESTONE_PHASES } from '../crTaskTemplates.js';
 
 const router = express.Router();
 
@@ -90,12 +91,16 @@ function validateCommon(body) {
   if (!statuses.includes(body.status)) return 'Invalid status';
   const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
   if (!milestones.includes(body.milestone)) return 'Invalid milestone';
+  // CR-only: keep the detailed milestone phase label if provided
+  if (body.type === 'CR' && body.crMilestonePhase) {
+    if (!CR_MILESTONE_PHASES.includes(body.crMilestonePhase)) return 'Invalid CR milestone phase';
+  }
   return null;
 }
 
 router.get('/', async (req, res) => {
-  const { q, type, status, milestone, priority, departmentId, itPicId, itPmId, businessOwnerId, active } = req.query;
-  console.log('API filter params:', { q, type, status, milestone, priority, departmentId, itPicId, itPmId, active });
+  const { q, type, status, milestone, crMilestonePhase, priority, departmentId, itPicId, itPmId, businessOwnerId, active } = req.query;
+  console.log('API filter params:', { q, type, status, milestone, crMilestonePhase, priority, departmentId, itPicId, itPmId, active });
   const data = await store.read();
   let rows = data.initiatives;
   
@@ -143,6 +148,12 @@ router.get('/', async (req, res) => {
   const milestoneValues = parseMultiValue(milestone);
   if (milestoneValues && milestoneValues.length > 0) {
     rows = rows.filter(r => milestoneValues.includes(r.milestone));
+  }
+
+  // CR-only milestone phase filter (new UI milestones)
+  const crPhaseValues = parseMultiValue(crMilestonePhase);
+  if (crPhaseValues && crPhaseValues.length > 0) {
+    rows = rows.filter(r => crPhaseValues.includes(r.crMilestonePhase));
   }
   
   const priorityValues = parseMultiValue(priority);
@@ -250,6 +261,7 @@ router.post('/', async (req, res) => {
   const {
     type,name,ticket,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,status,milestone,startDate,endDate,planStartDate,planEndDate,remark,documentationLink
   } = req.body;
+  const crMilestonePhase = req.body.crMilestonePhase || null;
   const data = await store.read();
   
   // Convert arrays to comma-separated strings for storage
@@ -274,7 +286,9 @@ router.post('/', async (req, res) => {
     itPicIds: finalItPicIds,
     itPmId: itPmId || null,
     itManagerIds: itManagerIdsStr,
-    status,milestone,startDate,endDate: endDate||null,planStartDate: planStartDate||null,planEndDate: planEndDate||null,remark: remark||null,documentationLink: documentationLink||null, 
+    status,milestone,
+    crMilestonePhase: type === 'CR' ? (crMilestonePhase || null) : null,
+    startDate,endDate: endDate||null,planStartDate: planStartDate||null,planEndDate: planEndDate||null,remark: remark||null,documentationLink: documentationLink||null, 
     createdAt, updatedAt 
   });
   if (type === 'CR') {
@@ -398,7 +412,7 @@ router.put('/:id', async (req, res) => {
   const initiative = data.initiatives[idx];
   const changes = [];
   const updatedAt = now();
-  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','startDate','endDate','planStartDate','planEndDate','remark','documentationLink'];
+  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','crMilestonePhase','startDate','endDate','planStartDate','planEndDate','remark','documentationLink'];
   
   // Track changes and update fields
   for (const k of allowed) {

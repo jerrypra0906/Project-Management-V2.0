@@ -66,6 +66,7 @@ async function initializeSchema() {
         "itManagerIds" TEXT,
         "status" TEXT,
         "milestone" TEXT,
+        "crMilestonePhase" TEXT,
         "startDate" TEXT,
         "endDate" TEXT,
         "planStartDate" TEXT,
@@ -87,6 +88,7 @@ async function initializeSchema() {
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itManagerIds" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "status" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "milestone" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "crMilestonePhase" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "startDate" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "endDate" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "planStartDate" TEXT;
@@ -356,6 +358,7 @@ async function read() {
           itManagerIds: row.itManagerIds || row.itmanagerids ? (row.itManagerIds || row.itmanagerids).split(',').filter(Boolean) : [],
           status: row.status || null,
           milestone: row.milestone || null,
+          crMilestonePhase: row.crMilestonePhase || row.crmilestonephase || null,
           startDate: row.startDate || row.startdate || null,
           endDate: row.endDate || row.enddate || null,
           planStartDate: row.planStartDate || row.planstartdate || null,
@@ -472,11 +475,11 @@ async function write(data) {
     const insertInit = `INSERT INTO "initiatives"(
       "id", "type", "name", "ticket", "description", "businessImpact", "priority",
       "businessOwnerId", "businessUserIds", "departmentId", "itPicId", "itPicIds", "itPmId", "itManagerIds",
-      "status", "milestone", "startDate", "endDate", "planStartDate", "planEndDate", "remark", "documentationLink", "createdAt", "updatedAt"
+      "status", "milestone", "crMilestonePhase", "startDate", "endDate", "planStartDate", "planEndDate", "remark", "documentationLink", "createdAt", "updatedAt"
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,
       $8,$9,$10,$11,$12,$13,$14,
-      $15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+      $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25
     )`;
     for (const i of data.initiatives || []) {
       // Convert arrays to comma-separated strings for storage
@@ -501,6 +504,7 @@ async function write(data) {
         itManagerIds,
         i.status || null,
         i.milestone || null,
+        i.crMilestonePhase || null,
         i.startDate || null,
         i.endDate || null,
         i.planStartDate || null,

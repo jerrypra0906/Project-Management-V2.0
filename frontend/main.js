@@ -962,7 +962,8 @@ function computeTaskAgingDays(startDateStr, endDateStr) {
 const CR_MILESTONE_UI_TO_CANONICAL = {
   'User Initiate': 'Preparation',
   'CR Created': 'Preparation',
-  'CR Signed Sec 2 and 3': 'Preparation',
+  'CR Signed sec 2': 'Preparation',
+  'CR Signed Sec 3': 'Preparation',
   'FSD': 'Tech Assessment',
   'Development': 'Development',
   'Changes': 'Development',
@@ -973,7 +974,20 @@ const CR_MILESTONE_UI_TO_CANONICAL = {
   'Live': 'Live',
 };
 
-const CR_MILESTONE_UI_OPTIONS = Object.keys(CR_MILESTONE_UI_TO_CANONICAL);
+const CR_MILESTONE_UI_OPTIONS = [
+  'User Initiate',
+  'CR Created',
+  'CR Signed sec 2',
+  'CR Signed Sec 3',
+  'FSD',
+  'Development',
+  'Changes',
+  'Signed Changes',
+  'Development - Extended',
+  'SIT',
+  'UAT',
+  'Live',
+];
 
 function canonicalMilestoneToCrUiLabel(canonical) {
   const v = String(canonical || '').trim().toLowerCase();
@@ -988,6 +1002,8 @@ function canonicalMilestoneToCrUiLabel(canonical) {
 
 function normalizeCrMilestoneForDisplay(initiative) {
   if (!initiative || initiative.type !== 'CR') return initiative?.milestone || '';
+  // Prefer the detailed phase if present; otherwise fall back to representative label.
+  if (initiative.crMilestonePhase) return String(initiative.crMilestonePhase);
   return canonicalMilestoneToCrUiLabel(initiative.milestone);
 }
 
@@ -1545,35 +1561,26 @@ async function renderList() {
     data = data.filter(i => isUserInInitiativeTeam(i, userId));
   }
   
-  // Calculate milestone counts from filtered data
-  // Database stores: "Preparation", "Business Requirement", "Tech Assessment", "Planning", "Development", "Testing", "Live"
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
-  const milestoneCounts = {};
-  // Display names for the graph (same as database values)
-  const milestoneDisplayNames = {
-    'Preparation': 'Preparation',
-    'Business Requirement': 'Business Requirement',
-    'Tech Assessment': 'Tech Assessment',
-    'Planning': 'Planning',
-    'Development': 'Development',
-    'Testing': 'Testing',
-    'Live': 'Live'
-  };
-  // Milestone colors mapping
+  // Calculate milestone counts from filtered data (CR list)
+  // DB stores canonical values; UI should show the newest CR milestone labels.
+  // Since canonical milestones collapse several CR phases (e.g. Preparation), we use a representative UI label.
+  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live']; // used for filtering
+
+  const uiMilestones = CR_MILESTONE_UI_OPTIONS;
+  const milestoneCounts = Object.fromEntries(uiMilestones.map((m) => [m, 0]));
+
+  const milestoneDisplayNames = Object.fromEntries(uiMilestones.map((m) => [m, m]));
   const milestoneColors = {
-    'Preparation': '#8b5cf6', // Purple
-    'Business Requirement': '#3b82f6', // Blue
-    'Tech Assessment': '#06b6d4', // Cyan
-    'Planning': '#10b981', // Green
+    'User Initiate': '#8b5cf6', // Purple
+    'FSD': '#06b6d4', // Cyan
     'Development': '#f59e0b', // Amber
-    'Testing': '#ef4444', // Red
+    'SIT': '#ef4444', // Red
     'Live': '#22c55e' // Green
   };
-  milestones.forEach(m => milestoneCounts[m] = 0);
+
   data.forEach(i => {
-    if (i.milestone && milestoneCounts.hasOwnProperty(i.milestone)) {
-      milestoneCounts[i.milestone]++;
-    }
+    const ui = normalizeCrMilestoneForDisplay(i);
+    if (ui && milestoneCounts[ui] !== undefined) milestoneCounts[ui] += 1;
   });
   // Apply client-side filtering for date filters
   if (filter.createdAt) {
@@ -1785,9 +1792,9 @@ async function renderList() {
     <div class="milestone-graph">
       <h3>Milestone Distribution</h3>
       <div class="milestone-flow">
-        ${milestones.map((m, index) => {
+        ${uiMilestones.map((m, index) => {
           const count = milestoneCounts[m] || 0;
-          const isLast = index === milestones.length - 1;
+          const isLast = index === uiMilestones.length - 1;
           const displayName = milestoneDisplayNames[m] || m;
           const color = milestoneColors[m] || 'var(--brand)';
           return `
@@ -2511,7 +2518,7 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
   const selectedType = initiative ? initiative.type : defaultType;
   const currentMilestone = initiative?.milestone || '';
   const selectedCrUiMilestone = selectedType === 'CR'
-    ? canonicalMilestoneToCrUiLabel(currentMilestone)
+    ? (initiative?.crMilestonePhase || canonicalMilestoneToCrUiLabel(currentMilestone))
     : currentMilestone;
   
   const fields = [
@@ -2808,6 +2815,7 @@ async function renderNew(defaultType = 'Project') {
       milestone: obj.type === 'CR'
         ? (CR_MILESTONE_UI_TO_CANONICAL[obj.milestone] || obj.milestone)
         : obj.milestone,
+      crMilestonePhase: obj.type === 'CR' ? (obj.milestone || null) : null,
       startDate: obj.startDate,
       endDate: obj.endDate || null,
       planStartDate: obj.planStartDate || null,
@@ -4580,7 +4588,7 @@ async function renderCRList() {
     departmentId: parseFilter('cr_departmentId'),
     priority: parseFilter('cr_priority'),
     status: parseFilter('cr_status'),
-    milestone: parseFilter('cr_milestone'),
+    crMilestonePhase: parseFilter('cr_crMilestonePhase'),
     itPicId: parseFilter('cr_itPicId'),
     itPmId: parseFilter('cr_itPmId'),
     itManagerId: parseFilter('cr_itManagerId'),
@@ -4597,7 +4605,7 @@ async function renderCRList() {
   if (filter.departmentId.length) apiQs.set('departmentId', filter.departmentId.join(','));
   if (filter.priority.length) apiQs.set('priority', filter.priority.join(','));
   if (filter.status.length) apiQs.set('status', filter.status.join(','));
-  if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
+  if (filter.crMilestonePhase.length) apiQs.set('crMilestonePhase', filter.crMilestonePhase.join(','));
   if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
   if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
   
@@ -4675,35 +4683,29 @@ async function renderCRList() {
     return false;
   });
   
-  // Calculate milestone counts from filtered data
-  // Database stores: "Preparation", "Business Requirement", "Tech Assessment", "Planning", "Development", "Testing", "Live"
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
-  const milestoneCounts = {};
-  // Display names for the graph (same as database values)
-  const milestoneDisplayNames = {
-    'Preparation': 'Preparation',
-    'Business Requirement': 'Business Requirement',
-    'Tech Assessment': 'Tech Assessment',
-    'Planning': 'Planning',
-    'Development': 'Development',
-    'Testing': 'Testing',
-    'Live': 'Live'
-  };
-  // Milestone colors mapping
+  // Calculate milestone counts from filtered data (CR list)
+  // DB stores canonical values; UI should show the newest CR milestone labels.
+  // Since canonical milestones collapse several CR phases (e.g. Preparation), we use a representative UI label.
+  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live']; // used elsewhere (filter list)
+
+  const uiMilestones = CR_MILESTONE_UI_OPTIONS;
+  const milestoneCounts = Object.fromEntries(uiMilestones.map((m) => [m, 0]));
+
+  // Display names for the graph (same as UI labels)
+  const milestoneDisplayNames = Object.fromEntries(uiMilestones.map((m) => [m, m]));
+
+  // Milestone colors mapping (align with Project list palette)
   const milestoneColors = {
-    'Preparation': '#8b5cf6', // Purple
-    'Business Requirement': '#3b82f6', // Blue
-    'Tech Assessment': '#06b6d4', // Cyan
-    'Planning': '#10b981', // Green
+    'User Initiate': '#8b5cf6', // Purple
+    'FSD': '#06b6d4', // Cyan
     'Development': '#f59e0b', // Amber
-    'Testing': '#ef4444', // Red
+    'SIT': '#ef4444', // Red
     'Live': '#22c55e' // Green
   };
-  milestones.forEach(m => milestoneCounts[m] = 0);
+
   data.forEach(i => {
-    if (i.milestone && milestoneCounts.hasOwnProperty(i.milestone)) {
-      milestoneCounts[i.milestone]++;
-    }
+    const ui = normalizeCrMilestoneForDisplay(i);
+    if (ui && milestoneCounts[ui] !== undefined) milestoneCounts[ui] += 1;
   });
   
   // CR data is now included in the API response
@@ -4748,9 +4750,9 @@ async function renderCRList() {
     <div class="milestone-graph">
       <h3>Milestone Distribution</h3>
       <div class="milestone-flow">
-        ${milestones.map((m, index) => {
+        ${uiMilestones.map((m, index) => {
           const count = milestoneCounts[m] || 0;
-          const isLast = index === milestones.length - 1;
+          const isLast = index === uiMilestones.length - 1;
           const displayName = milestoneDisplayNames[m] || m;
           const color = milestoneColors[m] || 'var(--brand)';
           return `
@@ -4812,13 +4814,13 @@ async function renderCRList() {
           </div>
           <div class="multi-select-wrapper">
             <button class="multi-select-btn" data-filter="fMilestone">
-              Milestone ${filter.milestone.length > 0 ? `(${filter.milestone.length})` : ''}
+              Milestone ${filter.crMilestonePhase.length > 0 ? `(${filter.crMilestonePhase.length})` : ''}
             </button>
             <div class="multi-select-dropdown" id="dropdown-fMilestone">
-              ${milestones.map(m => `
+              ${CR_MILESTONE_UI_OPTIONS.map(m => `
                 <label class="multi-select-option">
-                  <input type="checkbox" value="${m}" ${filter.milestone.includes(m) ? 'checked' : ''}>
-                  ${milestoneDisplayNames[m] || m}
+                  <input type="checkbox" value="${m}" ${filter.crMilestonePhase.includes(m) ? 'checked' : ''}>
+                  ${m}
                 </label>
               `).join('')}
             </div>
@@ -5034,7 +5036,7 @@ async function renderCRList() {
       'fDepartment': 'cr_departmentId',
       'fPriority': 'cr_priority',
       'fStatus': 'cr_status',
-      'fMilestone': 'cr_milestone',
+      'fMilestone': 'cr_crMilestonePhase',
       'fItPic': 'cr_itPicId',
       'fItPm': 'cr_itPmId',
       'fItManager': 'cr_itManagerId'
