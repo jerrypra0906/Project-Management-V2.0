@@ -736,6 +736,152 @@ function setupMentionAutocomplete(textareaId) {
   });
 }
 
+function setupMeetingNoteMentionInput(inputEl) {
+  if (!inputEl || inputEl.dataset.mentionBound === 'true') return;
+  inputEl.dataset.mentionBound = 'true';
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'meeting-note-mention-autocomplete hidden';
+  document.body.appendChild(dropdown);
+
+  let currentMention = null;
+  let filteredUsers = [];
+  let selectedIndex = -1;
+
+  const hideDropdown = () => {
+    dropdown.classList.add('hidden');
+    dropdown.style.display = 'none';
+    currentMention = null;
+    filteredUsers = [];
+    selectedIndex = -1;
+  };
+
+  const updateSelection = () => {
+    dropdown.querySelectorAll('.mention-item').forEach((item, idx) => {
+      item.classList.toggle('selected', idx === selectedIndex);
+    });
+  };
+
+  const positionDropdown = () => {
+    const rect = inputEl.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = `${rect.bottom + 4}px`;
+    dropdown.style.left = `${rect.left}px`;
+    dropdown.style.width = `${Math.min(420, Math.max(rect.width, 280))}px`;
+    dropdown.style.maxWidth = '92vw';
+    dropdown.style.zIndex = '10050';
+  };
+
+  const insertMention = (user) => {
+    if (!currentMention) return;
+    const mentionText = user.name || user.email || 'Unknown';
+    const before = inputEl.value.substring(0, currentMention.start);
+    const after = inputEl.value.substring(currentMention.end);
+    const isCommaSeparatedPeopleField = inputEl.name === 'participantsText' || inputEl.name === 'stakeholdersText';
+    if (isCommaSeparatedPeopleField) {
+      let normalizedBefore = before.replace(/\s+$/, '');
+      if (normalizedBefore && !normalizedBefore.endsWith(',')) normalizedBefore += ',';
+      if (normalizedBefore) normalizedBefore += ' ';
+      const normalizedAfter = after.replace(/^\s*,?\s*/, '');
+      inputEl.value = `${normalizedBefore}@${mentionText}, ${normalizedAfter}`;
+    } else {
+      inputEl.value = `${before}@${mentionText} ${after}`;
+    }
+    const newPos = inputEl.value.indexOf(`@${mentionText}`) + mentionText.length + 2;
+    inputEl.setSelectionRange(newPos, newPos);
+    inputEl.focus();
+    hideDropdown();
+  };
+
+  const renderDropdown = () => {
+    dropdown.innerHTML = filteredUsers.map((user, index) => `
+      <div class="mention-item ${index === selectedIndex ? 'selected' : ''}" data-index="${index}">
+        <strong>${escapeHtml(user.name || user.email || 'Unknown')}</strong>
+        <span class="muted">${escapeHtml(user.email || '')}</span>
+      </div>
+    `).join('');
+    dropdown.classList.remove('hidden');
+    dropdown.style.display = 'block';
+    positionDropdown();
+
+    dropdown.querySelectorAll('.mention-item').forEach((item, index) => {
+      item.addEventListener('click', () => insertMention(filteredUsers[index]));
+    });
+  };
+
+  inputEl.addEventListener('input', async () => {
+    const value = inputEl.value;
+    const cursorPos = inputEl.selectionStart;
+    const textBeforeCursor = value.substring(0, cursorPos);
+    const match = textBeforeCursor.match(/@([\w\s.-]*)$/);
+    if (!match) {
+      hideDropdown();
+      return;
+    }
+
+    if (!LOOKUPS.users || LOOKUPS.users.length === 0) {
+      await ensureLookups();
+    }
+
+    const query = (match[1] || '').toLowerCase().trim();
+    currentMention = {
+      start: cursorPos - query.length - 1,
+      end: cursorPos,
+      query,
+    };
+
+    let usersToFilter = (LOOKUPS.users || []).filter((u) => u.active !== false);
+    if (query) {
+      usersToFilter = usersToFilter.filter((u) => {
+        const name = (u.name || '').toLowerCase();
+        const nameNoSpaces = name.replace(/\s+/g, '');
+        const emailPrefix = (u.email || '').toLowerCase().split('@')[0];
+        return name.includes(query) || nameNoSpaces.includes(query) || emailPrefix.includes(query);
+      });
+    }
+    filteredUsers = usersToFilter.slice(0, 8);
+    if (filteredUsers.length === 0) {
+      hideDropdown();
+      return;
+    }
+    selectedIndex = -1;
+    renderDropdown();
+  });
+
+  inputEl.addEventListener('keydown', (e) => {
+    if (dropdown.classList.contains('hidden')) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = Math.min(selectedIndex + 1, filteredUsers.length - 1);
+      updateSelection();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = Math.max(selectedIndex - 1, -1);
+      updateSelection();
+    } else if (e.key === 'Enter' && selectedIndex >= 0) {
+      e.preventDefault();
+      insertMention(filteredUsers[selectedIndex]);
+    } else if (e.key === 'Escape') {
+      hideDropdown();
+    }
+  });
+
+  const outsideHandler = (e) => {
+    if (e.target === inputEl || dropdown.contains(e.target)) return;
+    hideDropdown();
+  };
+  document.addEventListener('click', outsideHandler);
+  window.addEventListener('resize', () => {
+    if (!dropdown.classList.contains('hidden')) positionDropdown();
+  });
+}
+
+function setupMeetingNoteMentionInputs(containerEl) {
+  if (!containerEl) return;
+  const mentionInputs = containerEl.querySelectorAll('.meeting-note-mention-input');
+  mentionInputs.forEach((inputEl) => setupMeetingNoteMentionInput(inputEl));
+}
+
 async function fetchJSON(url, options) {
   // Avoid cached 304 responses by adding a timestamp and disabling cache
   const cacheBuster = (url.includes('?') ? '&' : '?') + '_ts=' + Date.now();
@@ -769,15 +915,36 @@ async function fetchJSON(url, options) {
   
   const res = await fetch(url + cacheBuster, fetchOptions);
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
+    const body = await res.text().catch(() => '');
+    let parsedError = null;
+    try {
+      parsedError = body ? JSON.parse(body) : null;
+    } catch {
+      parsedError = null;
+    }
+    if (res.status === 401) {
       // Unauthorized - clear token and redirect to login
       clearUser();
       location.hash = '#auth';
       throw new Error('Authentication required');
     }
+    if (res.status === 403) {
+      const auth403Patterns = [
+        'Authentication required',
+        'Invalid or expired token',
+        'Email not activated',
+        'User not found or inactive',
+      ];
+      const isAuth403 = auth403Patterns.some((pattern) => body.includes(pattern));
+      if (isAuth403) {
+        clearUser();
+        location.hash = '#auth';
+        throw new Error('Authentication required');
+      }
+      throw new Error(parsedError?.error || `Request forbidden 403: ${body || res.statusText}`);
+    }
     // Surface status for easier debugging
-    const body = await res.text().catch(() => '');
-    throw new Error(`Request failed ${res.status}: ${body || res.statusText}`);
+    throw new Error(parsedError?.error || `Request failed ${res.status}: ${body || res.statusText}`);
   }
   const shouldSkipJson = options && options.skipJson;
   if (shouldSkipJson) {
@@ -2895,14 +3062,21 @@ async function renderView(id) {
   const itPmName = i.itPmId ? nameById(LOOKUPS.users, i.itPmId) : 'None';
   const itManagerNames = (i.itManagerIds || []).map(id => nameById(LOOKUPS.users, id)).filter(Boolean).join(', ') || 'None';
   
-  // Fetch comments and tasks
+  // Fetch comments, tasks, and meeting notes
   let comments = [];
   let tasks = [];
+  let meetingNotes = [];
   try {
-    comments = await fetchJSON(`/api/comments/initiative/${id}`);
-    tasks = await fetchJSON(`/api/tasks/initiative/${id}`);
+    const [commentRows, taskRows, meetingRows] = await Promise.all([
+      fetchJSON(`/api/comments/initiative/${id}`),
+      fetchJSON(`/api/tasks/initiative/${id}`),
+      fetchJSON(`/api/meeting-notes/initiative/${id}`),
+    ]);
+    comments = commentRows;
+    tasks = taskRows;
+    meetingNotes = meetingRows;
   } catch (e) {
-    console.error('Error fetching comments/tasks:', e);
+    console.error('Error fetching comments/tasks/meeting notes:', e);
   }
   
   // Sort tasks by Milestone and Start Date (Ascending)
@@ -3202,6 +3376,9 @@ async function renderView(id) {
         <button id="tab-comments" class="tab-btn active" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid var(--brand); margin-bottom: -2px; color: var(--brand);">
           💬 Comments <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${comments.length}</span>
         </button>
+        <button id="tab-meeting-notes" class="tab-btn" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--muted);">
+          🗒️ Meeting Notes <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${meetingNotes.length}</span>
+        </button>
         <button id="tab-activity" class="tab-btn" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--muted);">
           📋 Activity Log <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${i.changeHistory?.length || 0}</span>
         </button>
@@ -3244,6 +3421,11 @@ async function renderView(id) {
           </div>
           <button id="add-comment-btn" class="primary">Add Comment</button>
         </div>
+      </div>
+
+      <!-- Meeting Notes Tab Content -->
+      <div id="tab-content-meeting-notes" class="tab-content" style="display: none;">
+        ${renderMeetingNotesTabContent(meetingNotes)}
       </div>
       
       <!-- Activity Log Tab Content -->
@@ -3527,15 +3709,17 @@ async function renderView(id) {
   // Setup @mention autocomplete for comment textarea
   setupMentionAutocomplete('new-comment');
   
-  // Tab switching for Comments/Activity Log
+  // Tab switching for Comments/Meeting Notes/Activity Log
   const tabComments = document.getElementById('tab-comments');
+  const tabMeetingNotes = document.getElementById('tab-meeting-notes');
   const tabActivity = document.getElementById('tab-activity');
   const contentComments = document.getElementById('tab-content-comments');
+  const contentMeetingNotes = document.getElementById('tab-content-meeting-notes');
   const contentActivity = document.getElementById('tab-content-activity');
   
   const switchTab = (activeTab) => {
     // Update tab buttons
-    [tabComments, tabActivity].forEach(tab => {
+    [tabComments, tabMeetingNotes, tabActivity].forEach(tab => {
       tab.style.borderBottomColor = 'transparent';
       tab.style.color = 'var(--muted)';
       tab.style.fontWeight = '500';
@@ -3547,14 +3731,21 @@ async function renderView(id) {
     // Show/hide content
     if (activeTab === tabComments) {
       contentComments.style.display = 'block';
+      contentMeetingNotes.style.display = 'none';
+      contentActivity.style.display = 'none';
+    } else if (activeTab === tabMeetingNotes) {
+      contentComments.style.display = 'none';
+      contentMeetingNotes.style.display = 'block';
       contentActivity.style.display = 'none';
     } else {
       contentComments.style.display = 'none';
+      contentMeetingNotes.style.display = 'none';
       contentActivity.style.display = 'block';
     }
   };
   
   tabComments.onclick = () => switchTab(tabComments);
+  tabMeetingNotes.onclick = () => switchTab(tabMeetingNotes);
   tabActivity.onclick = () => switchTab(tabActivity);
   
   // Edit mode toggle button - replace view with edit form
@@ -3739,6 +3930,68 @@ async function renderView(id) {
       }
     };
   });
+
+  // Meeting notes actions
+  const openMeetingTabAndRefresh = () => {
+    renderView(id);
+    setTimeout(() => {
+      const noteTab = document.getElementById('tab-meeting-notes');
+      if (noteTab) noteTab.click();
+    }, 0);
+  };
+
+  const newMeetingBtn = document.getElementById('new-meeting-note-btn');
+  if (newMeetingBtn) {
+    newMeetingBtn.onclick = () => showMeetingNoteModal(id, null, openMeetingTabAndRefresh);
+  }
+
+  document.querySelectorAll('.meeting-note-view-btn').forEach((btn) => {
+    btn.onclick = () => showMeetingNoteModal(id, btn.dataset.id, openMeetingTabAndRefresh, true);
+  });
+  document.querySelectorAll('.meeting-note-edit-btn').forEach((btn) => {
+    btn.onclick = () => showMeetingNoteModal(id, btn.dataset.id, openMeetingTabAndRefresh, false);
+  });
+  document.querySelectorAll('.meeting-note-send-btn').forEach((btn) => {
+    btn.onclick = async () => {
+      const noteId = btn.dataset.id;
+      try {
+        const response = await fetchJSON(`/api/meeting-notes/${noteId}/send-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (response.ok === false) {
+          alert(response.error || 'Failed to send meeting notes email');
+          return;
+        }
+        alert('Meeting notes email sent successfully.');
+        openMeetingTabAndRefresh();
+      } catch (e) {
+        alert(`Failed to send email: ${e.message}`);
+      }
+    };
+  });
+  document.querySelectorAll('.meeting-note-duplicate-btn').forEach((btn) => {
+    btn.onclick = async () => {
+      try {
+        await fetchJSON(`/api/meeting-notes/${btn.dataset.id}/duplicate`, { method: 'POST' });
+        openMeetingTabAndRefresh();
+      } catch (e) {
+        alert(`Failed to duplicate meeting note: ${e.message}`);
+      }
+    };
+  });
+  document.querySelectorAll('.meeting-note-delete-btn').forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm('Remove this draft meeting note from the list?')) return;
+      try {
+        await fetchJSON(`/api/meeting-notes/${btn.dataset.id}`, { method: 'DELETE' });
+        openMeetingTabAndRefresh();
+      } catch (e) {
+        alert(`Failed to delete meeting note: ${e.message}`);
+      }
+    };
+  });
   
   // Event handlers for tasks
   document.getElementById('new-task-btn').onclick = () => showTaskModal(id);
@@ -3919,6 +4172,518 @@ function downloadTaskTemplate() {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+function getMeetingNoteStatusChip(status) {
+  const normalized = String(status || 'Draft').toLowerCase();
+  const palette = {
+    draft: { bg: '#e2e8f0', color: '#334155' },
+    published: { bg: '#d1fae5', color: '#065f46' },
+  };
+  const style = palette[normalized] || palette.draft;
+  const label = status || 'Draft';
+  return `<span style="display:inline-block;padding:4px 10px;border-radius:999px;background:${style.bg};color:${style.color};font-size:12px;font-weight:600;">${escapeHtml(label)}</span>`;
+}
+
+function renderMeetingNotesTabContent(meetingNotes = []) {
+  const rows = (meetingNotes || []).slice().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
+      <div class="muted" style="font-size:13px;">Structured notes, email traceability, and version history.</div>
+      <button id="new-meeting-note-btn" class="primary">+ New Meeting Note</button>
+    </div>
+    <div class="table-wrapper">
+      <table style="width:100%;">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Meeting Date</th>
+            <th>Status</th>
+            <th>Version</th>
+            <th>Updated</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.length === 0 ? '<tr><td colspan="6" class="muted" style="text-align:center;padding:20px;">No meeting notes yet</td></tr>' : rows.map((note) => `
+            <tr>
+              <td><strong>${escapeHtml(note.title || 'Untitled')}</strong><br><span class="muted">${escapeHtml(note.meetingType || 'General')}</span></td>
+              <td>${note.meetingDate ? new Date(note.meetingDate).toLocaleString() : '-'}</td>
+              <td>${getMeetingNoteStatusChip(note.status)}</td>
+              <td>v${Number(note.version || 1)}</td>
+              <td>${note.updatedAt ? new Date(note.updatedAt).toLocaleString() : '-'}</td>
+              <td style="white-space:nowrap;">
+                <button class="meeting-note-view-btn" data-id="${note.id}" style="margin-right:4px;">View</button>
+                <button class="meeting-note-edit-btn" data-id="${note.id}" style="margin-right:4px;">Edit</button>
+                ${note.status === 'Published' ? `<button class="meeting-note-send-btn" data-id="${note.id}" style="margin-right:4px;">Send</button>` : ''}
+                <button class="meeting-note-duplicate-btn" data-id="${note.id}" style="margin-right:4px;">Duplicate</button>
+                ${note.status === 'Draft' ? `<button type="button" class="meeting-note-delete-btn" data-id="${note.id}">Delete</button>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/** Display token for meeting note participant field (prefer @Name when userId resolves). */
+function formatMeetingNoteParticipantToken(participant, users = []) {
+  if (!participant) return '';
+  const list = users || [];
+  if (participant.userId) {
+    const u = list.find((x) => x.id === participant.userId);
+    if (u) {
+      const label = (u.name || u.email || '').trim();
+      if (label) return `@${label}`;
+    }
+  }
+  if (participant.name && String(participant.name).trim()) return String(participant.name).trim();
+  if (participant.email && String(participant.email).trim()) return String(participant.email).trim();
+  if (participant.userId) return participant.userId;
+  return '';
+}
+
+function formatMeetingNoteOwnerInput(ownerId, ownerName, users = []) {
+  if (ownerId) {
+    const u = (users || []).find((x) => x.id === ownerId);
+    if (u) {
+      const label = (u.name || u.email || '').trim();
+      if (label) return `@${label}`;
+    }
+  }
+  const name = (ownerName || '').trim();
+  if (name) return name;
+  return ownerId || '';
+}
+
+async function showMeetingNoteModal(initiativeId, noteId = null, onSaved = null, readOnly = false) {
+  await ensureLookups();
+  await getCurrentUser();
+
+  let note = null;
+  if (noteId) {
+    try {
+      note = await fetchJSON(`/api/meeting-notes/${noteId}`);
+    } catch (e) {
+      alert(`Unable to load meeting note: ${e.message}`);
+      return;
+    }
+  }
+
+  const users = LOOKUPS.users || [];
+  const participantsText = (note?.participants || [])
+    .map((p) => formatMeetingNoteParticipantToken(p, users))
+    .filter(Boolean)
+    .join(', ');
+  const stakeholdersText = (note?.participants || [])
+    .filter((p) => p.role === 'Stakeholder')
+    .map((p) => formatMeetingNoteParticipantToken(p, users))
+    .filter(Boolean)
+    .join(', ');
+
+  const actionItems = (note?.actionItems || [])
+    .slice()
+    .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  const actionItemsRows = actionItems.length > 0 ? actionItems : [{ description: '', ownerId: '', dueDate: '', priority: '', status: 'Not Started' }];
+  const isPublishedEdit = !!(noteId && note?.status === 'Published');
+  const renderActionRow = (item, index) => {
+    const ownerDisplay = formatMeetingNoteOwnerInput(item.ownerId, item.ownerName, users);
+    return `
+    <tr class="meeting-note-action-row">
+      <td><input name="mn_action_description_${index}" ${readOnly ? 'disabled' : ''} value="${escapeHtml(item.description || '')}" placeholder="Action item" /></td>
+      <td><input class="meeting-note-mention-input" name="mn_action_owner_${index}" ${readOnly ? 'disabled' : ''} value="${escapeHtml(ownerDisplay)}" placeholder="Type @ to pick user or enter free text" /></td>
+      <td><input type="date" name="mn_action_due_${index}" ${readOnly ? 'disabled' : ''} value="${(item.dueDate || '').slice(0, 10)}" /></td>
+      <td>
+        <select name="mn_action_priority_${index}" ${readOnly ? 'disabled' : ''}>
+          <option value="">-</option>
+          ${['Low', 'Medium', 'High'].map((p) => `<option value="${p}" ${item.priority === p ? 'selected' : ''}>${p}</option>`).join('')}
+        </select>
+      </td>
+      <td>
+        <select name="mn_action_status_${index}" ${readOnly ? 'disabled' : ''}>
+          ${['Not Started', 'In Progress', 'Done', 'Blocked', 'Cancelled'].map((s) => `<option value="${s}" ${item.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td>${readOnly ? '' : '<button type="button" class="meeting-note-remove-action-btn">Remove</button>'}</td>
+    </tr>
+  `;
+  };
+
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content meeting-note-modal-content">
+      <div class="meeting-note-modal-header">
+        <div>
+          <h3 style="margin:0;">${note ? (readOnly ? 'View Meeting Note' : 'Edit Meeting Note') : 'New Meeting Note'}</h3>
+          <div class="muted" style="margin-top:4px;">Capture structured outcomes and send to participants.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${note ? getMeetingNoteStatusChip(note.status) : ''}
+          ${note ? `<span class="muted">Version v${note.version || 1}</span>` : ''}
+          <button type="button" id="close-meeting-note-modal">✕</button>
+        </div>
+      </div>
+      <form id="meeting-note-form" class="form meeting-note-form-grid">
+        <div class="meeting-note-section">
+          <h4>Meeting Metadata</h4>
+        ${formRow('Meeting Title', `<input name="title" ${readOnly ? 'disabled' : ''} required value="${escapeHtml(note?.title || '')}" />`)}
+        <div class="form-row-inline">
+          <div>${formRow('Meeting Type', `<input name="meetingType" ${readOnly ? 'disabled' : ''} required value="${escapeHtml(note?.meetingType || 'General')}" />`)}</div>
+          <div>${formRow('Meeting Date/Time', `<input type="datetime-local" name="meetingDate" ${readOnly ? 'disabled' : ''} required value="${note?.meetingDate ? new Date(note.meetingDate).toISOString().slice(0, 16) : ''}" />`)}</div>
+        </div>
+        ${formRow('Facilitator', createSearchableSelect('facilitatorId', LOOKUPS.users, note?.facilitatorId || currentUser?.id || '', 'Select...'))}
+        ${formRow('Note Taker', createSearchableSelect('noteTakerId', LOOKUPS.users, note?.noteTakerId || currentUser?.id || '', 'Select...'))}
+        </div>
+
+        <div class="meeting-note-section">
+          <h4>Participants</h4>
+        ${formRow('Participants (comma-separated, @ supported)', `<input class="meeting-note-mention-input" name="participantsText" ${readOnly ? 'disabled' : ''} placeholder="Type @ to pick users or enter free text names/emails" value="${escapeHtml(participantsText)}" />`)}
+        ${formRow('Stakeholders (comma-separated, @ supported)', `<input class="meeting-note-mention-input" name="stakeholdersText" ${readOnly ? 'disabled' : ''} placeholder="Type @ to pick users or enter free text names/emails" value="${escapeHtml(stakeholdersText)}" />`)}
+        </div>
+
+        <div class="meeting-note-section">
+          <h4>Structured Notes</h4>
+        ${formRow('Agenda', `<textarea name="agenda" ${readOnly ? 'disabled' : ''}>${escapeHtml(note?.agenda || '')}</textarea>`)}
+        ${formRow('Discussion', `<textarea name="discussion" ${readOnly ? 'disabled' : ''}>${escapeHtml(note?.discussion || '')}</textarea>`)}
+        ${formRow('Decisions', `<textarea name="decisions" ${readOnly ? 'disabled' : ''}>${escapeHtml(note?.decisions || '')}</textarea>`)}
+        ${formRow('Risks', `<textarea name="risks" ${readOnly ? 'disabled' : ''}>${escapeHtml(note?.risks || '')}</textarea>`)}
+        ${formRow('Next Meeting', `<input type="datetime-local" name="nextMeetingAt" ${readOnly ? 'disabled' : ''} value="${note?.nextMeetingAt ? new Date(note.nextMeetingAt).toISOString().slice(0, 16) : ''}" />`)}
+        </div>
+
+        <div class="meeting-note-section" style="grid-column: 1 / -1;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <h4 style="margin:0;">Action Items</h4>
+            ${readOnly ? '' : '<button type="button" id="meeting-note-add-action-btn">+ Add Action</button>'}
+          </div>
+          <div class="table-wrapper">
+            <table class="meeting-note-actions-table">
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th>Owner</th>
+                  <th>Due Date</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th style="width:90px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="meeting-note-action-items-body">
+                ${actionItemsRows.map((item, index) => renderActionRow(item, index)).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="muted" style="margin-top:8px;">Use user ID/email in Owner for assignment mapping.</div>
+        </div>
+
+        <div class="meeting-note-section meeting-note-email-preview hidden" id="meeting-note-email-preview-panel">
+          <h4>Email Preview</h4>
+          <div class="muted">Subject</div>
+          <input id="meeting-note-preview-subject" value="Meeting Notes - ${escapeHtml(note?.title || '')}" disabled />
+          <div class="muted" style="margin-top:8px;">To (auto from Participants)</div>
+          <input id="meeting-note-preview-to" value="${escapeHtml(participantsText)}" disabled />
+          <div class="muted" style="margin-top:8px;">CC (auto from Stakeholders)</div>
+          <input id="meeting-note-preview-cc" value="${escapeHtml(stakeholdersText)}" disabled />
+        </div>
+
+        ${!readOnly ? `
+          <div class="meeting-note-send-email-block">
+            <label class="meeting-note-send-email-label" for="meeting-note-send-email">
+              <input type="checkbox" id="meeting-note-send-email" checked />
+              Send email to participants
+            </label>
+            <p class="muted meeting-note-send-email-help">${isPublishedEdit ? 'When checked, an email is sent after you save changes (same recipients as before, based on current participants).' : 'When checked, an email is sent right after the note is published.'}</p>
+          </div>
+          <div class="form-actions meeting-note-form-actions">
+            <button type="button" id="meeting-note-cancel-btn">Cancel</button>
+            <button type="button" id="meeting-note-preview-btn">Preview Email</button>
+            ${isPublishedEdit ? '' : '<button type="button" id="meeting-note-save-btn">Save Draft</button>'}
+            ${isPublishedEdit ? '' : '<button type="button" id="meeting-note-publish-btn" class="primary">Publish</button>'}
+            ${isPublishedEdit ? '<button type="button" class="primary" id="meeting-note-save-changes-btn">Save changes</button>' : ''}
+          </div>
+        ` : ''}
+      </form>
+    </div>
+  `;
+
+  const removeModal = () => modal.remove();
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) removeModal();
+  });
+  document.body.appendChild(modal);
+
+  const closeBtn = document.getElementById('close-meeting-note-modal');
+  if (closeBtn) closeBtn.onclick = removeModal;
+  const cancelBtn = document.getElementById('meeting-note-cancel-btn');
+  if (cancelBtn) cancelBtn.onclick = removeModal;
+
+  try {
+    initializeSearchableSelects();
+  } catch (e) {
+    console.error('Meeting note modal searchable select initialization error:', e);
+  }
+  setupMeetingNoteMentionInputs(modal);
+
+  if (readOnly) return;
+
+  const actionItemsBody = document.getElementById('meeting-note-action-items-body');
+  const addActionBtn = document.getElementById('meeting-note-add-action-btn');
+  const previewBtn = document.getElementById('meeting-note-preview-btn');
+  const previewPanel = document.getElementById('meeting-note-email-preview-panel');
+
+  const refreshPreview = () => {
+    const title = document.querySelector('#meeting-note-form input[name="title"]')?.value || '';
+    const participantsValue = document.querySelector('#meeting-note-form input[name="participantsText"]')?.value || '';
+    const stakeholdersValue = document.querySelector('#meeting-note-form input[name="stakeholdersText"]')?.value || '';
+    const subjectEl = document.getElementById('meeting-note-preview-subject');
+    const toEl = document.getElementById('meeting-note-preview-to');
+    const ccEl = document.getElementById('meeting-note-preview-cc');
+    if (subjectEl) subjectEl.value = `Meeting Notes - ${title}`.trim();
+    if (toEl) toEl.value = participantsValue;
+    if (ccEl) ccEl.value = stakeholdersValue;
+  };
+
+  const reindexActionRows = () => {
+    if (!actionItemsBody) return;
+    Array.from(actionItemsBody.querySelectorAll('.meeting-note-action-row')).forEach((row, index) => {
+      const inputs = row.querySelectorAll('input,select');
+      if (inputs[0]) inputs[0].name = `mn_action_description_${index}`;
+      if (inputs[1]) inputs[1].name = `mn_action_owner_${index}`;
+      if (inputs[2]) inputs[2].name = `mn_action_due_${index}`;
+      if (inputs[3]) inputs[3].name = `mn_action_priority_${index}`;
+      if (inputs[4]) inputs[4].name = `mn_action_status_${index}`;
+    });
+  };
+
+  const bindRemoveButtons = () => {
+    actionItemsBody.querySelectorAll('.meeting-note-remove-action-btn').forEach((btn) => {
+      btn.onclick = () => {
+        const rows = actionItemsBody.querySelectorAll('.meeting-note-action-row');
+        if (rows.length === 1) return;
+        btn.closest('.meeting-note-action-row')?.remove();
+        reindexActionRows();
+        bindRemoveButtons();
+      };
+    });
+  };
+  bindRemoveButtons();
+
+  if (addActionBtn) {
+    addActionBtn.onclick = () => {
+      const nextIndex = actionItemsBody.querySelectorAll('.meeting-note-action-row').length;
+      actionItemsBody.insertAdjacentHTML('beforeend', renderActionRow({ status: 'Not Started' }, nextIndex));
+      reindexActionRows();
+      bindRemoveButtons();
+      setupMeetingNoteMentionInputs(modal);
+    };
+  }
+
+  if (previewBtn && previewPanel) {
+    previewBtn.onclick = () => {
+      refreshPreview();
+      previewPanel.classList.toggle('hidden');
+      previewBtn.textContent = previewPanel.classList.contains('hidden') ? 'Preview Email' : 'Hide Preview';
+    };
+  }
+
+  const parseParticipants = (fd) => {
+    const parseList = (value, role) =>
+      String(value || '')
+        .replace(/\s+@(?=[a-zA-Z])/g, ', @')
+        .split(',')
+        .map((v) => v.trim().replace(/^@+/, ''))
+        .filter(Boolean)
+        .map((valueItem) => {
+          const normalized = valueItem.toLowerCase().replace(/\s+/g, ' ').trim();
+          const user = LOOKUPS.users.find((u) => (
+            u.id === valueItem
+            || (u.email || '').toLowerCase() === normalized
+            || (u.name || '').toLowerCase().replace(/\s+/g, ' ').trim() === normalized
+          ));
+          if (user) {
+            return { userId: user.id, email: user.email || null, name: user.name || null, role };
+          }
+          if (valueItem.includes('@')) {
+            return { userId: null, email: valueItem, name: valueItem, role };
+          }
+          return { userId: valueItem, email: null, name: valueItem, role };
+        });
+
+    return [...parseList(fd.get('participantsText'), 'Attendee'), ...parseList(fd.get('stakeholdersText'), 'Stakeholder')];
+  };
+
+  const parseActionItems = () =>
+    Array.from(document.querySelectorAll('#meeting-note-action-items-body .meeting-note-action-row'))
+      .map((row, index) => {
+        const description = (row.querySelector(`input[name="mn_action_description_${index}"]`)?.value || '').trim();
+        const ownerRaw = (row.querySelector(`input[name="mn_action_owner_${index}"]`)?.value || '').trim().replace(/^@+/, '');
+        const dueDate = (row.querySelector(`input[name="mn_action_due_${index}"]`)?.value || '').trim();
+        const priority = (row.querySelector(`select[name="mn_action_priority_${index}"]`)?.value || '').trim();
+        const status = (row.querySelector(`select[name="mn_action_status_${index}"]`)?.value || '').trim();
+        if (!description) return null;
+        const ownerNormalized = ownerRaw.toLowerCase().replace(/\s+/g, ' ').trim();
+        const ownerUser = LOOKUPS.users.find((u) => (
+          u.id === ownerRaw
+          || (u.email || '').toLowerCase() === ownerNormalized
+          || (u.name || '').toLowerCase().replace(/\s+/g, ' ').trim() === ownerNormalized
+        ));
+        return {
+          description,
+          ownerId: ownerUser ? ownerUser.id : (ownerRaw || null),
+          ownerName: ownerUser ? ownerUser.name : (ownerRaw || null),
+          dueDate: dueDate || null,
+          priority: priority || null,
+          status: status || 'Not Started',
+          orderIndex: index,
+        };
+      })
+      .filter(Boolean);
+
+  const buildPayload = (status) => {
+    const form = document.getElementById('meeting-note-form');
+    const fd = new FormData(form);
+    return {
+      initiativeId,
+      title: String(fd.get('title') || '').trim(),
+      meetingType: String(fd.get('meetingType') || '').trim(),
+      meetingDate: fd.get('meetingDate') ? new Date(fd.get('meetingDate')).toISOString() : null,
+      facilitatorId: fd.get('facilitatorId') || null,
+      noteTakerId: fd.get('noteTakerId') || null,
+      agenda: String(fd.get('agenda') || '').trim(),
+      discussion: String(fd.get('discussion') || '').trim(),
+      decisions: String(fd.get('decisions') || '').trim(),
+      risks: String(fd.get('risks') || '').trim(),
+      nextMeetingAt: fd.get('nextMeetingAt') ? new Date(fd.get('nextMeetingAt')).toISOString() : null,
+      status,
+      participants: parseParticipants(fd),
+      actionItems: parseActionItems(),
+    };
+  };
+
+  const sendIfChecked = async (id) => {
+    const sendEmail = document.getElementById('meeting-note-send-email')?.checked !== false;
+    if (!sendEmail || !id) return;
+    const sendRes = await fetchJSON(`/api/meeting-notes/${id}/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (sendRes.ok === false) {
+      alert(sendRes.error || 'Failed to send meeting notes email');
+      return false;
+    }
+    return true;
+  };
+
+  const saveNote = async ({ mode } = {}) => {
+    try {
+      const payloadDraft = buildPayload('Draft');
+      const payloadPublished = buildPayload('Published');
+      if (!payloadDraft.title || !payloadDraft.meetingDate) {
+        alert('Meeting title and meeting date are required.');
+        return;
+      }
+
+      let saved = null;
+      let effectiveId = noteId;
+
+      if (mode === 'draft') {
+        const payload = payloadDraft;
+        if (noteId) {
+          const response = await fetchJSON(`/api/meeting-notes/${noteId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (response.ok === false) {
+            alert(response.error || 'Failed to update meeting note');
+            return;
+          }
+          saved = response.note;
+        } else {
+          const response = await fetchJSON('/api/meeting-notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (!response.id) {
+            alert(response.error || 'Failed to create meeting note');
+            return;
+          }
+          saved = response;
+        }
+        effectiveId = saved?.id;
+      } else if (mode === 'publish') {
+        if (!noteId) {
+          const created = await fetchJSON('/api/meeting-notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payloadDraft),
+          });
+          if (!created.id) {
+            alert(created.error || 'Failed to create meeting note');
+            return;
+          }
+          effectiveId = created.id;
+          const updated = await fetchJSON(`/api/meeting-notes/${effectiveId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payloadPublished, initiativeId }),
+          });
+          if (updated.ok === false) {
+            alert(updated.error || 'Failed to publish meeting note');
+            return;
+          }
+          saved = updated.note;
+        } else {
+          const updated = await fetchJSON(`/api/meeting-notes/${noteId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payloadPublished),
+          });
+          if (updated.ok === false) {
+            alert(updated.error || 'Failed to update meeting note');
+            return;
+          }
+          saved = updated.note;
+          effectiveId = saved.id;
+        }
+
+        const publishRes = await fetchJSON(`/api/meeting-notes/${effectiveId}/publish`, { method: 'POST' });
+        if (publishRes.ok === false) {
+          alert(publishRes.error);
+          return;
+        }
+
+        const sendOk = await sendIfChecked(effectiveId);
+        if (sendOk === false) return;
+      } else if (mode === 'savePublished') {
+        const updated = await fetchJSON(`/api/meeting-notes/${noteId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payloadPublished),
+        });
+        if (updated.ok === false) {
+          alert(updated.error || 'Failed to update meeting note');
+          return;
+        }
+        saved = updated.note;
+        effectiveId = saved.id;
+        const sendOk = await sendIfChecked(effectiveId);
+        if (sendOk === false) return;
+      }
+
+      removeModal();
+      if (typeof onSaved === 'function') onSaved();
+    } catch (e) {
+      alert(`Meeting note action failed: ${e.message}`);
+    }
+  };
+
+  document.getElementById('meeting-note-save-btn')?.addEventListener('click', () => saveNote({ mode: 'draft' }));
+  document.getElementById('meeting-note-publish-btn')?.addEventListener('click', () => saveNote({ mode: 'publish' }));
+  document.getElementById('meeting-note-save-changes-btn')?.addEventListener('click', () => saveNote({ mode: 'savePublished' }));
 }
 
 // Gantt Chart rendering function

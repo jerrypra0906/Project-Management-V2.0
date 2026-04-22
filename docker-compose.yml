@@ -23,6 +23,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: project_management_backend
+    # Optional extra env file (gitignored), e.g. legacy SMTP-only file
+    env_file:
+      - path: smtp.local.env
+        required: false
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - DATABASE_URL=postgres://postgres:postgres123@postgres:5432/project_management_v2
@@ -32,19 +36,15 @@ services:
       - GID=${GID:-}
       - CR_GID=${CR_GID:-}
       - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me-in-production}
+      # Downstream Hub SSO (must match Hub; override with env SSO_TOKEN_SECRET if needed)
+      - SSO_TOKEN_SECRET=${SSO_TOKEN_SECRET:-your-sso-shared-secret-change-in-production}
+      - APP_PUBLIC_ORIGIN=${APP_PUBLIC_ORIGIN:-http://localhost:8080}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Admin123!}
       - ADMIN_NAME=${ADMIN_NAME:-Administrator}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8080}
-      - EMAIL_FROM=${EMAIL_FROM:-noreply@energi-up.com}
-      - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_SECURE=${SMTP_SECURE:-false}
-      - SMTP_USER=${SMTP_USER:-}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
-      - SMTP_REJECT_UNAUTHORIZED=${SMTP_REJECT_UNAUTHORIZED:-true}
+    # Host port maps to container :3000 (nginx uses backend:3000 inside the network)
     ports:
-      - "3000:3000"
+      - "${BACKEND_HOST_PORT:-13000}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,7 +53,7 @@ services:
       - ./backend:/app/backend:ro
       # Mount docs folder for static assets (logo, etc)
       - ./docs:/app/docs:ro
-      # Mount .env file if it exists (optional, can also use environment variables)
+      # Root .env file (optional; dotenv in container). Use a file, not a folder.
       - ./.env:/app/.env:ro
     networks:
       - app-network

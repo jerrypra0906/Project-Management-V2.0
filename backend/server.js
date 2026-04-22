@@ -37,6 +37,7 @@ import tasksRouter from './routes/tasks.js';
 import documentsRouter from './routes/documents.js';
 import profileRouter from './routes/profile.js';
 import notificationsRouter from './routes/notifications.js';
+import meetingNotesRouter from './routes/meeting-notes.js';
 import { authenticateToken } from './middleware/auth.js';
 
 // Public routes
@@ -55,6 +56,7 @@ app.use('/api/tasks', tasksRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/profile', authenticateToken, profileRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/meeting-notes', meetingNotesRouter);
 
 // Health
 app.get('/health', (_req, res) => {

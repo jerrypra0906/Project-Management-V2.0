@@ -1,4 +1,5 @@
 import fs from 'fs';
+import store from '../backend/store.js';
 
 const BASE_URL = 'http://localhost:3000';
 const TEST_TIMEOUT = 10000; // 10 seconds
@@ -241,6 +242,32 @@ const tests = [
       const crs = data.initiatives.filter(i => i.type === 'CR');
       
       return `✅ Data file contains ${projects.length} projects and ${crs.length} CRs`;
+    }
+  },
+
+  {
+    name: 'Meeting Notes Schema Availability',
+    async run() {
+      const data = await store.read();
+      const requiredCollections = [
+        'meetingNotes',
+        'meetingNoteParticipants',
+        'meetingNoteActionItems',
+        'meetingNoteEmailLog',
+        'meetingNoteHistory',
+      ];
+
+      for (const key of requiredCollections) {
+        if (!Array.isArray(data[key])) {
+          throw new Error(`Missing or invalid collection: ${key}`);
+        }
+      }
+
+      if (data.meetingNotes.length > 0 && !Object.prototype.hasOwnProperty.call(data.meetingNotes[0], 'deletedAt')) {
+        throw new Error('meetingNotes rows should include deletedAt (soft delete support)');
+      }
+
+      return `✅ Meeting notes collections ready (${data.meetingNotes.length} notes loaded)`;
     }
   },
   
