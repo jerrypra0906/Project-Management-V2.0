@@ -11,6 +11,7 @@ A web-based project and change request management application with authenticatio
 - **Google Sheets Integration**: Automatic sync from Google Sheets every 5 minutes
 - **Daily Snapshots**: Automatic tracking of milestone durations and project aging
 - **Comments & Tasks**: Collaboration features for projects and change requests
+- **Meeting Notes**: Capture structured meeting notes with participants, action items, email delivery log, and history tracking
 - **Notifications**: Real-time notifications for important events
 - **Document Management**: Upload and manage project-related documents
 
@@ -108,6 +109,12 @@ Access: http://localhost:3000
 - `GET /api/documents` - Get documents
 - `POST /api/documents` - Upload document
 - `GET /api/notifications` - Get notifications
+- `GET /api/meeting-notes` - List meeting notes by initiative/type/status
+- `POST /api/meeting-notes` - Create a meeting note with participants and action items
+- `GET /api/meeting-notes/:id` - Get a meeting note detail
+- `PUT /api/meeting-notes/:id` - Update a meeting note (increments version/history)
+- `DELETE /api/meeting-notes/:id` - Soft-delete a meeting note
+- `POST /api/meeting-notes/:id/send` - Send meeting note email and record delivery log
 
 See [docs/requirements.md](docs/requirements.md) for full API documentation.
 
@@ -179,6 +186,22 @@ node backend/sync_google_sheets_cr.js
 - Column headers are matched flexibly (e.g., `Initiative Name`, `Project Name`, or `Name`)
 - Ensure the Google Sheet is published or shared publicly for CSV export to work
 
+## 📝 Meeting Notes
+
+The Meeting Notes module provides a structured way to record and distribute project meeting outcomes.
+
+### Main capabilities
+
+- Store meeting metadata (title, type, date/time, facilitator, note taker, location/link)
+- Track participants and action items (owner, due date, priority, status)
+- Keep revision history/versioning for changes
+- Soft-delete notes for safer data recovery
+- Send meeting note summaries via email and keep an email delivery log
+
+### Related docs
+
+- [docs/MEETING-NOTES-UI-FUNCTIONAL-TECH-SPEC.md](docs/MEETING-NOTES-UI-FUNCTIONAL-TECH-SPEC.md)
+
 ## 🗄️ Database Migrations
 
 The system uses SQL migrations for database schema management.
@@ -188,6 +211,8 @@ The system uses SQL migrations for database schema management.
 - `migrations/001_initial_schema.sql` - Initial database schema
 - `migrations/002_add_notifications_table.sql` - Notifications table
 - `migrations/003_update_users_and_initiatives.sql` - User and initiative updates
+- `migrations/004_add_meeting_notes_tables.sql` - Meeting notes core tables
+- `migrations/005_meeting_notes_soft_delete_two_statuses.sql` - Meeting notes soft-delete and status normalization
 
 ### Running Migrations
 
