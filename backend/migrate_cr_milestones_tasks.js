@@ -30,7 +30,23 @@ async function main() {
   const crs = data.initiatives.filter((i) => i.type === 'CR');
 
   for (const cr of crs) {
-    const nextMilestone = mapCrInitiativeMilestone(cr.milestone);
+    // No-extra-column design: CR phase is stored directly in `milestone`.
+    // Prefer any existing `crMilestonePhase` if present; otherwise derive a representative CR phase from canonical milestone.
+    let nextMilestone = cr.crMilestonePhase ? String(cr.crMilestonePhase) : null;
+    if (!nextMilestone) {
+      const canon = String(mapCrInitiativeMilestone(cr.milestone) || '').trim().toLowerCase();
+      nextMilestone =
+        canon === 'preparation' ? 'User Initiate'
+          : canon === 'tech assessment' ? 'FSD'
+          : canon === 'testing' ? 'SIT'
+          : canon === 'live' ? 'Live'
+          : canon === 'development' ? 'Development'
+          : 'User Initiate';
+    }
+    // Normalize one legacy label
+    if (nextMilestone === 'CR Signed Sec 2 and 3') nextMilestone = 'CR Signed sec 2';
+    if (!CR_MILESTONE_PHASES.includes(nextMilestone)) nextMilestone = 'User Initiate';
+
     if (cr.milestone !== nextMilestone) {
       console.log(`[milestone] ${cr.ticket || cr.id}: "${cr.milestone}" → "${nextMilestone}"`);
       cr.milestone = nextMilestone;
@@ -38,21 +54,9 @@ async function main() {
       milestoneUpdates += 1;
     }
 
-    // Ensure a detailed CR milestone phase exists (cannot recover original phase; use representative label)
-    if (cr.crMilestonePhase === 'CR Signed Sec 2 and 3') {
-      cr.crMilestonePhase = 'CR Signed sec 2';
-      cr.updatedAt = now();
-    }
-    if (!cr.crMilestonePhase) {
-      const canon = String(cr.milestone || '').trim().toLowerCase();
-      const rep =
-        canon === 'preparation' ? 'User Initiate'
-          : canon === 'tech assessment' ? 'FSD'
-          : canon === 'testing' ? 'SIT'
-          : canon === 'live' ? 'Live'
-          : canon === 'development' ? 'Development'
-          : 'User Initiate';
-      cr.crMilestonePhase = CR_MILESTONE_PHASES.includes(rep) ? rep : 'User Initiate';
+    // Clear old column if present to avoid confusion (optional)
+    if (cr.crMilestonePhase) {
+      cr.crMilestonePhase = null;
       cr.updatedAt = now();
     }
 

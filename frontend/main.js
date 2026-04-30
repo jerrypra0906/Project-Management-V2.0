@@ -1125,22 +1125,6 @@ function computeTaskAgingDays(startDateStr, endDateStr) {
   return days >= 0 ? days : null;
 }
 
-// CR milestone UI labels (new) → canonical initiative milestone (old)
-const CR_MILESTONE_UI_TO_CANONICAL = {
-  'User Initiate': 'Preparation',
-  'CR Created': 'Preparation',
-  'CR Signed sec 2': 'Preparation',
-  'CR Signed Sec 3': 'Preparation',
-  'FSD': 'Tech Assessment',
-  'Development': 'Development',
-  'Changes': 'Development',
-  'Signed Changes': 'Development',
-  'Development - Extended': 'Development',
-  'SIT': 'Testing',
-  'UAT': 'Testing',
-  'Live': 'Live',
-};
-
 const CR_MILESTONE_UI_OPTIONS = [
   'User Initiate',
   'CR Created',
@@ -1156,22 +1140,11 @@ const CR_MILESTONE_UI_OPTIONS = [
   'Live',
 ];
 
-function canonicalMilestoneToCrUiLabel(canonical) {
-  const v = String(canonical || '').trim().toLowerCase();
-  // Representative UI label per canonical value (Preparation is many-to-one)
-  if (v === 'preparation') return 'User Initiate';
-  if (v === 'tech assessment') return 'FSD';
-  if (v === 'development') return 'Development';
-  if (v === 'testing') return 'SIT';
-  if (v === 'live') return 'Live';
-  return canonical || '';
-}
-
 function normalizeCrMilestoneForDisplay(initiative) {
-  if (!initiative || initiative.type !== 'CR') return initiative?.milestone || '';
-  // Prefer the detailed phase if present; otherwise fall back to representative label.
-  if (initiative.crMilestonePhase) return String(initiative.crMilestonePhase);
-  return canonicalMilestoneToCrUiLabel(initiative.milestone);
+  // With "no extra column" design:
+  // - Project: milestone is canonical (Preparation -> Live)
+  // - CR: milestone stores the CR phase directly (User Initiate -> Live)
+  return initiative?.milestone || '';
 }
 
 /** Shared formatters for change-history (recent activity FAB + view page). */
@@ -1558,6 +1531,9 @@ function exportCellValueForCR(i, key) {
       return nameById(LOOKUPS.users, i.businessOwnerId);
     case 'itPicId':
       return nameById(LOOKUPS.users, i.itPicId);
+    case 'milestone':
+      // Export the same milestone label shown in the UI (CR uses phase label when present)
+      return normalizeCrMilestoneForDisplay(i);
     case 'startDate':
     case 'endDate':
     case 'createdAt':
@@ -1728,26 +1704,25 @@ async function renderList() {
     data = data.filter(i => isUserInInitiativeTeam(i, userId));
   }
   
-  // Calculate milestone counts from filtered data (CR list)
-  // DB stores canonical values; UI should show the newest CR milestone labels.
-  // Since canonical milestones collapse several CR phases (e.g. Preparation), we use a representative UI label.
+  // Project List milestone distribution (canonical milestones only)
+  // Correct order: Preparation -> Business Requirement -> Tech Assessment -> Planning -> Development -> Testing -> Live
   const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live']; // used for filtering
-
-  const uiMilestones = CR_MILESTONE_UI_OPTIONS;
-  const milestoneCounts = Object.fromEntries(uiMilestones.map((m) => [m, 0]));
-
-  const milestoneDisplayNames = Object.fromEntries(uiMilestones.map((m) => [m, m]));
+  const uiMilestones = milestones;
+  const milestoneCounts = Object.fromEntries(milestones.map((m) => [m, 0]));
+  const milestoneDisplayNames = Object.fromEntries(milestones.map((m) => [m, m]));
   const milestoneColors = {
-    'User Initiate': '#8b5cf6', // Purple
-    'FSD': '#06b6d4', // Cyan
+    'Preparation': '#8b5cf6', // Purple
+    'Business Requirement': '#0ea5e9', // Sky
+    'Tech Assessment': '#06b6d4', // Cyan
+    'Planning': '#6366f1', // Indigo
     'Development': '#f59e0b', // Amber
-    'SIT': '#ef4444', // Red
-    'Live': '#22c55e' // Green
+    'Testing': '#ef4444', // Red
+    'Live': '#22c55e', // Green
   };
 
   data.forEach(i => {
-    const ui = normalizeCrMilestoneForDisplay(i);
-    if (ui && milestoneCounts[ui] !== undefined) milestoneCounts[ui] += 1;
+    const m = i?.milestone;
+    if (m && milestoneCounts[m] !== undefined) milestoneCounts[m] += 1;
   });
   // Apply client-side filtering for date filters
   if (filter.createdAt) {
@@ -2414,7 +2389,17 @@ async function renderList() {
     btn.onclick = async () => {
       if (!confirm('Delete this initiative?')) return;
       try {
-        await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        const result = await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        if (result?.trashId) {
+          const undo = confirm('Initiative deleted. Undo?');
+          if (undo) {
+            await fetchJSON(`/api/initiatives/restore/${result.trashId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({}),
+            });
+          }
+        }
         renderList();
       } catch (e) {
         alert('Failed to delete initiative: ' + (e.message || String(e)));
@@ -2684,9 +2669,7 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
   // Determine selected type: from initiative if exists, otherwise from defaultType
   const selectedType = initiative ? initiative.type : defaultType;
   const currentMilestone = initiative?.milestone || '';
-  const selectedCrUiMilestone = selectedType === 'CR'
-    ? (initiative?.crMilestonePhase || canonicalMilestoneToCrUiLabel(currentMilestone))
-    : currentMilestone;
+  const selectedCrUiMilestone = selectedType === 'CR' ? currentMilestone : currentMilestone;
   
   const fields = [
     formRow('Type', `<select name="type" id="typeSelect" required><option value="Project" ${selectedType === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${selectedType === 'CR' ? 'selected' : ''}>CR</option></select>`),
@@ -2979,10 +2962,8 @@ async function renderNew(defaultType = 'Project') {
       itPmId: obj.itPmId || null,
       itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
       status: obj.status,
-      milestone: obj.type === 'CR'
-        ? (CR_MILESTONE_UI_TO_CANONICAL[obj.milestone] || obj.milestone)
-        : obj.milestone,
-      crMilestonePhase: obj.type === 'CR' ? (obj.milestone || null) : null,
+      // No extra column: for CR we store the CR phase directly in `milestone`.
+      milestone: obj.milestone,
       startDate: obj.startDate,
       endDate: obj.endDate || null,
       planStartDate: obj.planStartDate || null,
@@ -3759,6 +3740,7 @@ async function renderView(id) {
     const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
     
     const card = document.querySelector('.card');
+    const crUiSelectedMilestone = i.type === 'CR' ? (i.milestone || '') : (i.milestone || '');
     card.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
         <h2 style="margin: 0;">Edit Initiative</h2>
@@ -3774,7 +3756,11 @@ async function renderView(id) {
         ${formRow('Create Date', `<input type="date" value="${i.createdAt?.slice(0,10) || ''}" readonly style="background: #f0f0f0;" />`)}
         ${formRow('Priority', `<select name="priority">${['P0','P1','P2'].map(p => `<option value="${p}" ${i.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
           ${formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => `<option value="${s}" ${i.status && i.status.toLowerCase() === s.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}</select>`)}
-        ${formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
+        ${formRow('Milestone', `<select name="milestone">${
+          i.type === 'CR'
+            ? CR_MILESTONE_UI_OPTIONS.map(m => `<option value="${m}" ${crUiSelectedMilestone === m ? 'selected' : ''}>${m}</option>`).join('')
+            : ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')
+        }</select>`)}
         ${formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, i.departmentId || '', 'Select...'))}
         ${formRow('Actual Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" />`)}
         ${formRow('Actual End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
@@ -4917,6 +4903,27 @@ async function showTaskModal(initiativeId, taskId = null) {
     }
   }
   
+  // Fetch initiative type so CR can use the newest milestone phases
+  let initiativeType = 'Project';
+  try {
+    const init = await fetchJSON(`/api/initiatives/${initiativeId}`);
+    initiativeType = init?.type || 'Project';
+  } catch {
+    // If this fails, fall back to Project milestone options
+  }
+
+  const milestoneOptions =
+    initiativeType === 'CR'
+      ? CR_MILESTONE_UI_OPTIONS.map((m) => ({ value: m, label: m }))
+      : [
+          { value: 'Business Requirement', label: 'Business Requirement' },
+          { value: 'Tech Assessment', label: 'Tech Assessment' },
+          { value: 'Planning', label: 'Planning' },
+          { value: 'Development', label: 'Development' },
+          { value: 'Testing', label: 'Testing' },
+          { value: 'Live Preparation', label: 'Live Preparation' },
+        ];
+
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.innerHTML = `
@@ -4968,14 +4975,7 @@ async function showTaskModal(initiativeId, taskId = null) {
           <label>Milestone</label>
           <select name="milestone" style="width: 100%;">
             <option value="">None</option>
-            ${[
-              { value: 'Business Requirement', label: 'Business Requirement' },
-              { value: 'Tech Assessment', label: 'Tech Assessment' },
-              { value: 'Planning', label: 'Planning' },
-              { value: 'Development', label: 'Development' },
-              { value: 'Testing', label: 'Testing' },
-              { value: 'Live Preparation', label: 'Live Preparation' }
-            ].map(m => 
+            ${milestoneOptions.map(m => 
               `<option value="${m.value}" ${task?.milestone === m.value ? 'selected' : ''}>${m.label}</option>`
             ).join('')}
           </select>
@@ -5273,6 +5273,8 @@ async function renderEdit(id) {
       itPmId: obj.itPmId || null,
       itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
       status: obj.status,
+      // For CR, the form milestone dropdown is the CR phase label (UI value).
+      // Persist canonical milestone in `milestone` and the detailed phase in `crMilestonePhase`.
       milestone: obj.milestone,
       startDate: obj.startDate,
       endDate: obj.endDate || null,
@@ -5353,7 +5355,7 @@ async function renderCRList() {
     departmentId: parseFilter('cr_departmentId'),
     priority: parseFilter('cr_priority'),
     status: parseFilter('cr_status'),
-    crMilestonePhase: parseFilter('cr_crMilestonePhase'),
+    milestone: parseFilter('cr_milestone'),
     itPicId: parseFilter('cr_itPicId'),
     itPmId: parseFilter('cr_itPmId'),
     itManagerId: parseFilter('cr_itManagerId'),
@@ -5370,7 +5372,7 @@ async function renderCRList() {
   if (filter.departmentId.length) apiQs.set('departmentId', filter.departmentId.join(','));
   if (filter.priority.length) apiQs.set('priority', filter.priority.join(','));
   if (filter.status.length) apiQs.set('status', filter.status.join(','));
-  if (filter.crMilestonePhase.length) apiQs.set('crMilestonePhase', filter.crMilestonePhase.join(','));
+  if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
   if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
   if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
   
@@ -5449,10 +5451,7 @@ async function renderCRList() {
   });
   
   // Calculate milestone counts from filtered data (CR list)
-  // DB stores canonical values; UI should show the newest CR milestone labels.
-  // Since canonical milestones collapse several CR phases (e.g. Preparation), we use a representative UI label.
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live']; // used elsewhere (filter list)
-
+  // No extra column: CR phase is stored directly in `milestone`.
   const uiMilestones = CR_MILESTONE_UI_OPTIONS;
   const milestoneCounts = Object.fromEntries(uiMilestones.map((m) => [m, 0]));
 
@@ -5469,8 +5468,8 @@ async function renderCRList() {
   };
 
   data.forEach(i => {
-    const ui = normalizeCrMilestoneForDisplay(i);
-    if (ui && milestoneCounts[ui] !== undefined) milestoneCounts[ui] += 1;
+    const m = i?.milestone || '';
+    if (m && milestoneCounts[m] !== undefined) milestoneCounts[m] += 1;
   });
   
   // CR data is now included in the API response
@@ -5491,6 +5490,9 @@ async function renderCRList() {
       if (key.endsWith('Id')) {
         va = nameFor(key, a.initiative[key]);
         vb = nameFor(key, b.initiative[key]);
+      } else if (key === 'milestone') {
+        va = String(normalizeCrMilestoneForDisplay(a.initiative) || '').toLowerCase();
+        vb = String(normalizeCrMilestoneForDisplay(b.initiative) || '').toLowerCase();
       } else if (key === 'businessImpact' || key === 'remark' || key === 'documentationLink') {
         va = String(a.initiative[key] || '').toLowerCase();
         vb = String(b.initiative[key] || '').toLowerCase();
@@ -5579,12 +5581,12 @@ async function renderCRList() {
           </div>
           <div class="multi-select-wrapper">
             <button class="multi-select-btn" data-filter="fMilestone">
-              Milestone ${filter.crMilestonePhase.length > 0 ? `(${filter.crMilestonePhase.length})` : ''}
+              Milestone ${filter.milestone.length > 0 ? `(${filter.milestone.length})` : ''}
             </button>
             <div class="multi-select-dropdown" id="dropdown-fMilestone">
               ${CR_MILESTONE_UI_OPTIONS.map(m => `
                 <label class="multi-select-option">
-                  <input type="checkbox" value="${m}" ${filter.crMilestonePhase.includes(m) ? 'checked' : ''}>
+                  <input type="checkbox" value="${m}" ${filter.milestone.includes(m) ? 'checked' : ''}>
                   ${m}
                 </label>
               `).join('')}
@@ -5801,7 +5803,7 @@ async function renderCRList() {
       'fDepartment': 'cr_departmentId',
       'fPriority': 'cr_priority',
       'fStatus': 'cr_status',
-      'fMilestone': 'cr_crMilestonePhase',
+      'fMilestone': 'cr_milestone',
       'fItPic': 'cr_itPicId',
       'fItPm': 'cr_itPmId',
       'fItManager': 'cr_itManagerId'
@@ -5952,7 +5954,17 @@ async function renderCRList() {
     btn.onclick = async () => {
       if (!confirm('Delete this CR?')) return;
       try {
-        await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        const result = await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        if (result?.trashId) {
+          const undo = confirm('CR deleted. Undo?');
+          if (undo) {
+            await fetchJSON(`/api/initiatives/restore/${result.trashId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({}),
+            });
+          }
+        }
         renderCRList();
       } catch (e) {
         alert('Failed to delete CR: ' + (e.message || String(e)));

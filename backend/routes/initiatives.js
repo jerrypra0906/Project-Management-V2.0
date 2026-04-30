@@ -89,11 +89,14 @@ function validateCommon(body) {
   if (!['P0','P1','P2'].includes(body.priority)) return 'Invalid priority';
   const statuses = ['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'];
   if (!statuses.includes(body.status)) return 'Invalid status';
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
-  if (!milestones.includes(body.milestone)) return 'Invalid milestone';
-  // CR-only: keep the detailed milestone phase label if provided
-  if (body.type === 'CR' && body.crMilestonePhase) {
-    if (!CR_MILESTONE_PHASES.includes(body.crMilestonePhase)) return 'Invalid CR milestone phase';
+  // Milestone validation depends on type:
+  // - Project: canonical milestone list
+  // - CR: store CR phase directly in `milestone` (no extra column)
+  if (body.type === 'Project') {
+    const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
+    if (!milestones.includes(body.milestone)) return 'Invalid milestone';
+  } else if (body.type === 'CR') {
+    if (!CR_MILESTONE_PHASES.includes(body.milestone)) return 'Invalid CR milestone phase';
   }
   return null;
 }
@@ -150,10 +153,11 @@ router.get('/', async (req, res) => {
     rows = rows.filter(r => milestoneValues.includes(r.milestone));
   }
 
-  // CR-only milestone phase filter (new UI milestones)
+  // Backward compatibility: older clients may send `crMilestonePhase`.
+  // Since we now store CR phase directly in `milestone`, treat it as an alias for `milestone` when type=CR.
   const crPhaseValues = parseMultiValue(crMilestonePhase);
   if (crPhaseValues && crPhaseValues.length > 0) {
-    rows = rows.filter(r => crPhaseValues.includes(r.crMilestonePhase));
+    rows = rows.filter(r => r.type === 'CR' && crPhaseValues.includes(r.milestone));
   }
   
   const priorityValues = parseMultiValue(priority);
@@ -261,7 +265,6 @@ router.post('/', async (req, res) => {
   const {
     type,name,ticket,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,status,milestone,startDate,endDate,planStartDate,planEndDate,remark,documentationLink
   } = req.body;
-  const crMilestonePhase = req.body.crMilestonePhase || null;
   const data = await store.read();
   
   // Convert arrays to comma-separated strings for storage
@@ -287,7 +290,7 @@ router.post('/', async (req, res) => {
     itPmId: itPmId || null,
     itManagerIds: itManagerIdsStr,
     status,milestone,
-    crMilestonePhase: type === 'CR' ? (crMilestonePhase || null) : null,
+    crMilestonePhase: null,
     startDate,endDate: endDate||null,planStartDate: planStartDate||null,planEndDate: planEndDate||null,remark: remark||null,documentationLink: documentationLink||null, 
     createdAt, updatedAt 
   });
@@ -412,7 +415,7 @@ router.put('/:id', async (req, res) => {
   const initiative = data.initiatives[idx];
   const changes = [];
   const updatedAt = now();
-  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','crMilestonePhase','startDate','endDate','planStartDate','planEndDate','remark','documentationLink'];
+  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','startDate','endDate','planStartDate','planEndDate','remark','documentationLink'];
   
   // Track changes and update fields
   for (const k of allowed) {
@@ -536,8 +539,7 @@ router.delete('/:id', async (req, res) => {
   data.initiatives = data.initiatives.filter(x => x.id !== req.params.id);
   data.changeRequests = data.changeRequests.filter(x => x.initiativeId !== req.params.id);
   await store.write(data);
-  if (data.initiatives.length === before) return res.status(404).json({ error: 'Not found' });
-  res.json({ ok: true });
+  res.json({ ok: true, deleted: before - data.initiatives.length });
 });
 
 export default router;
