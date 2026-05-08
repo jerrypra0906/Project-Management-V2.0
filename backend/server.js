@@ -39,6 +39,10 @@ import profileRouter from './routes/profile.js';
 import notificationsRouter from './routes/notifications.js';
 import meetingNotesRouter from './routes/meeting-notes.js';
 import { authenticateToken } from './middleware/auth.js';
+import { requestTimeout } from './middleware/timeout.js';
+import apiV1CrsRouter from './routes/api-v1-crs.js';
+import dwsApplicationsRouter from './routes/dws-applications.js';
+import managementDashboardRouter from './routes/management-dashboard.js';
 
 // Public routes
 app.use('/api/auth', authRouter);
@@ -57,6 +61,9 @@ app.use('/api/documents', documentsRouter);
 app.use('/api/profile', authenticateToken, profileRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/meeting-notes', meetingNotesRouter);
+app.use('/api/v1/crs', authenticateToken, requestTimeout(5000), apiV1CrsRouter);
+app.use('/api/dws-applications', authenticateToken, dwsApplicationsRouter);
+app.use('/api/management-dashboard', authenticateToken, managementDashboardRouter);
 
 // Health
 app.get('/health', (_req, res) => {

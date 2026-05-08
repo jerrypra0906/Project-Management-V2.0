@@ -145,6 +145,24 @@ async function getCurrentUser() {
     // Decode JWT to get user info (simple decode, not verification - backend verifies)
     const payload = JSON.parse(atob(token.split('.')[1]));
     currentUser = { id: payload.sub, email: payload.email, name: payload.name, isAdmin: payload.isAdmin };
+
+    // Enrich with profile fields (role/type/department) so menus don't depend on visiting Profile first.
+    // If this call fails, we still return the decoded token identity.
+    try {
+      const profile = await fetchJSON('/api/profile');
+      if (profile && typeof profile === 'object') {
+        currentUser = {
+          ...currentUser,
+          role: profile.role ?? currentUser.role,
+          type: profile.type ?? currentUser.type,
+          departmentId: profile.departmentId ?? currentUser.departmentId,
+          active: profile.active ?? currentUser.active,
+          emailActivated: profile.emailActivated ?? currentUser.emailActivated,
+        };
+      }
+    } catch (e) {
+      console.warn('Failed to enrich current user from profile:', e?.message || e);
+    }
     return currentUser;
   } catch {
     return null;
@@ -467,6 +485,8 @@ function getDefaultColumns(viewType) {
 
 function clearUser() {
   currentUser = null;
+  CURRENT_ACCESS = null;
+  LOOKUPS = { users: [], departments: [], dwsApplications: [] };
   setToken(null);
 }
 
@@ -886,6 +906,7 @@ async function fetchJSON(url, options) {
   // Avoid cached 304 responses by adding a timestamp and disabling cache
   const cacheBuster = (url.includes('?') ? '&' : '?') + '_ts=' + Date.now();
   const token = getToken();
+  const timeoutMs = (options && typeof options.timeoutMs === 'number') ? options.timeoutMs : 15000;
   
   // Merge headers properly - ensure Authorization is always included if token exists
   const defaultHeaders = {
@@ -907,13 +928,26 @@ async function fetchJSON(url, options) {
   }
   
   // Merge options, but ensure headers are properly set
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(0, timeoutMs));
   const fetchOptions = {
     ...(options || {}),
     cache: 'no-store',
-    headers
+    headers,
+    signal: options?.signal || controller.signal,
   };
   
-  const res = await fetch(url + cacheBuster, fetchOptions);
+  let res;
+  try {
+    res = await fetch(url + cacheBuster, fetchOptions);
+  } catch (e) {
+    if (e?.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeoutMs}ms`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     let parsedError = null;
@@ -1100,7 +1134,7 @@ async function compressImage(file, maxSizeKB = 300) {
   });
 }
 
-let LOOKUPS = { users: [], departments: [] };
+let LOOKUPS = { users: [], departments: [], dwsApplications: [] };
 async function ensureLookups() {
   console.log('ensureLookups called, current LOOKUPS:', LOOKUPS);
   if (LOOKUPS.users.length && LOOKUPS.departments.length) return LOOKUPS;
@@ -1600,27 +1634,43 @@ window.exportCRListToExcel = function exportCRListToExcel() {
 async function renderList() {
   console.log('renderList called');
   setActive('#list');
+  // Show immediate loading state so users see navigation worked even if data fetch fails later.
+  app.innerHTML = `
+    <div class="card">
+      <h2 style="margin-top:0;">Project List</h2>
+      <p class="muted">Loading projects...</p>
+    </div>
+  `;
+  let stage = 'init';
+  const setStage = (s) => {
+    stage = s;
+    const p = app.querySelector('p.muted');
+    if (p) p.textContent = `Loading projects... (${s})`;
+  };
   try {
-    await ensureLookups();
-    console.log('Lookups loaded successfully');
-  } catch (error) {
-    console.error('Error loading lookups:', error);
-    app.innerHTML = `<div class="error">Error loading lookups: ${error.message}</div>`;
-    return;
-  }
+    setStage('lookups');
+    try {
+      await ensureLookups();
+      console.log('Lookups loaded successfully');
+    } catch (error) {
+      console.error('Error loading lookups:', error);
+      app.innerHTML = `<div class="error">Error loading lookups: ${error.message}</div>`;
+      return;
+    }
 
-  // Apply access control for Project List
-  const access = await getUserAccess();
-  const user = currentUser;
-  if (!access || !user) {
-    app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You must be logged in to view Project List.</p></div>`;
-    return;
-  }
-  if (!access.canViewProjectList) {
-    app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You do not have access to Project List.</p></div>`;
-    return;
-  }
-  const urlParams = new URLSearchParams(location.search);
+    // Apply access control for Project List
+    setStage('access');
+    const access = await getUserAccess();
+    const user = currentUser;
+    if (!access || !user) {
+      app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You must be logged in to view Project List.</p></div>`;
+      return;
+    }
+    if (!access.canViewProjectList) {
+      app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You do not have access to Project List.</p></div>`;
+      return;
+    }
+    const urlParams = new URLSearchParams(location.search);
   // Use project-specific search key to keep Project and CR searches separate
   const q = urlParams.get('project_q') || '';
   // Parse multi-value filters (comma-separated)
@@ -1648,6 +1698,7 @@ async function renderList() {
     itPicId: parseFilter('project_itPicId'),
     itPmId: parseFilter('project_itPmId'),
     itManagerId: parseFilter('project_itManagerId'),
+    systemImpactedId: parseFilter('project_systemImpactedId'),
     createdAt: parseDateFilter('project_createdAt'),
     startDate: parseDateFilter('project_startDate'),
     endDate: parseDateFilter('project_endDate')
@@ -1664,16 +1715,19 @@ async function renderList() {
   if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
   if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
   if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
+  if (filter.systemImpactedId.length) apiQs.set('systemImpactedId', filter.systemImpactedId.join(','));
   
-  console.log('Fetching data from API...');
-  let data;
-  try {
-    data = await fetchJSON('/api/initiatives?' + apiQs.toString());
-  } catch (e) {
-    console.error('Failed to fetch initiatives:', e);
-    app.innerHTML = `<div class="error">Failed to load initiatives: ${e.message}</div>`;
-    return;
-  }
+    console.log('Fetching data from API...');
+    let data;
+    try {
+      setStage('fetch projects');
+      data = await fetchJSON('/api/initiatives?' + apiQs.toString());
+    } catch (e) {
+      console.error('Failed to fetch initiatives:', e);
+      app.innerHTML = `<div class="error">Failed to load initiatives: ${e.message}</div>`;
+      return;
+    }
+    setStage('render');
 
   // For internal ICs, restrict Project List visibility to projects where they are part of the project team
   if (access.restrictProjectVisibilityToOwnTeamOnly && user) {
@@ -2048,6 +2102,19 @@ async function renderList() {
               `).join('')}
             </div>
           </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fSystemImpacted">
+              System Impacted ${filter.systemImpactedId.length > 0 ? `(${filter.systemImpactedId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fSystemImpacted">
+              ${(LOOKUPS.dwsApplications || []).map(a => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${a.id}" ${filter.systemImpactedId.includes(a.id) ? 'checked' : ''}>
+                  ${a.systemName}
+                </label>
+              `).join('')}
+            </div>
+          </div>
         </div>
         <div class="date-filters-group" id="date-filters">
           <div class="date-filter-wrapper">
@@ -2229,7 +2296,8 @@ async function renderList() {
       'fMilestone': 'project_milestone',
       'fItPic': 'project_itPicId',
       'fItPm': 'project_itPmId',
-      'fItManager': 'project_itManagerId'
+      'fItManager': 'project_itManagerId',
+      'fSystemImpacted': 'project_systemImpactedId'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -2416,18 +2484,22 @@ async function renderList() {
   // Apply persisted column widths for Project List table
   applyColumnWidths('list', '#initiatives-table');
 
-  // Expand/collapse handler for Description/Remark cells (event delegation)
-  const initiativesTable = document.getElementById('initiatives-table');
-  if (initiativesTable) {
-    initiativesTable.addEventListener('click', (e) => {
-      const btn = e.target.closest?.('button.cell-toggle');
-      if (!btn) return;
-      e.preventDefault();
-      const td = btn.closest('td.cell-expandable');
-      if (!td) return;
-      const expanded = td.classList.toggle('expanded');
-      btn.textContent = expanded ? 'Less' : 'More';
-    });
+    // Expand/collapse handler for Description/Remark cells (event delegation)
+    const initiativesTable = document.getElementById('initiatives-table');
+    if (initiativesTable) {
+      initiativesTable.addEventListener('click', (e) => {
+        const btn = e.target.closest?.('button.cell-toggle');
+        if (!btn) return;
+        e.preventDefault();
+        const td = btn.closest('td.cell-expandable');
+        if (!td) return;
+        const expanded = td.classList.toggle('expanded');
+        btn.textContent = expanded ? 'Less' : 'More';
+      });
+    }
+  } catch (e) {
+    console.error('renderList failed at stage:', stage, e);
+    app.innerHTML = `<div class="card"><h2>Project List Error</h2><p class="error">Stage: ${escapeHtml(stage)}<br/>${escapeHtml(e?.message || String(e))}</p></div>`;
   }
 }
 
@@ -2665,6 +2737,7 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
   const itPicUsers = filterUsersByRole(LOOKUPS.users, 'itPic');
   const itManagerUsers = filterUsersByRole(LOOKUPS.users, 'itManager');
   const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
+  const dwsAppOptions = (LOOKUPS.dwsApplications || []).map(a => ({ id: a.id, name: a.systemName }));
   
   // Determine selected type: from initiative if exists, otherwise from defaultType
   const selectedType = initiative ? initiative.type : defaultType;
@@ -2683,6 +2756,9 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
     formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, initiative?.itPicIds || (initiative?.itPicId ? [initiative.itPicId] : []))),
     formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, initiative?.itPmId || '', 'Select...', true)),
     formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, initiative?.itManagerIds || [])),
+    ...(selectedType === 'CR'
+      ? [formRow('System Impacted', createMultiSelect('systemImpactedIds', dwsAppOptions, initiative?.systemImpactedIds || []))]
+      : []),
     formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => option(s, s, initiative?.status === s)).join('')}</select>`),
     formRow('Milestone', `<select name="milestone">${
       selectedType === 'CR'
@@ -2948,6 +3024,7 @@ async function renderNew(defaultType = 'Project') {
     const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
     const itPicIds = obj.itPicIds ? obj.itPicIds.split(',').filter(Boolean) : [];
     const itManagerIds = obj.itManagerIds ? obj.itManagerIds.split(',').filter(Boolean) : [];
+    const systemImpactedIds = obj.systemImpactedIds ? obj.systemImpactedIds.split(',').filter(Boolean) : [];
     
     const payload = {
       type: obj.type,
@@ -2961,6 +3038,7 @@ async function renderNew(defaultType = 'Project') {
       itPicIds: itPicIds.length > 0 ? itPicIds : null,
       itPmId: obj.itPmId || null,
       itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
+      systemImpactedIds: systemImpactedIds.length > 0 ? systemImpactedIds : null,
       status: obj.status,
       // No extra column: for CR we store the CR phase directly in `milestone`.
       milestone: obj.milestone,
@@ -3780,6 +3858,7 @@ async function renderView(id) {
           ${formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, i.itPmId || '', 'Select...', true))}
           ${formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, itPicIds))}
           ${formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, i.itManagerIds || []))}
+          ${i.type === 'CR' ? formRow('System Impacted', createMultiSelect('systemImpactedIds', (LOOKUPS.dwsApplications || []).map(a => ({ id: a.id, name: a.systemName })), i.systemImpactedIds || [])) : ''}
           ${formRow('Business Owner / Requestor', createSearchableSelect('businessOwnerId', businessOwnerUsers, i.businessOwnerId || '', 'Select...'))}
           ${formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, i.businessUserIds || []))}
         </div>
@@ -3804,6 +3883,7 @@ async function renderView(id) {
       const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
       const itPicIds = obj.itPicIds ? obj.itPicIds.split(',').filter(Boolean) : [];
       const itManagerIds = obj.itManagerIds ? obj.itManagerIds.split(',').filter(Boolean) : [];
+      const systemImpactedIds = obj.systemImpactedIds ? obj.systemImpactedIds.split(',').filter(Boolean) : [];
       
       // Debug logging
       console.log('[Frontend] Edit form data:', {
@@ -3823,6 +3903,7 @@ async function renderView(id) {
         itPicIds: itPicIds.length > 0 ? itPicIds : null,
         itPmId: obj.itPmId || null,
         itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
+        systemImpactedIds: systemImpactedIds.length > 0 ? systemImpactedIds : null,
       status: obj.status,
       milestone: obj.milestone,
       startDate: obj.startDate,
@@ -5260,6 +5341,7 @@ async function renderEdit(id) {
     const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
     const itPicIds = obj.itPicIds ? obj.itPicIds.split(',').filter(Boolean) : [];
     const itManagerIds = obj.itManagerIds ? obj.itManagerIds.split(',').filter(Boolean) : [];
+    const systemImpactedIds = obj.systemImpactedIds ? obj.systemImpactedIds.split(',').filter(Boolean) : [];
     
     const payload = {
       name: obj.name,
@@ -5272,6 +5354,7 @@ async function renderEdit(id) {
       itPicIds: itPicIds.length > 0 ? itPicIds : null,
       itPmId: obj.itPmId || null,
       itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
+      systemImpactedIds: systemImpactedIds.length > 0 ? systemImpactedIds : null,
       status: obj.status,
       // For CR, the form milestone dropdown is the CR phase label (UI value).
       // Persist canonical milestone in `milestone` and the detailed phase in `crMilestonePhase`.
@@ -5359,6 +5442,7 @@ async function renderCRList() {
     itPicId: parseFilter('cr_itPicId'),
     itPmId: parseFilter('cr_itPmId'),
     itManagerId: parseFilter('cr_itManagerId'),
+    systemImpactedId: parseFilter('cr_systemImpactedId'),
     createdAt: parseDateFilter('cr_createdAt'),
     startDate: parseDateFilter('cr_startDate'),
     endDate: parseDateFilter('cr_endDate')
@@ -5375,6 +5459,7 @@ async function renderCRList() {
   if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
   if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
   if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
+  if (filter.systemImpactedId.length) apiQs.set('systemImpactedId', filter.systemImpactedId.join(','));
   
   let data;
   try {
@@ -5806,7 +5891,8 @@ async function renderCRList() {
       'fMilestone': 'cr_milestone',
       'fItPic': 'cr_itPicId',
       'fItPm': 'cr_itPmId',
-      'fItManager': 'cr_itManagerId'
+      'fItManager': 'cr_itManagerId',
+      'fSystemImpacted': 'cr_systemImpactedId'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -8532,6 +8618,8 @@ async function renderAdminRoles() {
           canViewCRList: true,
           canCreateCR: true,
           canEditCR: true,
+          canViewMasterDwsApplication: false,
+          canViewManagementDashboard: false,
         },
         // Internal IC
         {
@@ -8549,6 +8637,8 @@ async function renderAdminRoles() {
           canViewCRList: true,
           canCreateCR: true,
           canEditCR: true,
+          canViewMasterDwsApplication: false,
+          canViewManagementDashboard: false,
         },
         // Internal Manager
         {
@@ -8566,6 +8656,8 @@ async function renderAdminRoles() {
           canViewCRList: true,
           canCreateCR: true,
           canEditCR: true,
+          canViewMasterDwsApplication: false,
+          canViewManagementDashboard: false,
         },
         // Management (any domain)
         {
@@ -8583,6 +8675,8 @@ async function renderAdminRoles() {
           canViewCRList: true,
           canCreateCR: true,
           canEditCR: true,
+          canViewMasterDwsApplication: false,
+          canViewManagementDashboard: false,
         },
       ];
     };
@@ -8619,6 +8713,8 @@ async function renderAdminRoles() {
                     <th>CR Dashboard</th>
                     <th>CR List</th>
                     <th>CR Create/Edit</th>
+                    <th>Master DWS Application</th>
+                    <th>Management Dashboard</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -8658,6 +8754,12 @@ async function renderAdminRoles() {
                         <td style="text-align: center;">
                           <input type="checkbox" class="access-checkbox" data-field="canCreateCR" ${r.canCreateCR ? 'checked' : ''} />
                           <input type="checkbox" class="access-checkbox" data-field="canEditCR" ${r.canEditCR ? 'checked' : ''} style="margin-left: 4px;" />
+                        </td>
+                        <td style="text-align: center;">
+                          <input type="checkbox" class="access-checkbox" data-field="canViewMasterDwsApplication" ${r.canViewMasterDwsApplication ? 'checked' : ''} />
+                        </td>
+                        <td style="text-align: center;">
+                          <input type="checkbox" class="access-checkbox" data-field="canViewManagementDashboard" ${r.canViewManagementDashboard ? 'checked' : ''} />
                         </td>
                       </tr>
                     `;
@@ -8731,6 +8833,8 @@ async function renderAdminRoles() {
             canViewCRList: getCheckboxVal('canViewCRList'),
             canCreateCR: getCheckboxVal('canCreateCR'),
             canEditCR: getCheckboxVal('canEditCR'),
+            canViewMasterDwsApplication: getCheckboxVal('canViewMasterDwsApplication'),
+            canViewManagementDashboard: getCheckboxVal('canViewManagementDashboard'),
           };
         });
 
@@ -8758,6 +8862,448 @@ async function renderAdminRoles() {
     console.error('Admin roles error:', error);
     app.innerHTML = `<div class="error">Error loading roles: ${error.message}</div>`;
   }
+}
+
+async function renderMasterDwsApplications() {
+  setActive('#master-dws');
+  await ensureLookups();
+
+  const load = async () => {
+    const items = await fetchJSON('/api/dws-applications');
+    return Array.isArray(items) ? items : [];
+  };
+
+  let apps = [];
+  try {
+    apps = await load();
+  } catch (e) {
+    app.innerHTML = `<div class="error">Failed to load Master DWS Applications: ${e.message}</div>`;
+    return;
+  }
+
+  const escape = (s) => escapeHtml(String(s ?? ''));
+
+  app.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content: space-between; align-items:center; gap:12px; flex-wrap: wrap;">
+        <h2 style="margin:0;">Master DWS Application</h2>
+        <button class="primary" id="btn-add-dws">+ Add Application</button>
+      </div>
+      <p class="muted" style="margin-top:8px;">Used as the source for CR field “System Impacted”.</p>
+
+      <div style="margin-top: 16px; overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>System Name</th>
+              <th>Production URL</th>
+              <th>Staging URL</th>
+              <th>Github URL</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${apps.map(a => `
+              <tr>
+                <td><strong>${escape(a.systemName)}</strong></td>
+                <td>${a.productionUrl ? `<a href="${escape(a.productionUrl)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">-</span>'}</td>
+                <td>${a.stagingUrl ? `<a href="${escape(a.stagingUrl)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">-</span>'}</td>
+                <td>${a.githubUrl ? `<a href="${escape(a.githubUrl)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">-</span>'}</td>
+                <td style="white-space:nowrap;">
+                  <button data-action="edit" data-id="${escape(a.id)}">Edit</button>
+                  <button data-action="delete" data-id="${escape(a.id)}" style="color: var(--danger); margin-left: 8px;">Delete</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  const openModal = (mode, existing) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 720px;">
+        <h3 style="margin-top:0;">${mode === 'create' ? 'Add' : 'Edit'} DWS Application</h3>
+        <form id="dws-form" class="form">
+          ${formRow('System Name *', `<input name="systemName" value="${escape(existing?.systemName || '')}" required />`)}
+          ${formRow('System Production URL', `<input name="productionUrl" type="url" value="${escape(existing?.productionUrl || '')}" placeholder="https://..." />`)}
+          ${formRow('System Staging URL', `<input name="stagingUrl" type="url" value="${escape(existing?.stagingUrl || '')}" placeholder="https://..." />`)}
+          ${formRow('Github URL', `<input name="githubUrl" type="url" value="${escape(existing?.githubUrl || '')}" placeholder="https://github.com/..." />`)}
+          <div style="display:flex; gap: 12px;">
+            <button type="submit" class="primary">${mode === 'create' ? 'Create' : 'Save'}</button>
+            <button type="button" id="btn-cancel">Cancel</button>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#btn-cancel').onclick = () => modal.remove();
+    modal.onclick = (e) => {
+      if (e.target === modal) modal.remove();
+    };
+
+    modal.querySelector('#dws-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = {
+        systemName: fd.get('systemName'),
+        productionUrl: fd.get('productionUrl') || null,
+        stagingUrl: fd.get('stagingUrl') || null,
+        githubUrl: fd.get('githubUrl') || null,
+      };
+      try {
+        if (mode === 'create') {
+          await fetchJSON('/api/dws-applications', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+        } else {
+          await fetchJSON(`/api/dws-applications/${existing.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+        }
+        // Refresh lookups and page
+        LOOKUPS = { users: [], departments: [], dwsApplications: [] };
+        await ensureLookups();
+        modal.remove();
+        renderMasterDwsApplications();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    };
+  };
+
+  document.getElementById('btn-add-dws').onclick = () => openModal('create');
+
+  app.querySelectorAll('button[data-action="edit"]').forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.dataset.id;
+      const existing = apps.find((a) => a.id === id);
+      openModal('edit', existing);
+    };
+  });
+
+  app.querySelectorAll('button[data-action="delete"]').forEach((btn) => {
+    btn.onclick = async () => {
+      const id = btn.dataset.id;
+      const existing = apps.find((a) => a.id === id);
+      if (!confirm(`Delete "${existing?.systemName || 'this application'}"?`)) return;
+      try {
+        await fetchJSON(`/api/dws-applications/${id}`, { method: 'DELETE' });
+        LOOKUPS = { users: [], departments: [], dwsApplications: [] };
+        await ensureLookups();
+        renderMasterDwsApplications();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    };
+  });
+}
+
+async function renderManagementDashboard() {
+  setActive('#management-dashboard');
+  await ensureLookups();
+
+  let data;
+  try {
+    data = await fetchJSON('/api/management-dashboard');
+  } catch (e) {
+    app.innerHTML = `<div class="error">Failed to load Management Dashboard: ${escapeHtml(e.message || String(e))}</div>`;
+    return;
+  }
+
+  const status = String(data?.portfolioStatus || 'GREEN').toUpperCase();
+  const statusColor = status === 'RED' ? '#ef4444' : status === 'AMBER' ? '#f59e0b' : '#22c55e';
+  const notes = data?.notes || { portfolioStatus: status, highlights: '', criticalAlerts: '', updatedAt: null, updatedBy: null };
+
+  const crFunnel = data?.crFunnel || { new: 0, inProgress: 0, testingQa: 0, completedClosed: 0 };
+  const timeline = Array.isArray(data?.timelineProgress) ? data.timelineProgress : [];
+  const topCrs = Array.isArray(data?.highPriorityCrs) ? data.highPriorityCrs : [];
+  const risks = Array.isArray(data?.risksBlockers) ? data.risksBlockers : [];
+
+  const ownerName = (ownerId) => ownerId ? nameById(LOOKUPS.users, ownerId) : '';
+
+  const parseDate = (s) => {
+    if (!s) return null;
+    const d = new Date(String(s).slice(0, 10));
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const quarterKey = (d) => {
+    const q = Math.floor(d.getMonth() / 3) + 1;
+    return `${d.getFullYear()}-Q${q}`;
+  };
+  const quarterLabel = (key) => {
+    const [y, qRaw] = key.split('-Q');
+    return `Q${qRaw} ${y}`;
+  };
+
+  // Timeline axis: from earliest planStartDate to latest planEndDate (fallbacks to start/end)
+  const timelineDates = timeline.flatMap((p) => {
+    const s = parseDate(p.planStartDate) || parseDate(p.startDate) || parseDate(p.createdAt);
+    const e = parseDate(p.planEndDate) || parseDate(p.endDate) || parseDate(p.updatedAt);
+    return [s, e].filter(Boolean);
+  });
+  const minDate = timelineDates.length ? new Date(Math.min(...timelineDates.map((d) => d.getTime()))) : new Date();
+  const maxDate = timelineDates.length ? new Date(Math.max(...timelineDates.map((d) => d.getTime()))) : new Date();
+  const startAxis = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+  const endAxis = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+  // expand a bit
+  startAxis.setMonth(startAxis.getMonth() - 3);
+  endAxis.setMonth(endAxis.getMonth() + 3);
+
+  const quarters = [];
+  const cursor = new Date(startAxis);
+  // normalize to quarter start
+  cursor.setMonth(Math.floor(cursor.getMonth() / 3) * 3, 1);
+  while (cursor <= endAxis && quarters.length < 12) {
+    quarters.push(quarterKey(cursor));
+    cursor.setMonth(cursor.getMonth() + 3, 1);
+  }
+
+  const projectMilestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
+  const milestonePct = (m) => {
+    const idx = projectMilestones.findIndex((x) => String(x).toLowerCase() === String(m || '').toLowerCase());
+    if (idx < 0) return 0;
+    return Math.round((idx / (projectMilestones.length - 1)) * 100);
+  };
+
+  const fmtDate = (s) => (s ? String(s).slice(0, 10) : '');
+
+  app.innerHTML = `
+    <div class="mgmt-dashboard">
+      <div class="mgmt-header">
+        <div>DOWNSTREAM IT PROJECT & CR WEEKLY DASHBOARD</div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end;">
+          <div class="asof">As of ${new Date().toLocaleDateString()}</div>
+          <button id="btn-mgmt-download" data-export-hide="1" style="background:#ffffff; border:1px solid rgba(255,255,255,.6); font-weight:900;">Download (HD)</button>
+        </div>
+      </div>
+
+      <div class="mgmt-top-row">
+        <div class="mgmt-status-box">
+          <div>
+            <div class="mgmt-status-title">PORTFOLIO STATUS</div>
+            <div class="muted" style="margin-top:4px;">(Overall)</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <select id="mgmt-portfolio-status" style="max-width: 140px;">
+              ${['GREEN','AMBER','RED'].map(s => `<option value="${s}" ${status === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div class="mgmt-notes-box">
+          <div style="display:grid; grid-template-columns: 1fr; gap: 12px;">
+            <div>
+              <div style="font-weight:900; color:#0f172a;">HIGHLIGHTS</div>
+              <textarea id="mgmt-highlights" placeholder="Type highlights...">${escapeHtml(notes.highlights || '')}</textarea>
+            </div>
+          </div>
+          <div class="mgmt-notes-actions">
+            <div class="muted" style="margin-right:auto; align-self:center;">
+              ${notes.updatedAt ? `Last updated: <strong>${escapeHtml(String(notes.updatedAt).replace('T',' ').slice(0,16))}</strong>` : 'Not saved yet'}
+            </div>
+            <button class="primary" id="btn-save-mgmt" data-export-hide="1">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mgmt-section">
+        <div class="mgmt-section-title">TIMELINE PROGRESS</div>
+        <div class="mgmt-body">
+          <div class="mgmt-timeline">
+            <table>
+              <thead>
+                <tr>
+                  <th class="sticky-col">PROJECT / MILESTONE</th>
+                  ${quarters.map(q => `<th>${quarterLabel(q)}</th>`).join('')}
+                  <th style="min-width:70px;">%</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${timeline.length ? timeline.map(p => {
+                  const s = parseDate(p.planStartDate) || parseDate(p.startDate) || parseDate(p.createdAt);
+                  const e = parseDate(p.planEndDate) || parseDate(p.endDate) || parseDate(p.updatedAt);
+                  const sKey = s ? quarterKey(new Date(s.getFullYear(), s.getMonth(), 1)) : null;
+                  const eKey = e ? quarterKey(new Date(e.getFullYear(), e.getMonth(), 1)) : null;
+                  const sIdx = sKey ? quarters.indexOf(sKey) : -1;
+                  const eIdx = eKey ? quarters.indexOf(eKey) : -1;
+                  const pct = milestonePct(p.milestone);
+                  const statusCls = (() => {
+                    const raw = String(p.status || '').toLowerCase().trim().replace(/\s+/g, '-');
+                    if (raw === 'on-track') return 'status-on-track';
+                    if (raw === 'at-risk') return 'status-at-risk';
+                    if (raw === 'delayed') return 'status-delayed';
+                    if (raw === 'live') return 'status-live';
+                    return '';
+                  })();
+
+                  return `
+                    <tr>
+                      <td class="sticky-col">
+                        <strong>${escapeHtml(p.name)}</strong>
+                        <span class="sub">${escapeHtml(p.milestone || '')} • ${escapeHtml(p.status || '')}</span>
+                      </td>
+                      ${quarters.map((_, idx) => {
+                        const inside = sIdx >= 0 && eIdx >= 0 ? (idx >= sIdx && idx <= eIdx) : false;
+                        return `<td>${inside ? `<div class="mgmt-bar-wrap"><div class="mgmt-bar ${statusCls}" style="width:100%"></div></div>` : ''}</td>`;
+                      }).join('')}
+                      <td><div class="mgmt-percent">${pct}%</div></td>
+                    </tr>
+                  `;
+                }).join('') : `<tr><td class="muted" colspan="${quarters.length + 2}">No projects found</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="mgmt-body">
+        <div class="mgmt-bottom-grid">
+          <div class="mgmt-box">
+            <div class="box-title">CHANGE REQUEST (CR) FUNNEL</div>
+            <div class="box-body">
+              <table class="mgmt-simple-table">
+                <thead><tr><th>CR Summary</th><th>Count</th></tr></thead>
+                <tbody>
+                  <tr><td>NEW</td><td>${Number(crFunnel.new || 0)}</td></tr>
+                  <tr><td>IN-PROGRESS</td><td>${Number(crFunnel.inProgress || 0)}</td></tr>
+                  <tr><td>TESTING/QA</td><td>${Number(crFunnel.testingQa || 0)}</td></tr>
+                  <tr><td>COMPLETED/CLOSED</td><td>${Number(crFunnel.completedClosed || 0)}</td></tr>
+                </tbody>
+              </table>
+
+              <div style="margin-top: 10px; font-weight:900; color:#0f172a;">HIGH PRIORITY CRs (TOP 5)</div>
+              <table class="mgmt-simple-table" style="margin-top:6px;">
+                <thead><tr><th>CR</th><th>Plan End</th><th>Status</th></tr></thead>
+                <tbody>
+                  ${topCrs.length ? topCrs.map(c => `
+                    <tr>
+                      <td>${escapeHtml((c.ticket ? `${c.ticket}: ` : '') + c.name)}</td>
+                      <td>${escapeHtml(fmtDate(c.planEndDate) || '')}</td>
+                      <td>${escapeHtml(c.status || '')}</td>
+                    </tr>
+                  `).join('') : `<tr><td class="muted" colspan="3">No P0 CRs found</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="mgmt-box">
+            <div class="box-title">CRITICAL RISKS & BLOCKERS</div>
+            <div class="box-body">
+              <table class="mgmt-simple-table">
+                <thead>
+                  <tr><th>Initiative Name</th><th>Remark</th></tr>
+                </thead>
+                <tbody>
+                  ${risks.length ? risks.map(r => `
+                    <tr>
+                      <td>${escapeHtml(r.issue || '')}<div class="muted" style="font-size: 12px;">${escapeHtml(r.type || '')} • ${escapeHtml(r.status || '')}</div></td>
+                      <td>${escapeHtml(r.remark || '')}</td>
+                    </tr>
+                  `).join('') : `<tr><td class="muted" colspan="2">No risks/blockers detected</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const btnSave = document.getElementById('btn-save-mgmt');
+  const btnDownload = document.getElementById('btn-mgmt-download');
+  const statusSelect = document.getElementById('mgmt-portfolio-status');
+  const applyStatusSelectStyle = () => {
+    const v = String(statusSelect?.value || 'GREEN').toUpperCase();
+    const color = v === 'RED' ? '#ef4444' : v === 'AMBER' ? '#f59e0b' : '#22c55e';
+    if (statusSelect) {
+      statusSelect.style.borderColor = color;
+      statusSelect.style.color = color;
+      statusSelect.style.fontWeight = '900';
+      statusSelect.style.background = '#fff';
+    }
+  };
+  if (statusSelect) {
+    statusSelect.onchange = applyStatusSelectStyle;
+    applyStatusSelectStyle();
+  }
+
+  if (btnDownload) {
+    btnDownload.onclick = async () => {
+      try {
+        const root = document.querySelector('.mgmt-dashboard');
+        if (!root) {
+          alert('Dashboard not found');
+          return;
+        }
+        const h2c = window.html2canvas;
+        if (typeof h2c !== 'function') {
+          alert('Image export is not available (html2canvas not loaded).');
+          return;
+        }
+
+        // Hide action buttons from export
+        const exportHideEls = Array.from(root.querySelectorAll('[data-export-hide="1"]'));
+        const prevDisplays = exportHideEls.map((el) => el.style.display);
+        exportHideEls.forEach((el) => { el.style.display = 'none'; });
+
+        // Make sure scrollable timeline is fully visible for capture
+        const timelineEl = root.querySelector('.mgmt-timeline');
+        const prevOverflow = timelineEl?.style.overflow;
+        if (timelineEl) timelineEl.style.overflow = 'visible';
+
+        const canvas = await h2c(root, {
+          backgroundColor: '#ffffff',
+          scale: 3, // HD
+          useCORS: true,
+          scrollX: 0,
+          scrollY: -window.scrollY,
+          windowWidth: Math.max(document.documentElement.clientWidth, root.scrollWidth),
+          windowHeight: Math.max(document.documentElement.clientHeight, root.scrollHeight),
+        });
+
+        if (timelineEl) timelineEl.style.overflow = prevOverflow || '';
+        exportHideEls.forEach((el, idx) => { el.style.display = prevDisplays[idx] || ''; });
+
+        const pngUrl = canvas.toDataURL('image/png');
+        const a = document.createElement('a');
+        a.href = pngUrl;
+        a.download = `Management_Dashboard_${new Date().toISOString().slice(0, 10)}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch (e) {
+        alert(e?.message || String(e));
+      }
+    };
+  }
+
+  btnSave.onclick = async () => {
+    const highlights = document.getElementById('mgmt-highlights').value || '';
+    const criticalAlerts = '';
+    const portfolioStatus = document.getElementById('mgmt-portfolio-status')?.value || 'GREEN';
+    try {
+      await fetchJSON('/api/management-dashboard/notes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ highlights, criticalAlerts, portfolioStatus }),
+      });
+      alert('Saved');
+      renderManagementDashboard();
+    } catch (e) {
+      alert(e.message || String(e));
+    }
+  };
 }
 
 async function renderCRDashboard() {
@@ -10128,8 +10674,8 @@ function renderAuth() {
 }
 
 // Protected routes that require authentication
-const PROTECTED_ROUTES = ['#list', '#crlist', '#dashboard', '#crdashboard', '#new', '#user-dashboard', '#admin', '#admin-users', '#admin-roles'];
-const ADMIN_ROUTES = ['#admin', '#admin-users', '#admin-roles'];
+const PROTECTED_ROUTES = ['#list', '#crlist', '#dashboard', '#crdashboard', '#new', '#user-dashboard', '#admin', '#admin-users', '#admin-roles', '#master-dws', '#management-dashboard'];
+const ADMIN_ROUTES = ['#admin', '#admin-users', '#admin-roles', '#master-dws', '#management-dashboard'];
 
 async function requireAuth() {
   const token = getToken();
@@ -10250,8 +10796,14 @@ async function updateNavAuth() {
   const profileMenuName = document.getElementById('profile-menu-name');
   const adminLinks = document.querySelectorAll('.admin-link');
   const protectedLinks = document.querySelectorAll('.protected-link');
+  const navMasterDws = document.getElementById('nav-master-dws');
+  const navManagementDashboard = document.getElementById('nav-management-dashboard');
   
-  const user = currentUser;
+  // Ensure currentUser is populated from token/profile so nav doesn't "disappear" after refresh.
+  let user = currentUser;
+  if (!user && getToken()) {
+    user = await getCurrentUser();
+  }
   if (user) {
     // Compute fine-grained access rules (based on email domain + type)
     const access = await getUserAccess();
@@ -10312,6 +10864,18 @@ async function updateNavAuth() {
       adminLinks.forEach(link => link.classList.remove('hidden'));
     } else {
       adminLinks.forEach(link => link.classList.add('hidden'));
+    }
+
+    // Master DWS Application must be visible ONLY when Role = "Admin"
+    if (navMasterDws) {
+      const role = String(user.role || '').trim().toLowerCase();
+      navMasterDws.classList.toggle('hidden', !(user.isAdmin || role === 'admin'));
+    }
+
+    // Management Dashboard must be visible ONLY when Role = "Admin"
+    if (navManagementDashboard) {
+      const role = String(user.role || '').trim().toLowerCase();
+      navManagementDashboard.classList.toggle('hidden', !(user.isAdmin || role === 'admin'));
     }
   } else {
     // Hide profile menu and notifications, show login link
@@ -10380,6 +10944,8 @@ async function router() {
     if (h.startsWith('#user-dashboard')) return renderUserDashboard();
     if (h.startsWith('#admin-users')) return renderAdminUsers();
     if (h.startsWith('#admin-roles')) return renderAdminRoles();
+    if (h.startsWith('#master-dws')) return renderMasterDwsApplications();
+    if (h.startsWith('#management-dashboard')) return renderManagementDashboard();
     if (h.startsWith('#profile')) return renderProfile();
     if (h.startsWith('#new')) {
       const parts = h.split('/');

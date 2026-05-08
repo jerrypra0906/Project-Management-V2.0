@@ -64,6 +64,7 @@ async function initializeSchema() {
         "itPicIds" TEXT,
         "itPmId" TEXT,
         "itManagerIds" TEXT,
+        "systemImpactedIds" TEXT,
         "status" TEXT,
         "milestone" TEXT,
         "crMilestonePhase" TEXT,
@@ -86,6 +87,7 @@ async function initializeSchema() {
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itPicIds" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itPmId" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itManagerIds" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "systemImpactedIds" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "status" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "milestone" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "crMilestonePhase" TEXT;
@@ -274,7 +276,9 @@ async function initializeSchema() {
         "canViewCRDashboard" BOOLEAN,
         "canViewCRList" BOOLEAN,
         "canCreateCR" BOOLEAN,
-        "canEditCR" BOOLEAN
+        "canEditCR" BOOLEAN,
+        "canViewMasterDwsApplication" BOOLEAN,
+        "canViewManagementDashboard" BOOLEAN
       );
       ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "role" TEXT;
       ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "type" TEXT;
@@ -289,6 +293,54 @@ async function initializeSchema() {
       ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewCRList" BOOLEAN;
       ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canCreateCR" BOOLEAN;
       ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canEditCR" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewMasterDwsApplication" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewManagementDashboard" BOOLEAN;
+
+      CREATE TABLE IF NOT EXISTS "apiClients" (
+        "id" TEXT PRIMARY KEY,
+        "name" TEXT NOT NULL,
+        "clientId" TEXT NOT NULL,
+        "clientSecretHash" TEXT NOT NULL,
+        "scopes" TEXT,
+        "active" BOOLEAN DEFAULT TRUE,
+        "createdAt" TEXT NOT NULL
+      );
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "name" TEXT;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "clientId" TEXT;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "clientSecretHash" TEXT;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "scopes" TEXT;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "active" BOOLEAN DEFAULT TRUE;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+
+      CREATE TABLE IF NOT EXISTS "dwsApplications" (
+        "id" TEXT PRIMARY KEY,
+        "systemName" TEXT NOT NULL,
+        "productionUrl" TEXT,
+        "stagingUrl" TEXT,
+        "githubUrl" TEXT,
+        "createdAt" TEXT NOT NULL,
+        "updatedAt" TEXT NOT NULL
+      );
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "systemName" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "productionUrl" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "stagingUrl" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "githubUrl" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "updatedAt" TEXT;
+
+      CREATE TABLE IF NOT EXISTS "managementDashboard" (
+        "id" TEXT PRIMARY KEY,
+        "portfolioStatus" TEXT,
+        "highlights" TEXT,
+        "criticalAlerts" TEXT,
+        "updatedBy" TEXT,
+        "updatedAt" TEXT NOT NULL
+      );
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "portfolioStatus" TEXT;
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "highlights" TEXT;
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "criticalAlerts" TEXT;
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "updatedBy" TEXT;
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "updatedAt" TEXT;
       CREATE TABLE IF NOT EXISTS "meetingNotes" (
         "id" TEXT PRIMARY KEY,
         "initiativeId" TEXT NOT NULL,
@@ -429,6 +481,9 @@ async function read() {
       'documents',
       'notifications',
       'accessRules',
+      'apiClients',
+      'dwsApplications',
+      'managementDashboard',
       'meetingNotes',
       'meetingNoteParticipants',
       'meetingNoteActionItems',
@@ -475,6 +530,7 @@ async function read() {
           itPicIds: row.itPicIds || row.itpicids ? (row.itPicIds || row.itpicids).split(',').filter(Boolean) : (row.itPicId || row.itpicid ? [row.itPicId || row.itpicid] : []),
           itPmId: row.itPmId || row.itpmid || null,
           itManagerIds: row.itManagerIds || row.itmanagerids ? (row.itManagerIds || row.itmanagerids).split(',').filter(Boolean) : [],
+          systemImpactedIds: row.systemImpactedIds || row.systemimpactedids ? (row.systemImpactedIds || row.systemimpactedids).split(',').filter(Boolean) : [],
           status: row.status || null,
           milestone: row.milestone || null,
           crMilestonePhase: row.crMilestonePhase || row.crmilestonephase || null,
@@ -502,6 +558,35 @@ async function read() {
         }));
       } else if (table === 'accessRules') {
         data[table] = res.rows;
+      } else if (table === 'apiClients') {
+        data[table] = res.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          clientId: row.clientId || row.clientid,
+          clientSecretHash: row.clientSecretHash || row.clientsecrethash,
+          scopes: row.scopes || null,
+          active: row.active !== undefined ? !!row.active : true,
+          createdAt: row.createdAt || row.createdat,
+        }));
+      } else if (table === 'dwsApplications') {
+        data[table] = res.rows.map((row) => ({
+          id: row.id,
+          systemName: row.systemName || row.systemname,
+          productionUrl: row.productionUrl || row.productionurl || null,
+          stagingUrl: row.stagingUrl || row.stagingurl || null,
+          githubUrl: row.githubUrl || row.githuburl || null,
+          createdAt: row.createdAt || row.createdat,
+          updatedAt: row.updatedAt || row.updatedat,
+        }));
+      } else if (table === 'managementDashboard') {
+        data[table] = res.rows.map((row) => ({
+          id: row.id,
+          portfolioStatus: row.portfolioStatus || row.portfoliostatus || null,
+          highlights: row.highlights || null,
+          criticalAlerts: row.criticalAlerts || row.criticalalerts || null,
+          updatedBy: row.updatedBy || row.updatedby || null,
+          updatedAt: row.updatedAt || row.updatedat,
+        }));
       } else if (table === 'meetingNotes') {
         data[table] = res.rows.map(row => ({
           id: row.id,
@@ -630,6 +715,9 @@ async function write(data) {
     await client.query('DELETE FROM "tasks"');
     await client.query('DELETE FROM "documents"');
     await client.query('DELETE FROM "notifications"');
+    await client.query('DELETE FROM "apiClients"');
+    await client.query('DELETE FROM "dwsApplications"');
+    await client.query('DELETE FROM "managementDashboard"');
     await client.query('DELETE FROM "meetingNoteParticipants"');
     await client.query('DELETE FROM "meetingNoteActionItems"');
     await client.query('DELETE FROM "meetingNoteEmailLog"');
@@ -668,17 +756,20 @@ async function write(data) {
     const insertInit = `INSERT INTO "initiatives"(
       "id", "type", "name", "ticket", "description", "businessImpact", "priority",
       "businessOwnerId", "businessUserIds", "departmentId", "itPicId", "itPicIds", "itPmId", "itManagerIds",
+      "systemImpactedIds",
       "status", "milestone", "crMilestonePhase", "startDate", "endDate", "planStartDate", "planEndDate", "remark", "documentationLink", "createdAt", "updatedAt"
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,
       $8,$9,$10,$11,$12,$13,$14,
-      $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25
+      $15,
+      $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
     )`;
     for (const i of data.initiatives || []) {
       // Convert arrays to comma-separated strings for storage
       const businessUserIds = Array.isArray(i.businessUserIds) ? i.businessUserIds.join(',') : (i.businessUserIds || null);
       const itPicIds = Array.isArray(i.itPicIds) ? i.itPicIds.join(',') : (i.itPicIds || null);
       const itManagerIds = Array.isArray(i.itManagerIds) ? i.itManagerIds.join(',') : (i.itManagerIds || null);
+      const systemImpactedIds = Array.isArray(i.systemImpactedIds) ? i.systemImpactedIds.join(',') : (i.systemImpactedIds || null);
       
       await client.query(insertInit, [
         i.id,
@@ -695,6 +786,7 @@ async function write(data) {
         itPicIds,
         i.itPmId || null,
         itManagerIds,
+        systemImpactedIds,
         i.status || null,
         i.milestone || null,
         i.crMilestonePhase || null,
@@ -859,6 +951,47 @@ async function write(data) {
         n.commentId || null,
         !!n.read,
         n.createdAt,
+      ]);
+    }
+
+    const insertApiClient =
+      'INSERT INTO "apiClients"("id","name","clientId","clientSecretHash","scopes","active","createdAt") VALUES ($1,$2,$3,$4,$5,$6,$7)';
+    for (const c of data.apiClients || []) {
+      await client.query(insertApiClient, [
+        c.id,
+        c.name,
+        c.clientId,
+        c.clientSecretHash,
+        c.scopes || null,
+        c.active !== undefined ? !!c.active : true,
+        c.createdAt,
+      ]);
+    }
+
+    const insertDwsApp =
+      'INSERT INTO "dwsApplications"("id","systemName","productionUrl","stagingUrl","githubUrl","createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7)';
+    for (const a of data.dwsApplications || []) {
+      await client.query(insertDwsApp, [
+        a.id,
+        a.systemName,
+        a.productionUrl || null,
+        a.stagingUrl || null,
+        a.githubUrl || null,
+        a.createdAt,
+        a.updatedAt,
+      ]);
+    }
+
+    const insertMgmtDashboard =
+      'INSERT INTO "managementDashboard"("id","portfolioStatus","highlights","criticalAlerts","updatedBy","updatedAt") VALUES ($1,$2,$3,$4,$5,$6)';
+    for (const d of data.managementDashboard || []) {
+      await client.query(insertMgmtDashboard, [
+        d.id,
+        d.portfolioStatus || null,
+        d.highlights || null,
+        d.criticalAlerts || null,
+        d.updatedBy || null,
+        d.updatedAt,
       ]);
     }
 

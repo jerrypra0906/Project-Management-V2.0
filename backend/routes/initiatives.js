@@ -102,8 +102,8 @@ function validateCommon(body) {
 }
 
 router.get('/', async (req, res) => {
-  const { q, type, status, milestone, crMilestonePhase, priority, departmentId, itPicId, itPmId, businessOwnerId, active } = req.query;
-  console.log('API filter params:', { q, type, status, milestone, crMilestonePhase, priority, departmentId, itPicId, itPmId, active });
+  const { q, type, status, milestone, crMilestonePhase, priority, departmentId, itPicId, itPmId, businessOwnerId, active, systemImpactedId } = req.query;
+  console.log('API filter params:', { q, type, status, milestone, crMilestonePhase, priority, departmentId, itPicId, itPmId, businessOwnerId, active, systemImpactedId });
   const data = await store.read();
   let rows = data.initiatives;
   
@@ -186,6 +186,18 @@ router.get('/', async (req, res) => {
   if (itPmIdValues && itPmIdValues.length > 0) {
     rows = rows.filter(r => itPmIdValues.includes(r.itPmId));
   }
+
+  // Multi-value filter for System Impacted (initiative.systemImpactedIds includes any selected id)
+  const systemImpactedValues = parseMultiValue(systemImpactedId);
+  if (systemImpactedValues && systemImpactedValues.length > 0) {
+    rows = rows.filter((r) => {
+      const raw = r.systemImpactedIds || [];
+      const ids = Array.isArray(raw)
+        ? raw
+        : String(raw).split(',').map(v => v.trim()).filter(Boolean);
+      return systemImpactedValues.some((sel) => ids.includes(sel));
+    });
+  }
   
   console.log(`API returned ${rows.length} rows after filtering (total initiatives: ${data.initiatives.length})`);
   rows = rows.sort((a,b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
@@ -263,7 +275,7 @@ router.post('/', async (req, res) => {
   const createdAt = now();
   const updatedAt = createdAt;
   const {
-    type,name,ticket,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,status,milestone,startDate,endDate,planStartDate,planEndDate,remark,documentationLink
+    type,name,ticket,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,systemImpactedIds,status,milestone,startDate,endDate,planStartDate,planEndDate,remark,documentationLink
   } = req.body;
   const data = await store.read();
   
@@ -271,6 +283,7 @@ router.post('/', async (req, res) => {
   const businessUserIdsStr = Array.isArray(businessUserIds) ? businessUserIds.join(',') : (businessUserIds || null);
   const itPicIdsStr = Array.isArray(itPicIds) ? itPicIds.join(',') : (itPicIds || null);
   const itManagerIdsStr = Array.isArray(itManagerIds) ? itManagerIds.join(',') : (itManagerIds || null);
+  const systemImpactedIdsStr = Array.isArray(systemImpactedIds) ? systemImpactedIds.join(',') : (systemImpactedIds || null);
   
   // Use itPicIds if provided, otherwise fall back to itPicId for backward compatibility
   const finalItPicIds = itPicIdsStr || (itPicId ? itPicId : null);
@@ -289,6 +302,7 @@ router.post('/', async (req, res) => {
     itPicIds: finalItPicIds,
     itPmId: itPmId || null,
     itManagerIds: itManagerIdsStr,
+    systemImpactedIds: systemImpactedIdsStr,
     status,milestone,
     crMilestonePhase: null,
     startDate,endDate: endDate||null,planStartDate: planStartDate||null,planEndDate: planEndDate||null,remark: remark||null,documentationLink: documentationLink||null, 
@@ -415,7 +429,7 @@ router.put('/:id', async (req, res) => {
   const initiative = data.initiatives[idx];
   const changes = [];
   const updatedAt = now();
-  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','startDate','endDate','planStartDate','planEndDate','remark','documentationLink'];
+  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','systemImpactedIds','status','milestone','startDate','endDate','planStartDate','planEndDate','remark','documentationLink'];
   
   // Track changes and update fields
   for (const k of allowed) {
@@ -424,7 +438,7 @@ router.put('/:id', async (req, res) => {
       let newValue = req.body[k];
       
       // Convert arrays to comma-separated strings for storage
-      if ((k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds') && Array.isArray(newValue)) {
+      if ((k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds' || k === 'systemImpactedIds') && Array.isArray(newValue)) {
         newValue = newValue.length > 0 ? newValue.join(',') : null;
       }
       
@@ -435,7 +449,7 @@ router.put('/:id', async (req, res) => {
       
       // Normalize values for comparison (handle null, undefined, empty string)
       // For array fields (comma-separated strings), normalize by sorting and trimming
-      const isArrayField = k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds';
+      const isArrayField = k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds' || k === 'systemImpactedIds';
       
       let oldVal, newVal;
       if (isArrayField) {

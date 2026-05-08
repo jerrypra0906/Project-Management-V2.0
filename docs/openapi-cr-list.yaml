@@ -1,0 +1,383 @@
+openapi: 3.0.3
+info:
+  title: Project Management Tools API - CR List
+  version: 1.0.0
+  description: |
+    OpenAPI for integrating external applications (API Consumers) with the Project Management Tools app (API Provider),
+    focused on the CR List page data (read/list + update).
+servers:
+  - url: http://localhost:3000
+    description: Backend API (local)
+  - url: http://localhost:8080
+    description: Frontend proxy (local dev)
+tags:
+  - name: Auth
+  - name: CRs
+security:
+  - bearerAuth: []
+paths:
+  /api/auth/client-token:
+    post:
+      tags: [Auth]
+      summary: Client credentials token (API Consumer)
+      description: |
+        Exchange `clientId` and `clientSecret` for a short-lived JWT access token.
+        Use the returned token in `Authorization: Bearer <token>`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId, clientSecret]
+              properties:
+                clientId:
+                  type: string
+                  example: my-integration-app
+                clientSecret:
+                  type: string
+                  example: "********"
+      responses:
+        "200":
+          description: Token response
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type, expires_in]
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    example: Bearer
+                  expires_in:
+                    type: integer
+                    example: 1800
+                  scope:
+                    type: string
+                    example: cr:read cr:write
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/crs/list:
+    post:
+      tags: [CRs]
+      summary: CR List (filters + pagination)
+      description: |
+        Returns CR list data used by the CR List page.
+        The API Provider enforces a 5 second processing timeout and may return 504 if exceeded.
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrListRequest"
+      responses:
+        "200":
+          description: Paginated CR list
+          headers:
+            X-Request-Id:
+              schema: { type: string }
+            X-Response-Time-Ms:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+  /api/v1/crs/{id}:
+    patch:
+      tags: [CRs]
+      summary: Update CR (partial update)
+      description: |
+        Update CR fields needed to keep CR List data in sync from external systems.
+        Only supports `type=CR` initiatives.
+      parameters:
+        - $ref: "#/components/parameters/CrId"
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrUpdateRequest"
+      responses:
+        "200":
+          description: Update successful
+          headers:
+            X-Request-Id:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    CrId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    XRequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: Optional request correlation id provided by API Consumer.
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Unauthorized:
+      description: Unauthorized (missing/invalid token)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Forbidden:
+      description: Forbidden (insufficient scope/permissions)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    TooManyRequests:
+      description: Too many requests
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    GatewayTimeout:
+      description: Processing exceeded 5 seconds
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    InternalError:
+      description: Internal error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          oneOf:
+            - type: string
+            - type: object
+
+    CrListRequest:
+      type: object
+      properties:
+        q:
+          type: string
+          description: Text search in name/description/ticket
+        filters:
+          type: object
+          properties:
+            status:
+              type: array
+              items: { type: string }
+              example: [LIVE, DELAYED]
+            priority:
+              type: array
+              items: { type: string }
+              example: [P0, P1]
+            milestone:
+              type: array
+              items: { type: string }
+            departmentId:
+              type: array
+              items: { type: string }
+            itPicId:
+              type: array
+              items: { type: string }
+            itPmId:
+              type: array
+              items: { type: string }
+            businessOwnerId:
+              type: array
+              items: { type: string }
+            systemImpactedId:
+              type: array
+              items: { type: string }
+              description: Master DWS Application IDs (any-of match)
+            active:
+              type: boolean
+              description: When true, filters out NOT STARTED
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+        sort:
+          type: object
+          properties:
+            field:
+              type: string
+              example: updatedAt
+            direction:
+              type: string
+              enum: [asc, desc]
+              default: desc
+
+    CrListItem:
+      type: object
+      required: [id, type, name]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [CR] }
+        name: { type: string }
+        ticket: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        businessImpact: { type: string, nullable: true }
+        priority: { type: string, nullable: true }
+        businessOwnerId: { type: string, nullable: true }
+        businessUserIds:
+          type: array
+          items: { type: string }
+        departmentId: { type: string, nullable: true }
+        itPicId: { type: string, nullable: true }
+        itPicIds:
+          type: array
+          items: { type: string }
+        itPmId: { type: string, nullable: true }
+        itManagerIds:
+          type: array
+          items: { type: string }
+        systemImpactedIds:
+          type: array
+          items: { type: string }
+        status: { type: string, nullable: true }
+        milestone: { type: string, nullable: true }
+        startDate: { type: string, nullable: true }
+        endDate: { type: string, nullable: true }
+        planStartDate: { type: string, nullable: true }
+        planEndDate: { type: string, nullable: true }
+        remark: { type: string, nullable: true }
+        documentationLink: { type: string, nullable: true }
+        createdAt: { type: string, nullable: true }
+        updatedAt: { type: string, nullable: true }
+        cr:
+          type: object
+          nullable: true
+          properties:
+            initiativeId: { type: string }
+            crSubmissionStart: { type: string, nullable: true }
+            crSubmissionEnd: { type: string, nullable: true }
+            developmentStart: { type: string, nullable: true }
+            developmentEnd: { type: string, nullable: true }
+            sitStart: { type: string, nullable: true }
+            sitEnd: { type: string, nullable: true }
+            uatStart: { type: string, nullable: true }
+            uatEnd: { type: string, nullable: true }
+            liveDate: { type: string, nullable: true }
+
+    CrListResponse:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CrListItem" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+
+    CrUpdateRequest:
+      type: object
+      properties:
+        ticket: { type: string, nullable: true }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        businessImpact: { type: string, nullable: true }
+        priority:
+          type: string
+          enum: [P0, P1, P2]
+        businessOwnerId: { type: string, nullable: true }
+        businessUserIds:
+          type: array
+          items: { type: string }
+        departmentId: { type: string, nullable: true }
+        itPicId: { type: string, nullable: true }
+        itPicIds:
+          type: array
+          items: { type: string }
+        itPmId: { type: string, nullable: true }
+        itManagerIds:
+          type: array
+          items: { type: string }
+        systemImpactedIds:
+          type: array
+          items: { type: string }
+        status: { type: string }
+        milestone: { type: string }
+        startDate: { type: string, nullable: true }
+        endDate: { type: string, nullable: true }
+        planStartDate: { type: string, nullable: true }
+        planEndDate: { type: string, nullable: true }
+        remark: { type: string, nullable: true }
+        documentationLink: { type: string, nullable: true }
+        cr:
+          type: object
+          properties:
+            crSubmissionStart: { type: string, nullable: true }
+            crSubmissionEnd: { type: string, nullable: true }
+            developmentStart: { type: string, nullable: true }
+            developmentEnd: { type: string, nullable: true }
+            sitStart: { type: string, nullable: true }
+            sitEnd: { type: string, nullable: true }
+            uatStart: { type: string, nullable: true }
+            uatEnd: { type: string, nullable: true }
+            liveDate: { type: string, nullable: true }
+      additionalProperties: false

@@ -23,7 +23,14 @@ router.get('/', async (_req, res) => {
     return n;
   };
   const departments = data.departments.map(d => ({ id: d.id, name: normalizeDepartmentName(d.name) }));
-  res.json({ users, departments });
+  const dwsApplications = (data.dwsApplications || []).map((a) => ({
+    id: a.id,
+    systemName: a.systemName,
+    productionUrl: a.productionUrl || null,
+    stagingUrl: a.stagingUrl || null,
+    githubUrl: a.githubUrl || null,
+  }));
+  res.json({ users, departments, dwsApplications });
 });
 
 export default router;

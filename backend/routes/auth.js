@@ -258,6 +258,46 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// OAuth-like client credentials token (for external API consumers)
+router.post('/client-token', async (req, res) => {
+  try {
+    const { clientId, clientSecret } = req.body || {};
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({ error: 'clientId and clientSecret are required' });
+    }
+
+    const data = await store.read();
+    const apiClient = (data.apiClients || []).find(
+      (c) => String(c.clientId || '').toLowerCase() === String(clientId).toLowerCase()
+    );
+    if (!apiClient || apiClient.active === false) {
+      return res.status(401).json({ error: 'Invalid client credentials' });
+    }
+
+    const ok = await bcrypt.compare(String(clientSecret), String(apiClient.clientSecretHash || ''));
+    if (!ok) {
+      return res.status(401).json({ error: 'Invalid client credentials' });
+    }
+
+    const scopes = String(apiClient.scopes || 'cr:read cr:write').trim();
+    const token = jwt.sign(
+      { sub: `client:${apiClient.id}`, clientId: apiClient.clientId, scopes },
+      JWT_SECRET,
+      { expiresIn: '30m' }
+    );
+
+    return res.json({
+      access_token: token,
+      token_type: 'Bearer',
+      expires_in: 1800,
+      scope: scopes,
+    });
+  } catch (e) {
+    console.error('[CLIENT-TOKEN] Error:', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 router.post('/activate', async (req, res) => {
   try {
     const { token } = req.body || {};

@@ -1,0 +1,38 @@
+# Docker Compose overrides for LOCAL laptop development
+# Usage (PowerShell):
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    environment:
+      NODE_ENV: development
+      # File watching can be flaky on some Windows+Docker setups; polling is safer.
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "500"
+      # Local email testing (Mailpit)
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      EMAIL_FROM: "noreply@energi-up.com"
+    volumes:
+      # Allow live code edits
+      - ./backend:/app/backend
+      - ./docs:/app/docs
+      # Persist uploads locally
+      - ./uploads:/app/uploads
+      # Optional env file
+      - ./.env:/app/.env:ro
+
+  frontend:
+    environment:
+      NGINX_ENV: local
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025" # Web UI
+      - "1025:1025" # SMTP
+
