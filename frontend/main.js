@@ -9256,16 +9256,6 @@ async function renderManagementDashboard() {
           return;
         }
 
-        // Hide action buttons from export
-        const exportHideEls = Array.from(root.querySelectorAll('[data-export-hide="1"]'));
-        const prevDisplays = exportHideEls.map((el) => el.style.display);
-        exportHideEls.forEach((el) => { el.style.display = 'none'; });
-
-        // Make sure scrollable timeline is fully visible for capture
-        const timelineEl = root.querySelector('.mgmt-timeline');
-        const prevOverflow = timelineEl?.style.overflow;
-        if (timelineEl) timelineEl.style.overflow = 'visible';
-
         const canvas = await h2c(root, {
           backgroundColor: '#ffffff',
           scale: 3, // HD
@@ -9274,10 +9264,50 @@ async function renderManagementDashboard() {
           scrollY: -window.scrollY,
           windowWidth: Math.max(document.documentElement.clientWidth, root.scrollWidth),
           windowHeight: Math.max(document.documentElement.clientHeight, root.scrollHeight),
-        });
+          onclone: (doc) => {
+            try {
+              const clonedRoot = doc.querySelector('.mgmt-dashboard');
+              if (!clonedRoot) return;
 
-        if (timelineEl) timelineEl.style.overflow = prevOverflow || '';
-        exportHideEls.forEach((el, idx) => { el.style.display = prevDisplays[idx] || ''; });
+              // Remove action buttons in export
+              clonedRoot.querySelectorAll('[data-export-hide="1"]').forEach((el) => {
+                el.style.display = 'none';
+              });
+
+              // Ensure timeline container doesn't clip content in export
+              const t = clonedRoot.querySelector('.mgmt-timeline');
+              if (t) t.style.overflow = 'visible';
+
+              // Replace textareas (Highlights) with a full-height div so wording is fully captured.
+              clonedRoot.querySelectorAll('textarea').forEach((ta) => {
+                const text = ta.value ?? ta.textContent ?? '';
+                const div = doc.createElement('div');
+                const cs = doc.defaultView?.getComputedStyle(ta);
+                if (cs) {
+                  div.style.font = cs.font;
+                  div.style.fontSize = cs.fontSize;
+                  div.style.fontFamily = cs.fontFamily;
+                  div.style.fontWeight = cs.fontWeight;
+                  div.style.lineHeight = cs.lineHeight;
+                  div.style.color = cs.color;
+                  div.style.padding = cs.padding;
+                  div.style.border = cs.border;
+                  div.style.borderRadius = cs.borderRadius;
+                  div.style.background = cs.background;
+                  div.style.width = cs.width;
+                  div.style.boxSizing = cs.boxSizing;
+                  div.style.minHeight = cs.minHeight;
+                }
+                div.style.whiteSpace = 'pre-wrap';
+                div.style.overflow = 'visible';
+                div.textContent = text;
+                ta.replaceWith(div);
+              });
+            } catch {
+              /* ignore */
+            }
+          },
+        });
 
         const pngUrl = canvas.toDataURL('image/png');
         const a = document.createElement('a');
