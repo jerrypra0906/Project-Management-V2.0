@@ -9136,7 +9136,9 @@ async function renderManagementDashboard() {
                   const eKey = e ? quarterKey(new Date(e.getFullYear(), e.getMonth(), 1)) : null;
                   const sIdx = sKey ? quarters.indexOf(sKey) : -1;
                   const eIdx = eKey ? quarters.indexOf(eKey) : -1;
-                  const pct = milestonePct(p.milestone);
+                  const pct = (Number.isFinite(Number(p.percentCompletion))
+                    ? Math.max(0, Math.min(100, Math.round(Number(p.percentCompletion))))
+                    : milestonePct(p.milestone));
                   const statusCls = (() => {
                     const raw = String(p.status || '').toLowerCase().trim().replace(/\s+/g, '-');
                     if (raw === 'on-track') return 'status-on-track';

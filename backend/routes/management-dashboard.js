@@ -33,6 +33,7 @@ router.use(requireAdmin);
 router.get('/', async (_req, res) => {
   const data = await store.read();
   const initiatives = data.initiatives || [];
+  const tasks = data.tasks || [];
   const projects = initiatives.filter((i) => i.type === 'Project');
   const crs = initiatives.filter((i) => i.type === 'CR');
 
@@ -67,6 +68,42 @@ router.get('/', async (_req, res) => {
     return end >= monthStart && end <= monthEnd;
   });
 
+  // % Completion (matches Initiative view logic):
+  // - average task status progress if tasks exist
+  // - otherwise fallback to initiative status mapping
+  const statusToPercent = {
+    // Task status values (lowercase)
+    'not started': 0,
+    'in progress': 50,
+    'at risk': 25,
+    'cancel': 100,
+    'done': 100,
+    // Initiative status values (uppercase keys)
+    'NOT STARTED': 0,
+    'ON HOLD': 0,
+    'ON TRACK': 50,
+    'AT RISK': 25,
+    'DELAYED': 10,
+    'LIVE': 100,
+    'CANCELLED': 100,
+  };
+  const percentForTaskStatus = (s) => {
+    const k = String(s || '').trim().toLowerCase();
+    return statusToPercent[k] ?? 0;
+  };
+  const percentForInitiativeStatus = (s) => {
+    const k = normalizeStatus(s);
+    return statusToPercent[k] ?? 0;
+  };
+  const computePercentCompletion = (initiativeId, initiativeStatus) => {
+    const ts = tasks.filter((t) => t.initiativeId === initiativeId);
+    if (ts.length > 0) {
+      const total = ts.reduce((sum, t) => sum + percentForTaskStatus(t.status), 0);
+      return Math.max(0, Math.min(100, Math.round(total / ts.length)));
+    }
+    return Math.max(0, Math.min(100, percentForInitiativeStatus(initiativeStatus)));
+  };
+
   const timelineProjects = [...inProgressProjects, ...liveThisMonth]
     .slice()
     .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
@@ -76,6 +113,7 @@ router.get('/', async (_req, res) => {
       milestone: getMilestoneLabel(p.milestone),
       status: p.status || null,
       priority: p.priority || null,
+      percentCompletion: computePercentCompletion(p.id, p.status),
       planStartDate: p.planStartDate || null,
       planEndDate: p.planEndDate || null,
       startDate: p.startDate || null,
