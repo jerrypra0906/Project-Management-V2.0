@@ -86,7 +86,9 @@ router.get('/', async (_req, res) => {
 
   // CR funnel: group by CR milestone (phase) instead of fixed buckets.
   const milestoneCounts = new Map();
-  crs.forEach((c) => {
+  crs
+    .filter((c) => normalizeStatus(c.status) !== 'CANCELLED')
+    .forEach((c) => {
     const key = String(c.milestone || '—').trim() || '—';
     milestoneCounts.set(key, (milestoneCounts.get(key) || 0) + 1);
   });
