@@ -84,16 +84,40 @@ router.get('/', async (_req, res) => {
       updatedAt: p.updatedAt || null,
     }));
 
-  // CR funnel (simple buckets)
-  const crFunnel = {
-    new: crs.filter((c) => normalizeStatus(c.status) === 'NOT STARTED').length,
-    inProgress: crs.filter((c) => {
-      const s = normalizeStatus(c.status);
-      return s !== 'NOT STARTED' && s !== 'LIVE' && s !== 'CANCELLED';
-    }).length,
-    testingQa: crs.filter((c) => ['SIT', 'UAT', 'TESTING'].includes(normalizeStatus(c.milestone))).length,
-    completedClosed: crs.filter((c) => ['LIVE', 'CANCELLED'].includes(normalizeStatus(c.status))).length,
-  };
+  // CR funnel: group by CR milestone (phase) instead of fixed buckets.
+  const milestoneCounts = new Map();
+  crs.forEach((c) => {
+    const key = String(c.milestone || '—').trim() || '—';
+    milestoneCounts.set(key, (milestoneCounts.get(key) || 0) + 1);
+  });
+  const crFunnel = Array.from(milestoneCounts.entries())
+    .map(([milestone, count]) => ({ milestone, count }))
+    .sort((a, b) => {
+      // Keep UI-friendly order for known CR phases, then alpha.
+      const preferred = [
+        'User Initiate',
+        'CR Created',
+        'CR Signed sec 2',
+        'CR Signed Sec 3',
+        'FSD',
+        'Development',
+        'Changes',
+        'Signed Changes',
+        'Development - Extended',
+        'SIT',
+        'UAT',
+        'Testing',
+        'Live',
+      ].map((x) => x.toLowerCase());
+      const ai = preferred.indexOf(String(a.milestone).toLowerCase());
+      const bi = preferred.indexOf(String(b.milestone).toLowerCase());
+      if (ai !== -1 || bi !== -1) {
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
+        return ai - bi;
+      }
+      return String(a.milestone).localeCompare(String(b.milestone));
+    });
 
   // High Priority CRs (Top 5):
   // - Priority = P0

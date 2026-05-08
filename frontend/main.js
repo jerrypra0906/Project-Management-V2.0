@@ -9023,7 +9023,7 @@ async function renderManagementDashboard() {
   const statusColor = status === 'RED' ? '#ef4444' : status === 'AMBER' ? '#f59e0b' : '#22c55e';
   const notes = data?.notes || { portfolioStatus: status, highlights: '', criticalAlerts: '', updatedAt: null, updatedBy: null };
 
-  const crFunnel = data?.crFunnel || { new: 0, inProgress: 0, testingQa: 0, completedClosed: 0 };
+  const crFunnel = Array.isArray(data?.crFunnel) ? data.crFunnel : [];
   const timeline = Array.isArray(data?.timelineProgress) ? data.timelineProgress : [];
   const topCrs = Array.isArray(data?.highPriorityCrs) ? data.highPriorityCrs : [];
   const risks = Array.isArray(data?.risksBlockers) ? data.risksBlockers : [];
@@ -9174,10 +9174,12 @@ async function renderManagementDashboard() {
               <table class="mgmt-simple-table">
                 <thead><tr><th>CR Summary</th><th>Count</th></tr></thead>
                 <tbody>
-                  <tr><td>NEW</td><td>${Number(crFunnel.new || 0)}</td></tr>
-                  <tr><td>IN-PROGRESS</td><td>${Number(crFunnel.inProgress || 0)}</td></tr>
-                  <tr><td>TESTING/QA</td><td>${Number(crFunnel.testingQa || 0)}</td></tr>
-                  <tr><td>COMPLETED/CLOSED</td><td>${Number(crFunnel.completedClosed || 0)}</td></tr>
+                  ${crFunnel.length
+                    ? crFunnel.map((r) => `
+                      <tr><td>${escapeHtml(r.milestone || '—')}</td><td>${Number(r.count || 0)}</td></tr>
+                    `).join('')
+                    : `<tr><td class="muted" colspan="2">No CRs found</td></tr>`
+                  }
                 </tbody>
               </table>
 
