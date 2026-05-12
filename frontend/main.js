@@ -3829,7 +3829,12 @@ async function renderView(id) {
       </div>
       <form id="edit-form" class="form">
         ${formRow('Initiative Name', `<input name="name" value="${(i.name || '').replace(/"/g, '&quot;')}" required />`)}
-        ${formRow('Ticket', `<input name="ticket" value="${(i.ticket || '').replace(/"/g, '&quot;')}" readonly style="background: #f0f0f0;" />`)}
+        ${formRow(
+          'Ticket',
+          i.type === 'CR'
+            ? `<input name="ticket" value="${(i.ticket || '').replace(/"/g, '&quot;')}" placeholder="e.g. CR11052026002" />`
+            : `<input name="ticket" value="${(i.ticket || '').replace(/"/g, '&quot;')}" readonly style="background: #f0f0f0;" />`
+        )}
         ${formRow('Type', `<input name="type" value="${i.type}" readonly style="background: #f0f0f0;" />`)}
         ${formRow('Create Date', `<input type="date" value="${i.createdAt?.slice(0,10) || ''}" readonly style="background: #f0f0f0;" />`)}
         ${formRow('Priority', `<select name="priority">${['P0','P1','P2'].map(p => `<option value="${p}" ${i.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
@@ -3918,6 +3923,7 @@ async function renderView(id) {
       // CR dates removed - no longer used
       if (i.type === 'CR') {
         payload.cr = {};
+        payload.ticket = (obj.ticket || '').trim() || null;
       }
       
       try {
@@ -5712,6 +5718,19 @@ async function renderCRList() {
                 <label class="multi-select-option">
                   <input type="checkbox" value="${u.id}" ${filter.itManagerId.includes(u.id) ? 'checked' : ''}>
                   ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fSystemImpacted">
+              System Impacted ${filter.systemImpactedId.length > 0 ? `(${filter.systemImpactedId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fSystemImpacted">
+              ${(LOOKUPS.dwsApplications || []).map(a => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${a.id}" ${filter.systemImpactedId.includes(a.id) ? 'checked' : ''}>
+                  ${escapeHtml(a.systemName)}
                 </label>
               `).join('')}
             </div>
@@ -8908,7 +8927,7 @@ async function renderMasterDwsApplications() {
                 <td><strong>${escape(a.systemName)}</strong></td>
                 <td>${a.productionUrl ? `<a href="${escape(a.productionUrl)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">-</span>'}</td>
                 <td>${a.stagingUrl ? `<a href="${escape(a.stagingUrl)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">-</span>'}</td>
-                <td>${a.githubUrl ? `<a href="${escape(a.githubUrl)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">-</span>'}</td>
+                <td style="max-width:320px;white-space:pre-wrap;word-break:break-word;">${a.githubUrl ? escape(String(a.githubUrl)) : '<span class="muted">-</span>'}</td>
                 <td style="white-space:nowrap;">
                   <button data-action="edit" data-id="${escape(a.id)}">Edit</button>
                   <button data-action="delete" data-id="${escape(a.id)}" style="color: var(--danger); margin-left: 8px;">Delete</button>
@@ -8931,7 +8950,7 @@ async function renderMasterDwsApplications() {
           ${formRow('System Name *', `<input name="systemName" value="${escape(existing?.systemName || '')}" required />`)}
           ${formRow('System Production URL', `<input name="productionUrl" type="url" value="${escape(existing?.productionUrl || '')}" placeholder="https://..." />`)}
           ${formRow('System Staging URL', `<input name="stagingUrl" type="url" value="${escape(existing?.stagingUrl || '')}" placeholder="https://..." />`)}
-          ${formRow('Github URL', `<input name="githubUrl" type="url" value="${escape(existing?.githubUrl || '')}" placeholder="https://github.com/..." />`)}
+          ${formRow('Github URL', `<textarea name="githubUrl" rows="3" style="width:100%;resize:vertical;" placeholder="Repository link or description...">${escape(existing?.githubUrl || '')}</textarea>`)}
           <div style="display:flex; gap: 12px;">
             <button type="submit" class="primary">${mode === 'create' ? 'Create' : 'Save'}</button>
             <button type="button" id="btn-cancel">Cancel</button>
@@ -8953,7 +8972,7 @@ async function renderMasterDwsApplications() {
         systemName: fd.get('systemName'),
         productionUrl: fd.get('productionUrl') || null,
         stagingUrl: fd.get('stagingUrl') || null,
-        githubUrl: fd.get('githubUrl') || null,
+        githubUrl: (fd.get('githubUrl') || '').trim() || null,
       };
       try {
         if (mode === 'create') {
@@ -9025,6 +9044,7 @@ async function renderManagementDashboard() {
 
   const crFunnel = Array.isArray(data?.crFunnel) ? data.crFunnel : [];
   const timeline = Array.isArray(data?.timelineProgress) ? data.timelineProgress : [];
+  const itProjectLived = Array.isArray(data?.itProjectLived) ? data.itProjectLived : [];
   const topCrs = Array.isArray(data?.highPriorityCrs) ? data.highPriorityCrs : [];
   const risks = Array.isArray(data?.risksBlockers) ? data.risksBlockers : [];
 
@@ -9162,6 +9182,46 @@ async function renderManagementDashboard() {
                     </tr>
                   `;
                 }).join('') : `<tr><td class="muted" colspan="${quarters.length + 2}">No projects found</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="mgmt-section">
+        <div class="mgmt-section-title">IT PROJECT LIVED</div>
+        <div class="mgmt-body">
+          <div class="mgmt-timeline">
+            <table class="mgmt-simple-table" style="min-width:720px;">
+              <thead>
+                <tr>
+                  <th>PROJECT / MILESTONE</th>
+                  <th>ACTUAL START DATE</th>
+                  <th>ACTUAL END DATE</th>
+                  <th>LIVE AGING (DAYS)</th>
+                  <th>REMARKS</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itProjectLived.length
+                  ? itProjectLived.map((row) => {
+                    const aging =
+                      row.liveAgingDays === null || row.liveAgingDays === undefined
+                        ? '—'
+                        : `${row.liveAgingDays} day${Number(row.liveAgingDays) === 1 ? '' : 's'}`;
+                    return `
+                    <tr>
+                      <td>
+                        <strong>${escapeHtml(row.name || '')}</strong>
+                        <div class="muted" style="font-size:12px;margin-top:2px;">${escapeHtml(row.milestone || '')}</div>
+                      </td>
+                      <td>${escapeHtml(fmtDate(row.startDate) || '—')}</td>
+                      <td>${escapeHtml(fmtDate(row.endDate) || '—')}</td>
+                      <td>${escapeHtml(aging)}</td>
+                      <td style="max-width:360px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(row.remark || '')}</td>
+                    </tr>`;
+                  }).join('')
+                  : `<tr><td class="muted" colspan="5">No live projects found</td></tr>`}
               </tbody>
             </table>
           </div>
@@ -9348,11 +9408,16 @@ async function renderCRDashboard() {
   const urlParams = new URLSearchParams(location.search);
   const selectedDepartmentId = urlParams.get('departmentId') || '';
   const selectedItManagerId = urlParams.get('itManagerId') || '';
-  
+  const selectedSystemImpactedIds = (urlParams.get('systemImpactedId') || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   // Build API query string with filters
   const apiQs = new URLSearchParams();
   if (selectedDepartmentId) apiQs.set('departmentId', selectedDepartmentId);
   if (selectedItManagerId) apiQs.set('itManagerId', selectedItManagerId);
+  if (selectedSystemImpactedIds.length) apiQs.set('systemImpactedId', selectedSystemImpactedIds.join(','));
   
   const d = await fetchJSON('/api/cr-dashboard?' + apiQs.toString());
 
@@ -9373,10 +9438,11 @@ async function renderCRDashboard() {
 
   try {
     // Fetch CR initiatives with dates so we can compute all age metrics.
-    // Apply the same dashboard filters (departmentId and itManagerId).
+    // Apply the same dashboard filters (department, IT manager, system impacted).
     const crQs = new URLSearchParams();
     crQs.set('type', 'CR');
     if (selectedDepartmentId) crQs.set('departmentId', selectedDepartmentId);
+    if (selectedSystemImpactedIds.length) crQs.set('systemImpactedId', selectedSystemImpactedIds.join(','));
     const crInitiatives = await fetchJSON('/api/initiatives?' + crQs.toString());
 
     // Role/type based IT Manager filter is stored on initiative.itManagerIds (array or CSV)
@@ -9386,6 +9452,13 @@ async function renderCRDashboard() {
         const raw = i.itManagerIds || i.itManagerId || [];
         const ids = Array.isArray(raw) ? raw : String(raw).split(',').map(v => v.trim()).filter(Boolean);
         return ids.includes(selectedItManagerId);
+      });
+    }
+    if (selectedSystemImpactedIds.length) {
+      filteredCRs = filteredCRs.filter((i) => {
+        const raw = i.systemImpactedIds ?? i.systemImpactedId;
+        const ids = Array.isArray(raw) ? raw : String(raw || '').split(',').map((v) => v.trim()).filter(Boolean);
+        return selectedSystemImpactedIds.some((sel) => ids.includes(sel));
       });
     }
 
@@ -9714,11 +9787,32 @@ async function renderCRDashboard() {
     .sort((a, b) => a.label.localeCompare(b.label));
   
   app.innerHTML = `
-    <div class="card" style="margin-bottom: 24px; padding: 20px;">
+    <div class="card" id="cr-dashboard-filters" style="margin-bottom: 24px; padding: 20px;">
       <div style="display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap;">
         ${createFilterDropdown('filter-department-cr', 'Department', departmentOptions, selectedDepartmentId, 'updateCRDashboardFilters()')}
         ${createFilterDropdown('filter-itmanager-cr', 'IT Manager', itManagerOptions, selectedItManagerId, 'updateCRDashboardFilters()')}
-        ${(selectedDepartmentId || selectedItManagerId) ? `
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;">System impacted</label>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <div class="multi-select-wrapper" style="position: relative;">
+              <button type="button" class="multi-select-btn" data-filter="fSystemImpacted-cr" style="min-width: 200px; text-align: left;">
+                ${selectedSystemImpactedIds.length ? `System impacted (${selectedSystemImpactedIds.length})` : 'All system impacted'}
+              </button>
+              <div class="multi-select-dropdown" id="dropdown-fSystemImpacted-cr">
+                ${(LOOKUPS.dwsApplications || []).map((a) => `
+                  <label class="multi-select-option">
+                    <input type="checkbox" value="${a.id}" ${selectedSystemImpactedIds.includes(a.id) ? 'checked' : ''}>
+                    ${escapeHtml(a.systemName || '')}
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+            <button type="button" onclick="updateCRDashboardFilters()" style="padding: 10px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text);">
+              Apply
+            </button>
+          </div>
+        </div>
+        ${(selectedDepartmentId || selectedItManagerId || selectedSystemImpactedIds.length) ? `
           <button onclick="clearCRDashboardFilters()" style="padding: 10px 16px; background: var(--gray-100); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text);">
             Clear Filters
           </button>
@@ -10551,15 +10645,48 @@ async function renderCRDashboard() {
   window.updateCRDashboardFilters = () => {
     const departmentId = document.getElementById('filter-department-cr')?.value || '';
     const itManagerId = document.getElementById('filter-itmanager-cr')?.value || '';
+    const sysBoxes = document.querySelectorAll('#dropdown-fSystemImpacted-cr input[type="checkbox"]:checked');
+    const systemImpactedIds = Array.from(sysBoxes).map((cb) => cb.value);
     const params = new URLSearchParams();
     if (departmentId) params.set('departmentId', departmentId);
     if (itManagerId) params.set('itManagerId', itManagerId);
+    if (systemImpactedIds.length) params.set('systemImpactedId', systemImpactedIds.join(','));
     location.search = params.toString();
   };
-  
+
   window.clearCRDashboardFilters = () => {
     location.search = '';
   };
+
+  const dashFilterRoot = document.getElementById('cr-dashboard-filters');
+  if (dashFilterRoot) {
+    dashFilterRoot.querySelectorAll('.multi-select-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const filterId = btn.dataset.filter;
+        if (!filterId) return;
+        const dropdown = document.getElementById(`dropdown-${filterId}`);
+        if (!dropdown) return;
+        const isOpen = dropdown.classList.contains('open');
+        document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach((d) => d.classList.remove('open'));
+        document.body.classList.remove('dropdown-open');
+        if (!isOpen) {
+          dropdown.classList.add('open');
+          document.body.classList.add('dropdown-open');
+        }
+      });
+    });
+    if (window.__crDashDocClick) {
+      document.removeEventListener('click', window.__crDashDocClick);
+    }
+    window.__crDashDocClick = (e) => {
+      if (!dashFilterRoot.contains(e.target)) {
+        dashFilterRoot.querySelectorAll('.multi-select-dropdown.open').forEach((d) => d.classList.remove('open'));
+        document.body.classList.remove('dropdown-open');
+      }
+    };
+    document.addEventListener('click', window.__crDashDocClick);
+  }
 }
 
 function renderAuth() {

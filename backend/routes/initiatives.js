@@ -2,6 +2,7 @@ import express from 'express';
 import store from '../store.js';
 import crypto from 'crypto';
 import { sendCRCreationEmail } from '../services/email.js';
+import { initiativeTriggersCrCreationEmail } from '../services/cr-email-eligibility.js';
 import fs from 'fs/promises';
 import {
   CR_TASK_DEFINITIONS,
@@ -363,59 +364,70 @@ router.post('/', async (req, res) => {
   }
   
   await store.write(data);
-  
-  // Send email notification for new CR creation
+
+  // Send email notification for new CR creation only when System Impacted includes SAP FICO or SAP NON FICO
   // Note: Email will be sent when documents are uploaded (if within 10 minutes)
   // If no documents are uploaded within 10 minutes, email will be sent via delayed check
   if (type === 'CR') {
-    console.log(`[CR CREATION] New CR created: ${name} (ID: ${id})`);
-    // Set a flag to track that email should be sent when documents are uploaded
-    // If no documents are uploaded within 10 minutes, send email without documents
-    const emailFlag = `cr_email_pending_${id}`;
-    global[emailFlag] = {
-      initiativeId: id,
-      createdAt: new Date(),
-      sent: false
-    };
-    
-    // Schedule email to be sent after 10 minutes if no documents are uploaded
-    setTimeout(async () => {
-      try {
-        const flag = global[emailFlag];
-        if (flag && !flag.sent) {
-          console.log(`[CR CREATION] No documents uploaded within 10 minutes, sending email without documents...`);
-          const currentData = await store.read();
-          const initiative = currentData.initiatives.find(i => i.id === id);
-          if (initiative && initiative.type === 'CR') {
-            const userLookups = currentData.users.map(u => ({
-              id: u.id,
-              name: u.name,
-              email: u.email || null
-            }));
-            
-            const documents = (currentData.documents || []).filter(d => d.initiativeId === id);
-            
-            const crData = {
-              name: initiative.name,
-              description: initiative.description,
-              businessImpact: initiative.businessImpact,
-              priority: initiative.priority,
-              businessOwnerId: initiative.businessOwnerId,
-              businessUserIds: initiative.businessUserIds,
-              itPicId: initiative.itPicId,
-              itPicIds: initiative.itPicIds,
-              itManagerIds: initiative.itManagerIds
-            };
-            
-            await sendCRCreationEmail(crData, userLookups, documents);
-            flag.sent = true;
+    const createdInitiative = data.initiatives.find((i) => i.id === id);
+    const emailEligible =
+      createdInitiative && initiativeTriggersCrCreationEmail(data, createdInitiative);
+
+    if (emailEligible) {
+      console.log(`[CR CREATION] New CR created (SAP email eligible): ${name} (ID: ${id})`);
+      const emailFlag = `cr_email_pending_${id}`;
+      global[emailFlag] = {
+        initiativeId: id,
+        createdAt: new Date(),
+        sent: false,
+      };
+
+      setTimeout(async () => {
+        try {
+          const flag = global[emailFlag];
+          if (flag && !flag.sent) {
+            console.log(
+              `[CR CREATION] No documents uploaded within 10 minutes, sending email without documents...`
+            );
+            const currentData = await store.read();
+            const initiative = currentData.initiatives.find((i) => i.id === id);
+            if (
+              initiative &&
+              initiative.type === 'CR' &&
+              initiativeTriggersCrCreationEmail(currentData, initiative)
+            ) {
+              const userLookups = currentData.users.map((u) => ({
+                id: u.id,
+                name: u.name,
+                email: u.email || null,
+              }));
+
+              const documents = (currentData.documents || []).filter((d) => d.initiativeId === id);
+
+              const crData = {
+                name: initiative.name,
+                description: initiative.description,
+                businessImpact: initiative.businessImpact,
+                priority: initiative.priority,
+                businessOwnerId: initiative.businessOwnerId,
+                businessUserIds: initiative.businessUserIds,
+                itPicId: initiative.itPicId,
+                itPicIds: initiative.itPicIds,
+                itManagerIds: initiative.itManagerIds,
+              };
+
+              await sendCRCreationEmail(crData, userLookups, documents);
+              flag.sent = true;
+            }
+            delete global[emailFlag];
           }
-          delete global[emailFlag];
+        } catch (error) {
+          console.error('[EMAIL ERROR] Error sending delayed CR creation email:', error);
         }
-      } catch (error) {
-        console.error('[EMAIL ERROR] Error sending delayed CR creation email:', error);
-      }
-    }, 10 * 60 * 1000); // 10 minutes
+      }, 10 * 60 * 1000); // 10 minutes
+    } else {
+      console.log(`[CR CREATION] New CR created (no SAP FICO / SAP NON FICO email): ${name} (ID: ${id})`);
+    }
   }
   
   res.status(201).json({ id });

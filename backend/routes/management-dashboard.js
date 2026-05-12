@@ -122,6 +122,35 @@ router.get('/', async (_req, res) => {
       updatedAt: p.updatedAt || null,
     }));
 
+  // IT Project Lived: all projects in Live status (aging = today − actual end date)
+  const itProjectLived = projects
+    .filter((p) => normalizeStatus(p.status) === 'LIVE')
+    .slice()
+    .sort((a, b) => {
+      const ae = parseDate(a.endDate);
+      const be = parseDate(b.endDate);
+      if (ae && be) return be.getTime() - ae.getTime();
+      if (ae) return -1;
+      if (be) return 1;
+      return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+    })
+    .map((p) => {
+      const end = parseDate(p.endDate);
+      let liveAgingDays = null;
+      if (end) {
+        liveAgingDays = Math.floor((today.getTime() - end.getTime()) / (1000 * 60 * 60 * 24));
+      }
+      return {
+        id: p.id,
+        name: p.name,
+        milestone: getMilestoneLabel(p.milestone),
+        startDate: p.startDate || null,
+        endDate: p.endDate || null,
+        liveAgingDays,
+        remark: p.remark || null,
+      };
+    });
+
   // CR funnel: group by CR milestone (phase) instead of fixed buckets.
   const milestoneCounts = new Map();
   crs
@@ -205,6 +234,7 @@ router.get('/', async (_req, res) => {
   res.json({
     portfolioStatus,
     timelineProgress: timelineProjects,
+    itProjectLived,
     crFunnel,
     highPriorityCrs,
     risksBlockers,

@@ -336,7 +336,7 @@ function calculateGoLiveRate(crInitiatives) {
 }
 
 router.get('/', async (req, res) => {
-  const { departmentId, itManagerId } = req.query;
+  const { departmentId, itManagerId, systemImpactedId } = req.query;
   const data = await store.read();
   const total = data.initiatives.length;
   const projects = data.initiatives.filter(i => i.type === 'Project').length;
@@ -348,6 +348,11 @@ router.get('/', async (req, res) => {
   const normPriority = (p) => String(p || '').toUpperCase().trim();
   const normMilestone = (m) => String(m || '').trim();
 
+  const systemImpactedValues = String(systemImpactedId || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   // Apply filters
   if (departmentId) {
     crInitiatives = crInitiatives.filter(i => i.departmentId === departmentId);
@@ -357,6 +362,15 @@ router.get('/', async (req, res) => {
     crInitiatives = crInitiatives.filter(i => {
       const managerIds = (i.itManagerIds || '').split(',').map(id => id.trim()).filter(id => id);
       return managerIds.includes(itManagerId);
+    });
+  }
+  if (systemImpactedValues.length > 0) {
+    crInitiatives = crInitiatives.filter((i) => {
+      const raw = i.systemImpactedIds || '';
+      const ids = Array.isArray(raw)
+        ? raw
+        : String(raw).split(',').map((id) => id.trim()).filter(Boolean);
+      return systemImpactedValues.some((sel) => ids.includes(sel));
     });
   }
   
