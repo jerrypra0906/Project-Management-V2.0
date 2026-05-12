@@ -324,6 +324,7 @@ function crListColumnDefinitions() {
     { key: 'status', class: 'col-status', label: 'Status', sortable: true },
     { key: 'milestone', class: 'col-milestone', label: 'Milestone', sortable: true },
     { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
+    { key: 'systemImpactedIds', class: 'col-system-impacted', label: 'System Impacted', sortable: true },
     { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
     { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
     { key: 'startDate', class: 'col-start-date', label: 'Actual Start Date', sortable: true },
@@ -445,6 +446,7 @@ function getDefaultColumns(viewType) {
       'col-department': true,
       'col-owner': true,
       'col-pic': true,
+      'col-system-impacted': true,
       'col-start-date': true,
       'col-create-date': true,
       'col-end-date': true,
@@ -468,6 +470,7 @@ function getDefaultColumns(viewType) {
     'col-department': true,
     'col-owner': true,
     'col-pic': true,
+    'col-system-impacted': false,
     'col-start-date': true,
     'col-create-date': true,
     'col-end-date': true,
@@ -481,6 +484,14 @@ function getDefaultColumns(viewType) {
     'col-doc': true,
     'col-actions': true
   };
+}
+
+/** Merge saved column visibility with defaults so new columns get sane defaults. */
+function resolveColumnVisibility(viewType) {
+  const defaults = getDefaultColumns(viewType);
+  const saved = getColumnVisibility(viewType);
+  if (!saved) return { ...defaults };
+  return { ...defaults, ...saved };
 }
 
 function clearUser() {
@@ -1149,6 +1160,20 @@ function nameById(arr, id) {
   return m ? m.name : id || '';
 }
 
+/** Comma-separated DWS system names for an initiative's `systemImpactedIds`. */
+function dwsSystemNamesFromInitiative(initiative) {
+  const apps = LOOKUPS.dwsApplications || [];
+  const byId = new Map(apps.map((a) => [a.id, String(a.systemName || '').trim()]));
+  const raw = initiative?.systemImpactedIds;
+  const ids = Array.isArray(raw)
+    ? raw.map((x) => String(x).trim()).filter(Boolean)
+    : String(raw || '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+  return ids.map((id) => byId.get(id)).filter(Boolean).join(', ');
+}
+
 /** Calendar days between task start and end (inclusive span); both dates required (YYYY-MM-DD). */
 function computeTaskAgingDays(startDateStr, endDateStr) {
   if (!startDateStr || !endDateStr) return null;
@@ -1452,6 +1477,7 @@ function initiativeRow(i, crData = null, colVisibility = null) {
     <td class="col-status" style="display: ${colVisibility['col-status'] !== false ? 'table-cell' : 'none'}"><span class="status-badge status-${statusClass}">${i.status}</span></td>
     <td class="col-milestone" style="display: ${colVisibility['col-milestone'] !== false ? 'table-cell' : 'none'}">${escapeHtml(normalizeCrMilestoneForDisplay(i))}</td>
     <td class="col-department" style="display: ${colVisibility['col-department'] !== false ? 'table-cell' : 'none'}">${dep}</td>
+    <td class="col-system-impacted" style="display: ${colVisibility['col-system-impacted'] !== false ? 'table-cell' : 'none'}" title="${escapeHtml(dwsSystemNamesFromInitiative(i))}">${escapeHtml(dwsSystemNamesFromInitiative(i))}</td>
     <td class="col-owner" style="display: ${colVisibility['col-owner'] !== false ? 'table-cell' : 'none'}">${bo}</td>
     <td class="col-pic" style="display: ${colVisibility['col-pic'] !== false ? 'table-cell' : 'none'}">${itpic}</td>
     <td class="col-start-date" style="display: ${colVisibility['col-start-date'] !== false ? 'table-cell' : 'none'}">${i.startDate?.slice(0,10) || ''}</td>
@@ -1565,6 +1591,8 @@ function exportCellValueForCR(i, key) {
       return nameById(LOOKUPS.users, i.businessOwnerId);
     case 'itPicId':
       return nameById(LOOKUPS.users, i.itPicId);
+    case 'systemImpactedIds':
+      return dwsSystemNamesFromInitiative(i);
     case 'milestone':
       // Export the same milestone label shown in the UI (CR uses phase label when present)
       return normalizeCrMilestoneForDisplay(i);
@@ -1873,7 +1901,10 @@ async function renderList() {
     };
     data = data.slice().sort((a,b) => {
       let va, vb;
-      if (key.endsWith('Id')) {
+      if (key === 'systemImpactedIds') {
+        va = dwsSystemNamesFromInitiative(a).toLowerCase();
+        vb = dwsSystemNamesFromInitiative(b).toLowerCase();
+      } else if (key.endsWith('Id')) {
         va = nameFor(key, a[key]);
         vb = nameFor(key, b[key]);
       } else if (key === 'businessImpact' || key === 'remark' || key === 'documentationLink') {
@@ -1888,7 +1919,7 @@ async function renderList() {
   }
   
   // Get column visibility preferences
-  const colVisibility = getColumnVisibility('list') || getDefaultColumns('list');
+  const colVisibility = resolveColumnVisibility('list');
   
   // Column definitions
   const columns = [
@@ -1900,6 +1931,7 @@ async function renderList() {
     { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
     { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
     { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
+    { key: 'systemImpactedIds', class: 'col-system-impacted', label: 'System Impacted', sortable: true },
     { key: 'startDate', class: 'col-start-date', label: 'Actual Start Date', sortable: true },
     { key: 'createdAt', class: 'col-create-date', label: 'Create Date', sortable: true },
     { key: 'endDate', class: 'col-end-date', label: 'Actual End Date', sortable: true },
@@ -3366,6 +3398,7 @@ async function renderView(id) {
         <div><div class="muted">% Completion</div><div><strong>${completionPercent}%</strong></div></div>
         <div><div class="muted">Milestone</div><div>${escapeHtml(normalizeCrMilestoneForDisplay(i))}</div></div>
         <div><div class="muted">Department</div><div>${depName}</div></div>
+        ${i.type === 'CR' ? `<div><div class="muted">System Impacted</div><div>${escapeHtml(dwsSystemNamesFromInitiative(i) || '')}</div></div>` : ''}
         <div><div class="muted">Actual Start Date</div><div>${i.startDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">Actual End Date</div><div>${i.endDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">Plan Start Date</div><div>${i.planStartDate?.slice(0,10) || ''}</div></div>
@@ -3845,6 +3878,7 @@ async function renderView(id) {
             : ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')
         }</select>`)}
         ${formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, i.departmentId || '', 'Select...'))}
+        ${i.type === 'CR' ? formRow('System Impacted', createMultiSelect('systemImpactedIds', (LOOKUPS.dwsApplications || []).map(a => ({ id: a.id, name: a.systemName })), i.systemImpactedIds || [])) : ''}
         ${formRow('Actual Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" />`)}
         ${formRow('Actual End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
         ${formRow('Plan Start Date', `<input type="date" name="planStartDate" value="${i.planStartDate?.slice(0,10) || ''}" required />`)}
@@ -3863,7 +3897,6 @@ async function renderView(id) {
           ${formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, i.itPmId || '', 'Select...', true))}
           ${formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, itPicIds))}
           ${formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, i.itManagerIds || []))}
-          ${i.type === 'CR' ? formRow('System Impacted', createMultiSelect('systemImpactedIds', (LOOKUPS.dwsApplications || []).map(a => ({ id: a.id, name: a.systemName })), i.systemImpactedIds || [])) : ''}
           ${formRow('Business Owner / Requestor', createSearchableSelect('businessOwnerId', businessOwnerUsers, i.businessOwnerId || '', 'Select...'))}
           ${formRow('Business Users', createMultiSelect('businessUserIds', LOOKUPS.users, i.businessUserIds || []))}
         </div>
@@ -5578,7 +5611,10 @@ async function renderCRList() {
     };
     dataWithCR.sort((a,b) => {
       let va, vb;
-      if (key.endsWith('Id')) {
+      if (key === 'systemImpactedIds') {
+        va = dwsSystemNamesFromInitiative(a.initiative).toLowerCase();
+        vb = dwsSystemNamesFromInitiative(b.initiative).toLowerCase();
+      } else if (key.endsWith('Id')) {
         va = nameFor(key, a.initiative[key]);
         vb = nameFor(key, b.initiative[key]);
       } else if (key === 'milestone') {
@@ -5596,7 +5632,7 @@ async function renderCRList() {
   }
   
   // Get column visibility preferences
-  const colVisibility = getColumnVisibility('crlist') || getDefaultColumns('crlist');
+  const colVisibility = resolveColumnVisibility('crlist');
 
   const columns = crListColumnDefinitions();
   const access = await getUserAccess();
