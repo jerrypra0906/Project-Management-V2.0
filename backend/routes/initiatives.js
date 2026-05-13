@@ -2,7 +2,13 @@ import express from 'express';
 import store from '../store.js';
 import crypto from 'crypto';
 import { sendCRCreationEmail } from '../services/email.js';
+import { initiativeTriggersCrCreationEmail } from '../services/cr-email-eligibility.js';
 import fs from 'fs/promises';
+import {
+  CR_TASK_DEFINITIONS,
+  getCrAssigneeIdFromBody,
+} from '../crTaskTemplates.js';
+import { CR_MILESTONE_PHASES } from '../crTaskTemplates.js';
 
 const router = express.Router();
 
@@ -84,14 +90,21 @@ function validateCommon(body) {
   if (!['P0','P1','P2'].includes(body.priority)) return 'Invalid priority';
   const statuses = ['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'];
   if (!statuses.includes(body.status)) return 'Invalid status';
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
-  if (!milestones.includes(body.milestone)) return 'Invalid milestone';
+  // Milestone validation depends on type:
+  // - Project: canonical milestone list
+  // - CR: store CR phase directly in `milestone` (no extra column)
+  if (body.type === 'Project') {
+    const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
+    if (!milestones.includes(body.milestone)) return 'Invalid milestone';
+  } else if (body.type === 'CR') {
+    if (!CR_MILESTONE_PHASES.includes(body.milestone)) return 'Invalid CR milestone phase';
+  }
   return null;
 }
 
 router.get('/', async (req, res) => {
-  const { q, type, status, milestone, priority, departmentId, itPicId, itPmId, businessOwnerId, active } = req.query;
-  console.log('API filter params:', { q, type, status, milestone, priority, departmentId, itPicId, itPmId, active });
+  const { q, type, status, milestone, crMilestonePhase, priority, departmentId, itPicId, itPmId, businessOwnerId, active, systemImpactedId } = req.query;
+  console.log('API filter params:', { q, type, status, milestone, crMilestonePhase, priority, departmentId, itPicId, itPmId, businessOwnerId, active, systemImpactedId });
   const data = await store.read();
   let rows = data.initiatives;
   
@@ -140,6 +153,13 @@ router.get('/', async (req, res) => {
   if (milestoneValues && milestoneValues.length > 0) {
     rows = rows.filter(r => milestoneValues.includes(r.milestone));
   }
+
+  // Backward compatibility: older clients may send `crMilestonePhase`.
+  // Since we now store CR phase directly in `milestone`, treat it as an alias for `milestone` when type=CR.
+  const crPhaseValues = parseMultiValue(crMilestonePhase);
+  if (crPhaseValues && crPhaseValues.length > 0) {
+    rows = rows.filter(r => r.type === 'CR' && crPhaseValues.includes(r.milestone));
+  }
   
   const priorityValues = parseMultiValue(priority);
   if (priorityValues && priorityValues.length > 0) {
@@ -167,6 +187,18 @@ router.get('/', async (req, res) => {
   if (itPmIdValues && itPmIdValues.length > 0) {
     rows = rows.filter(r => itPmIdValues.includes(r.itPmId));
   }
+
+  // Multi-value filter for System Impacted (initiative.systemImpactedIds includes any selected id)
+  const systemImpactedValues = parseMultiValue(systemImpactedId);
+  if (systemImpactedValues && systemImpactedValues.length > 0) {
+    rows = rows.filter((r) => {
+      const raw = r.systemImpactedIds || [];
+      const ids = Array.isArray(raw)
+        ? raw
+        : String(raw).split(',').map(v => v.trim()).filter(Boolean);
+      return systemImpactedValues.some((sel) => ids.includes(sel));
+    });
+  }
   
   console.log(`API returned ${rows.length} rows after filtering (total initiatives: ${data.initiatives.length})`);
   rows = rows.sort((a,b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
@@ -180,6 +212,38 @@ router.get('/', async (req, res) => {
   }
   
   res.json(rows.slice(0,500));
+});
+
+/** Last N change-history entries for initiatives of a given type (Project | CR). */
+router.get('/recent-activity', async (req, res) => {
+  const { type } = req.query;
+  const limitRaw = parseInt(String(req.query.limit || '20'), 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(100, Math.max(1, limitRaw)) : 20;
+  if (type !== 'Project' && type !== 'CR') {
+    return res.status(400).json({ error: 'Query parameter "type" must be Project or CR' });
+  }
+  const data = await store.read();
+  const allowedIds = new Set(
+    (data.initiatives || []).filter((i) => i.type === type).map((i) => i.id)
+  );
+  const byId = Object.fromEntries((data.initiatives || []).map((i) => [i.id, i]));
+  const items = (data.changeHistory || [])
+    .filter((h) => h.initiativeId && allowedIds.has(h.initiativeId))
+    .map((h) => {
+      const init = byId[h.initiativeId];
+      return {
+        id: h.id,
+        initiativeId: h.initiativeId,
+        initiativeName: init?.name || '',
+        initiativeTicket: init?.ticket || '',
+        timestamp: h.timestamp,
+        changedBy: h.changedBy,
+        changes: Array.isArray(h.changes) ? h.changes : [],
+      };
+    })
+    .sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))
+    .slice(0, limit);
+  res.json(items);
 });
 
 router.get('/:id', async (req, res) => {
@@ -212,7 +276,7 @@ router.post('/', async (req, res) => {
   const createdAt = now();
   const updatedAt = createdAt;
   const {
-    type,name,ticket,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,status,milestone,startDate,endDate,planStartDate,planEndDate,remark,documentationLink
+    type,name,ticket,description,businessImpact,priority,businessOwnerId,businessUserIds,departmentId,itPicId,itPicIds,itPmId,itManagerIds,systemImpactedIds,status,milestone,startDate,endDate,planStartDate,planEndDate,remark,documentationLink
   } = req.body;
   const data = await store.read();
   
@@ -220,6 +284,7 @@ router.post('/', async (req, res) => {
   const businessUserIdsStr = Array.isArray(businessUserIds) ? businessUserIds.join(',') : (businessUserIds || null);
   const itPicIdsStr = Array.isArray(itPicIds) ? itPicIds.join(',') : (itPicIds || null);
   const itManagerIdsStr = Array.isArray(itManagerIds) ? itManagerIds.join(',') : (itManagerIds || null);
+  const systemImpactedIdsStr = Array.isArray(systemImpactedIds) ? systemImpactedIds.join(',') : (systemImpactedIds || null);
   
   // Use itPicIds if provided, otherwise fall back to itPicId for backward compatibility
   const finalItPicIds = itPicIdsStr || (itPicId ? itPicId : null);
@@ -238,7 +303,10 @@ router.post('/', async (req, res) => {
     itPicIds: finalItPicIds,
     itPmId: itPmId || null,
     itManagerIds: itManagerIdsStr,
-    status,milestone,startDate,endDate: endDate||null,planStartDate: planStartDate||null,planEndDate: planEndDate||null,remark: remark||null,documentationLink: documentationLink||null, 
+    systemImpactedIds: systemImpactedIdsStr,
+    status,milestone,
+    crMilestonePhase: null,
+    startDate,endDate: endDate||null,planStartDate: planStartDate||null,planEndDate: planEndDate||null,remark: remark||null,documentationLink: documentationLink||null, 
     createdAt, updatedAt 
   });
   if (type === 'CR') {
@@ -257,80 +325,109 @@ router.post('/', async (req, res) => {
     });
   }
   
-  // Auto-create tasks: 1 task per milestone
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
+  // Auto-create tasks: CR workflow tasks (IT PIC) or Project milestone tasks
   if (!data.tasks) data.tasks = [];
-  milestones.forEach(m => {
-    const taskId = uuid();
-    data.tasks.push({
-      id: taskId,
-      initiativeId: id,
-      name: `${m} Task`,
-      description: `Task for ${m} milestone`,
-      startDate: null,
-      endDate: null,
-      assigneeId: null,
-      status: 'Not Started',
-      milestone: m,
-      createdAt,
-      updatedAt: null
+  if (type === 'CR') {
+    const assigneeId = getCrAssigneeIdFromBody(req.body);
+    CR_TASK_DEFINITIONS.forEach(({ name, milestone }) => {
+      data.tasks.push({
+        id: uuid(),
+        initiativeId: id,
+        name,
+        description: null,
+        startDate: null,
+        endDate: null,
+        assigneeId,
+        status: 'not started',
+        milestone,
+        createdAt,
+        updatedAt: null,
+      });
     });
-  });
+  } else {
+    const milestones = ['Preparation', 'Business Requirement', 'Tech Assessment', 'Planning', 'Development', 'Testing', 'Live'];
+    milestones.forEach((m) => {
+      data.tasks.push({
+        id: uuid(),
+        initiativeId: id,
+        name: `${m} Task`,
+        description: `Task for ${m} milestone`,
+        startDate: null,
+        endDate: null,
+        assigneeId: null,
+        status: 'Not Started',
+        milestone: m,
+        createdAt,
+        updatedAt: null,
+      });
+    });
+  }
   
   await store.write(data);
-  
-  // Send email notification for new CR creation
+
+  // Send email notification for new CR creation only when System Impacted includes SAP FICO or SAP NON FICO
   // Note: Email will be sent when documents are uploaded (if within 10 minutes)
   // If no documents are uploaded within 10 minutes, email will be sent via delayed check
   if (type === 'CR') {
-    console.log(`[CR CREATION] New CR created: ${name} (ID: ${id})`);
-    // Set a flag to track that email should be sent when documents are uploaded
-    // If no documents are uploaded within 10 minutes, send email without documents
-    const emailFlag = `cr_email_pending_${id}`;
-    global[emailFlag] = {
-      initiativeId: id,
-      createdAt: new Date(),
-      sent: false
-    };
-    
-    // Schedule email to be sent after 10 minutes if no documents are uploaded
-    setTimeout(async () => {
-      try {
-        const flag = global[emailFlag];
-        if (flag && !flag.sent) {
-          console.log(`[CR CREATION] No documents uploaded within 10 minutes, sending email without documents...`);
-          const currentData = await store.read();
-          const initiative = currentData.initiatives.find(i => i.id === id);
-          if (initiative && initiative.type === 'CR') {
-            const userLookups = currentData.users.map(u => ({
-              id: u.id,
-              name: u.name,
-              email: u.email || null
-            }));
-            
-            const documents = (currentData.documents || []).filter(d => d.initiativeId === id);
-            
-            const crData = {
-              name: initiative.name,
-              description: initiative.description,
-              businessImpact: initiative.businessImpact,
-              priority: initiative.priority,
-              businessOwnerId: initiative.businessOwnerId,
-              businessUserIds: initiative.businessUserIds,
-              itPicId: initiative.itPicId,
-              itPicIds: initiative.itPicIds,
-              itManagerIds: initiative.itManagerIds
-            };
-            
-            await sendCRCreationEmail(crData, userLookups, documents);
-            flag.sent = true;
+    const createdInitiative = data.initiatives.find((i) => i.id === id);
+    const emailEligible =
+      createdInitiative && initiativeTriggersCrCreationEmail(data, createdInitiative);
+
+    if (emailEligible) {
+      console.log(`[CR CREATION] New CR created (SAP email eligible): ${name} (ID: ${id})`);
+      const emailFlag = `cr_email_pending_${id}`;
+      global[emailFlag] = {
+        initiativeId: id,
+        createdAt: new Date(),
+        sent: false,
+      };
+
+      setTimeout(async () => {
+        try {
+          const flag = global[emailFlag];
+          if (flag && !flag.sent) {
+            console.log(
+              `[CR CREATION] No documents uploaded within 10 minutes, sending email without documents...`
+            );
+            const currentData = await store.read();
+            const initiative = currentData.initiatives.find((i) => i.id === id);
+            if (
+              initiative &&
+              initiative.type === 'CR' &&
+              initiativeTriggersCrCreationEmail(currentData, initiative)
+            ) {
+              const userLookups = currentData.users.map((u) => ({
+                id: u.id,
+                name: u.name,
+                email: u.email || null,
+              }));
+
+              const documents = (currentData.documents || []).filter((d) => d.initiativeId === id);
+
+              const crData = {
+                name: initiative.name,
+                description: initiative.description,
+                businessImpact: initiative.businessImpact,
+                priority: initiative.priority,
+                businessOwnerId: initiative.businessOwnerId,
+                businessUserIds: initiative.businessUserIds,
+                itPicId: initiative.itPicId,
+                itPicIds: initiative.itPicIds,
+                itManagerIds: initiative.itManagerIds,
+              };
+
+              await sendCRCreationEmail(crData, userLookups, documents);
+              flag.sent = true;
+            }
+            delete global[emailFlag];
           }
-          delete global[emailFlag];
+        } catch (error) {
+          console.error('[EMAIL ERROR] Error sending delayed CR creation email:', error);
         }
-      } catch (error) {
-        console.error('[EMAIL ERROR] Error sending delayed CR creation email:', error);
-      }
-    }, 10 * 60 * 1000); // 10 minutes
+      }, 10 * 60 * 1000); // 10 minutes
+    } else {
+      console.log(`[CR CREATION] New CR created (no SAP FICO / SAP NON FICO email): ${name} (ID: ${id})`);
+    }
   }
   
   res.status(201).json({ id });
@@ -344,7 +441,7 @@ router.put('/:id', async (req, res) => {
   const initiative = data.initiatives[idx];
   const changes = [];
   const updatedAt = now();
-  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','status','milestone','startDate','endDate','planStartDate','planEndDate','remark','documentationLink'];
+  const allowed = ['name','ticket','description','businessImpact','priority','businessOwnerId','businessUserIds','departmentId','itPicId','itPicIds','itPmId','itManagerIds','systemImpactedIds','status','milestone','startDate','endDate','planStartDate','planEndDate','remark','documentationLink'];
   
   // Track changes and update fields
   for (const k of allowed) {
@@ -353,7 +450,7 @@ router.put('/:id', async (req, res) => {
       let newValue = req.body[k];
       
       // Convert arrays to comma-separated strings for storage
-      if ((k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds') && Array.isArray(newValue)) {
+      if ((k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds' || k === 'systemImpactedIds') && Array.isArray(newValue)) {
         newValue = newValue.length > 0 ? newValue.join(',') : null;
       }
       
@@ -364,7 +461,7 @@ router.put('/:id', async (req, res) => {
       
       // Normalize values for comparison (handle null, undefined, empty string)
       // For array fields (comma-separated strings), normalize by sorting and trimming
-      const isArrayField = k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds';
+      const isArrayField = k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds' || k === 'systemImpactedIds';
       
       let oldVal, newVal;
       if (isArrayField) {
@@ -468,8 +565,7 @@ router.delete('/:id', async (req, res) => {
   data.initiatives = data.initiatives.filter(x => x.id !== req.params.id);
   data.changeRequests = data.changeRequests.filter(x => x.initiativeId !== req.params.id);
   await store.write(data);
-  if (data.initiatives.length === before) return res.status(404).json({ error: 'Not found' });
-  res.json({ ok: true });
+  res.json({ ok: true, deleted: before - data.initiatives.length });
 });
 
 export default router;

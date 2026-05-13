@@ -145,6 +145,24 @@ async function getCurrentUser() {
     // Decode JWT to get user info (simple decode, not verification - backend verifies)
     const payload = JSON.parse(atob(token.split('.')[1]));
     currentUser = { id: payload.sub, email: payload.email, name: payload.name, isAdmin: payload.isAdmin };
+
+    // Enrich with profile fields (role/type/department) so menus don't depend on visiting Profile first.
+    // If this call fails, we still return the decoded token identity.
+    try {
+      const profile = await fetchJSON('/api/profile');
+      if (profile && typeof profile === 'object') {
+        currentUser = {
+          ...currentUser,
+          role: profile.role ?? currentUser.role,
+          type: profile.type ?? currentUser.type,
+          departmentId: profile.departmentId ?? currentUser.departmentId,
+          active: profile.active ?? currentUser.active,
+          emailActivated: profile.emailActivated ?? currentUser.emailActivated,
+        };
+      }
+    } catch (e) {
+      console.warn('Failed to enrich current user from profile:', e?.message || e);
+    }
     return currentUser;
   } catch {
     return null;
@@ -273,7 +291,17 @@ function getColumnVisibility(viewType = 'list') {
   const saved = localStorage.getItem(key);
   if (saved) {
     try {
-      return JSON.parse(saved);
+      const vis = JSON.parse(saved);
+      // CR list used to share class "col-date" for three columns; body cells use col-start-date / col-create-date / col-end-date.
+      if (viewType === 'crlist' && vis && Object.prototype.hasOwnProperty.call(vis, 'col-date')) {
+        const dv = vis['col-date'];
+        if (vis['col-start-date'] === undefined) vis['col-start-date'] = dv;
+        if (vis['col-create-date'] === undefined) vis['col-create-date'] = dv;
+        if (vis['col-end-date'] === undefined) vis['col-end-date'] = dv;
+        delete vis['col-date'];
+        localStorage.setItem(key, JSON.stringify(vis));
+      }
+      return vis;
     } catch {
       return null;
     }
@@ -285,6 +313,85 @@ function getColumnVisibility(viewType = 'list') {
 function saveColumnVisibility(viewType, visibility) {
   const key = `pm_column_visibility_${viewType}`;
   localStorage.setItem(key, JSON.stringify(visibility));
+}
+
+/** Column metadata for CR list (must match initiativeRow cell classes and order). */
+function crListColumnDefinitions() {
+  return [
+    { key: 'ticket', class: 'col-ticket', label: 'Ticket', sortable: true },
+    { key: 'name', class: 'col-name', label: 'CR Name', sortable: true },
+    { key: 'priority', class: 'col-priority', label: 'Priority', sortable: true },
+    { key: 'status', class: 'col-status', label: 'Status', sortable: true },
+    { key: 'milestone', class: 'col-milestone', label: 'Milestone', sortable: true },
+    { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
+    { key: 'systemImpactedIds', class: 'col-system-impacted', label: 'System Impacted', sortable: true },
+    { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
+    { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
+    { key: 'startDate', class: 'col-start-date', label: 'Actual Start Date', sortable: true },
+    { key: 'createdAt', class: 'col-create-date', label: 'Create Date', sortable: true },
+    { key: 'endDate', class: 'col-end-date', label: 'Actual End Date', sortable: true },
+    { key: 'planStartDate', class: 'col-plan-start-date', label: 'Plan Start Date', sortable: true },
+    { key: 'planEndDate', class: 'col-plan-end-date', label: 'Plan End Date', sortable: true },
+    { key: 'ageCreatedToStart', class: 'col-age-created-to-start', label: 'Age Created to Start', sortable: false },
+    { key: 'cycleTime', class: 'col-cycle-time', label: 'Cycle Time (Age Start to End)', sortable: false },
+    { key: 'description', class: 'col-description', label: 'Description', sortable: true },
+    { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
+    { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
+    { key: 'documentationLink', class: 'col-doc', label: 'CR Doc Link', sortable: true },
+    { key: 'actions', class: 'col-actions', label: 'Actions', sortable: false }
+  ];
+}
+
+window.showColumnSettings = (viewType) => {
+  const modalId = viewType === 'crlist' ? 'column-settings-modal-cr' : 'column-settings-modal';
+  const modal = document.getElementById(modalId);
+  if (modal) modal.classList.remove('hidden');
+};
+
+window.closeColumnSettings = () => {
+  document.getElementById('column-settings-modal')?.classList.add('hidden');
+  document.getElementById('column-settings-modal-cr')?.classList.add('hidden');
+};
+
+window.saveColumnSettings = (viewType) => {
+  const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+  const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
+  const visibility = {};
+  checkboxes.forEach((cb) => {
+    visibility[cb.dataset.col] = cb.checked;
+  });
+  visibility['col-actions'] = true;
+  saveColumnVisibility(viewType, visibility);
+  window.closeColumnSettings();
+  if (viewType === 'list') {
+    renderList();
+  } else if (viewType === 'crlist') {
+    renderCRList();
+  }
+};
+
+window.checkAllColumns = (viewType) => {
+  const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+  document.querySelectorAll(`${checkboxId} input[type="checkbox"]`).forEach((cb) => {
+    cb.checked = true;
+  });
+};
+
+window.uncheckAllColumns = (viewType) => {
+  const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
+  document.querySelectorAll(`${checkboxId} input[type="checkbox"]`).forEach((cb) => {
+    cb.checked = false;
+  });
+};
+
+if (typeof window !== 'undefined' && !window.__pmColumnModalBackdropBound) {
+  window.__pmColumnModalBackdropBound = true;
+  document.addEventListener('click', (e) => {
+    const id = e.target?.id;
+    if (id === 'column-settings-modal' || id === 'column-settings-modal-cr') {
+      window.closeColumnSettings();
+    }
+  });
 }
 
 // Column width management (persist per viewType)
@@ -339,6 +446,7 @@ function getDefaultColumns(viewType) {
       'col-department': true,
       'col-owner': true,
       'col-pic': true,
+      'col-system-impacted': true,
       'col-start-date': true,
       'col-create-date': true,
       'col-end-date': true,
@@ -362,6 +470,7 @@ function getDefaultColumns(viewType) {
     'col-department': true,
     'col-owner': true,
     'col-pic': true,
+    'col-system-impacted': false,
     'col-start-date': true,
     'col-create-date': true,
     'col-end-date': true,
@@ -377,8 +486,18 @@ function getDefaultColumns(viewType) {
   };
 }
 
+/** Merge saved column visibility with defaults so new columns get sane defaults. */
+function resolveColumnVisibility(viewType) {
+  const defaults = getDefaultColumns(viewType);
+  const saved = getColumnVisibility(viewType);
+  if (!saved) return { ...defaults };
+  return { ...defaults, ...saved };
+}
+
 function clearUser() {
   currentUser = null;
+  CURRENT_ACCESS = null;
+  LOOKUPS = { users: [], departments: [], dwsApplications: [] };
   setToken(null);
 }
 
@@ -648,10 +767,157 @@ function setupMentionAutocomplete(textareaId) {
   });
 }
 
+function setupMeetingNoteMentionInput(inputEl) {
+  if (!inputEl || inputEl.dataset.mentionBound === 'true') return;
+  inputEl.dataset.mentionBound = 'true';
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'meeting-note-mention-autocomplete hidden';
+  document.body.appendChild(dropdown);
+
+  let currentMention = null;
+  let filteredUsers = [];
+  let selectedIndex = -1;
+
+  const hideDropdown = () => {
+    dropdown.classList.add('hidden');
+    dropdown.style.display = 'none';
+    currentMention = null;
+    filteredUsers = [];
+    selectedIndex = -1;
+  };
+
+  const updateSelection = () => {
+    dropdown.querySelectorAll('.mention-item').forEach((item, idx) => {
+      item.classList.toggle('selected', idx === selectedIndex);
+    });
+  };
+
+  const positionDropdown = () => {
+    const rect = inputEl.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = `${rect.bottom + 4}px`;
+    dropdown.style.left = `${rect.left}px`;
+    dropdown.style.width = `${Math.min(420, Math.max(rect.width, 280))}px`;
+    dropdown.style.maxWidth = '92vw';
+    dropdown.style.zIndex = '10050';
+  };
+
+  const insertMention = (user) => {
+    if (!currentMention) return;
+    const mentionText = user.name || user.email || 'Unknown';
+    const before = inputEl.value.substring(0, currentMention.start);
+    const after = inputEl.value.substring(currentMention.end);
+    const isCommaSeparatedPeopleField = inputEl.name === 'participantsText' || inputEl.name === 'stakeholdersText';
+    if (isCommaSeparatedPeopleField) {
+      let normalizedBefore = before.replace(/\s+$/, '');
+      if (normalizedBefore && !normalizedBefore.endsWith(',')) normalizedBefore += ',';
+      if (normalizedBefore) normalizedBefore += ' ';
+      const normalizedAfter = after.replace(/^\s*,?\s*/, '');
+      inputEl.value = `${normalizedBefore}@${mentionText}, ${normalizedAfter}`;
+    } else {
+      inputEl.value = `${before}@${mentionText} ${after}`;
+    }
+    const newPos = inputEl.value.indexOf(`@${mentionText}`) + mentionText.length + 2;
+    inputEl.setSelectionRange(newPos, newPos);
+    inputEl.focus();
+    hideDropdown();
+  };
+
+  const renderDropdown = () => {
+    dropdown.innerHTML = filteredUsers.map((user, index) => `
+      <div class="mention-item ${index === selectedIndex ? 'selected' : ''}" data-index="${index}">
+        <strong>${escapeHtml(user.name || user.email || 'Unknown')}</strong>
+        <span class="muted">${escapeHtml(user.email || '')}</span>
+      </div>
+    `).join('');
+    dropdown.classList.remove('hidden');
+    dropdown.style.display = 'block';
+    positionDropdown();
+
+    dropdown.querySelectorAll('.mention-item').forEach((item, index) => {
+      item.addEventListener('click', () => insertMention(filteredUsers[index]));
+    });
+  };
+
+  inputEl.addEventListener('input', async () => {
+    const value = inputEl.value;
+    const cursorPos = inputEl.selectionStart;
+    const textBeforeCursor = value.substring(0, cursorPos);
+    const match = textBeforeCursor.match(/@([\w\s.-]*)$/);
+    if (!match) {
+      hideDropdown();
+      return;
+    }
+
+    if (!LOOKUPS.users || LOOKUPS.users.length === 0) {
+      await ensureLookups();
+    }
+
+    const query = (match[1] || '').toLowerCase().trim();
+    currentMention = {
+      start: cursorPos - query.length - 1,
+      end: cursorPos,
+      query,
+    };
+
+    let usersToFilter = (LOOKUPS.users || []).filter((u) => u.active !== false);
+    if (query) {
+      usersToFilter = usersToFilter.filter((u) => {
+        const name = (u.name || '').toLowerCase();
+        const nameNoSpaces = name.replace(/\s+/g, '');
+        const emailPrefix = (u.email || '').toLowerCase().split('@')[0];
+        return name.includes(query) || nameNoSpaces.includes(query) || emailPrefix.includes(query);
+      });
+    }
+    filteredUsers = usersToFilter.slice(0, 8);
+    if (filteredUsers.length === 0) {
+      hideDropdown();
+      return;
+    }
+    selectedIndex = -1;
+    renderDropdown();
+  });
+
+  inputEl.addEventListener('keydown', (e) => {
+    if (dropdown.classList.contains('hidden')) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = Math.min(selectedIndex + 1, filteredUsers.length - 1);
+      updateSelection();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = Math.max(selectedIndex - 1, -1);
+      updateSelection();
+    } else if (e.key === 'Enter' && selectedIndex >= 0) {
+      e.preventDefault();
+      insertMention(filteredUsers[selectedIndex]);
+    } else if (e.key === 'Escape') {
+      hideDropdown();
+    }
+  });
+
+  const outsideHandler = (e) => {
+    if (e.target === inputEl || dropdown.contains(e.target)) return;
+    hideDropdown();
+  };
+  document.addEventListener('click', outsideHandler);
+  window.addEventListener('resize', () => {
+    if (!dropdown.classList.contains('hidden')) positionDropdown();
+  });
+}
+
+function setupMeetingNoteMentionInputs(containerEl) {
+  if (!containerEl) return;
+  const mentionInputs = containerEl.querySelectorAll('.meeting-note-mention-input');
+  mentionInputs.forEach((inputEl) => setupMeetingNoteMentionInput(inputEl));
+}
+
 async function fetchJSON(url, options) {
   // Avoid cached 304 responses by adding a timestamp and disabling cache
   const cacheBuster = (url.includes('?') ? '&' : '?') + '_ts=' + Date.now();
   const token = getToken();
+  const timeoutMs = (options && typeof options.timeoutMs === 'number') ? options.timeoutMs : 15000;
   
   // Merge headers properly - ensure Authorization is always included if token exists
   const defaultHeaders = {
@@ -673,23 +939,57 @@ async function fetchJSON(url, options) {
   }
   
   // Merge options, but ensure headers are properly set
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(0, timeoutMs));
   const fetchOptions = {
     ...(options || {}),
     cache: 'no-store',
-    headers
+    headers,
+    signal: options?.signal || controller.signal,
   };
   
-  const res = await fetch(url + cacheBuster, fetchOptions);
+  let res;
+  try {
+    res = await fetch(url + cacheBuster, fetchOptions);
+  } catch (e) {
+    if (e?.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeoutMs}ms`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
+    const body = await res.text().catch(() => '');
+    let parsedError = null;
+    try {
+      parsedError = body ? JSON.parse(body) : null;
+    } catch {
+      parsedError = null;
+    }
+    if (res.status === 401) {
       // Unauthorized - clear token and redirect to login
       clearUser();
       location.hash = '#auth';
       throw new Error('Authentication required');
     }
+    if (res.status === 403) {
+      const auth403Patterns = [
+        'Authentication required',
+        'Invalid or expired token',
+        'Email not activated',
+        'User not found or inactive',
+      ];
+      const isAuth403 = auth403Patterns.some((pattern) => body.includes(pattern));
+      if (isAuth403) {
+        clearUser();
+        location.hash = '#auth';
+        throw new Error('Authentication required');
+      }
+      throw new Error(parsedError?.error || `Request forbidden 403: ${body || res.statusText}`);
+    }
     // Surface status for easier debugging
-    const body = await res.text().catch(() => '');
-    throw new Error(`Request failed ${res.status}: ${body || res.statusText}`);
+    throw new Error(parsedError?.error || `Request failed ${res.status}: ${body || res.statusText}`);
   }
   const shouldSkipJson = options && options.skipJson;
   if (shouldSkipJson) {
@@ -845,7 +1145,7 @@ async function compressImage(file, maxSizeKB = 300) {
   });
 }
 
-let LOOKUPS = { users: [], departments: [] };
+let LOOKUPS = { users: [], departments: [], dwsApplications: [] };
 async function ensureLookups() {
   console.log('ensureLookups called, current LOOKUPS:', LOOKUPS);
   if (LOOKUPS.users.length && LOOKUPS.departments.length) return LOOKUPS;
@@ -858,6 +1158,198 @@ async function ensureLookups() {
 function nameById(arr, id) {
   const m = arr.find(x => x.id === id);
   return m ? m.name : id || '';
+}
+
+/** Comma-separated DWS system names for an initiative's `systemImpactedIds`. */
+function dwsSystemNamesFromInitiative(initiative) {
+  const apps = LOOKUPS.dwsApplications || [];
+  const byId = new Map(apps.map((a) => [a.id, String(a.systemName || '').trim()]));
+  const raw = initiative?.systemImpactedIds;
+  const ids = Array.isArray(raw)
+    ? raw.map((x) => String(x).trim()).filter(Boolean)
+    : String(raw || '')
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+  return ids.map((id) => byId.get(id)).filter(Boolean).join(', ');
+}
+
+/** Calendar days between task start and end (inclusive span); both dates required (YYYY-MM-DD). */
+function computeTaskAgingDays(startDateStr, endDateStr) {
+  if (!startDateStr || !endDateStr) return null;
+  const s = new Date(String(startDateStr).slice(0, 10));
+  const e = new Date(String(endDateStr).slice(0, 10));
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null;
+  const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24));
+  return days >= 0 ? days : null;
+}
+
+const CR_MILESTONE_UI_OPTIONS = [
+  'User Initiate',
+  'CR Created',
+  'CR Signed sec 2',
+  'CR Signed Sec 3',
+  'FSD',
+  'Development',
+  'Changes',
+  'Signed Changes',
+  'Development - Extended',
+  'SIT',
+  'UAT',
+  'Live',
+];
+
+function normalizeCrMilestoneForDisplay(initiative) {
+  // With "no extra column" design:
+  // - Project: milestone is canonical (Preparation -> Live)
+  // - CR: milestone stores the CR phase directly (User Initiate -> Live)
+  return initiative?.milestone || '';
+}
+
+/** Shared formatters for change-history (recent activity FAB + view page). */
+function formatActivityFieldLabelGlobal(field) {
+  if (!field) return '';
+  const mapping = {
+    businessOwnerId: 'Business Owner / Requestor',
+    businessUserIds: 'Business Users',
+    departmentId: 'Department',
+    itPicId: 'IT PIC',
+    itPicIds: 'IT PIC',
+    itPmId: 'IT PM',
+    itManagerIds: 'IT Manager',
+    startDate: 'Actual Start Date',
+    endDate: 'Actual End Date',
+    planStartDate: 'Plan Start Date',
+    planEndDate: 'Plan End Date',
+    documentationLink: 'Project Doc Link',
+  };
+  if (mapping[field]) return mapping[field];
+  return String(field).charAt(0).toUpperCase() + String(field).slice(1).replace(/([A-Z])/g, ' $1').trim();
+}
+
+function formatActivityValueGlobal(field, raw) {
+  if (raw === null || raw === undefined || raw === '') return '(empty)';
+  if (field === 'businessOwnerId' || field === 'itPicId' || field === 'itPmId' || field === 'changedBy') {
+    const name = nameById(LOOKUPS.users, raw);
+    return name || String(raw);
+  }
+  if (field === 'departmentId') {
+    return nameById(LOOKUPS.departments, raw) || String(raw);
+  }
+  if (field === 'businessUserIds' || field === 'itPicIds' || field === 'itManagerIds') {
+    let ids = [];
+    if (Array.isArray(raw)) {
+      ids = raw;
+    } else {
+      const str = String(raw).trim();
+      if (str.startsWith('[') && str.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(str);
+          if (Array.isArray(parsed)) ids = parsed;
+        } catch {
+          /* ignore */
+        }
+      }
+      if (ids.length === 0) {
+        const cleaned = str.replace(/[\[\]"]/g, '');
+        ids = cleaned.split(',').map((v) => v.trim()).filter(Boolean);
+      }
+    }
+    const names = ids.map((id) => nameById(LOOKUPS.users, id)).filter(Boolean);
+    return names.length > 0 ? names.join(', ') : ids.length > 0 ? ids.join(', ') : String(raw);
+  }
+  return String(raw);
+}
+
+function formatRecentActivityHtml(items) {
+  if (!items || items.length === 0) {
+    return '<p class="muted" style="padding:16px;">No recent changes recorded yet.</p>';
+  }
+  return items
+    .map((h) => {
+      const ts = h.timestamp ? new Date(h.timestamp) : null;
+      const when =
+        ts && !isNaN(ts.getTime())
+          ? `${ts.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} ${ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+          : '';
+      const who = escapeHtml(formatActivityValueGlobal('changedBy', h.changedBy));
+      const title = escapeHtml(h.initiativeName || 'Unknown');
+      const ticket = h.initiativeTicket ? escapeHtml(String(h.initiativeTicket)) : '';
+      const link = h.initiativeId ? `#view/${escapeHtml(h.initiativeId)}` : '#';
+      const changes = (h.changes || [])
+        .map((c) => {
+          const fl = escapeHtml(formatActivityFieldLabelGlobal(c.field));
+          const ov = escapeHtml(formatActivityValueGlobal(c.field, c.oldValue));
+          const nv = escapeHtml(formatActivityValueGlobal(c.field, c.newValue));
+          return `<li><span class="muted">${fl}:</span> <span style="text-decoration:line-through;color:#b91c1c;">${ov}</span> → <span style="color:#047857;">${nv}</span></li>`;
+        })
+        .join('');
+      return `
+      <article class="recent-activity-item">
+        <div class="recent-activity-item-header">
+          <a href="${link}">${title}</a>${ticket ? ` <span class="muted">(${ticket})</span>` : ''}
+        </div>
+        <div class="recent-activity-item-meta muted">${escapeHtml(when)} · ${who}</div>
+        <ul class="recent-activity-changes">${changes || '<li class="muted">(no field details)</li>'}</ul>
+      </article>`;
+    })
+    .join('');
+}
+
+function recentActivityFabMarkup(initiativeType) {
+  const t = initiativeType === 'CR' ? 'CR' : 'Project';
+  return `
+    <div class="recent-activity-root" data-initiative-type="${t}">
+      <button type="button" class="recent-activity-fab" title="Last 20 recent changes" aria-expanded="false">📋</button>
+      <div class="recent-activity-backdrop hidden" aria-hidden="true"></div>
+      <aside class="recent-activity-panel hidden" role="dialog" aria-label="Recent activity">
+        <div class="recent-activity-panel-header">
+          <h3>Recent activity</h3>
+          <button type="button" class="recent-activity-close" aria-label="Close">×</button>
+        </div>
+        <div class="recent-activity-panel-body"></div>
+      </aside>
+    </div>`;
+}
+
+function wireRecentActivityFab() {
+  const root = document.querySelector('.recent-activity-root');
+  if (!root) return;
+  const initiativeType = root.dataset.initiativeType || 'Project';
+  const btn = root.querySelector('.recent-activity-fab');
+  const panel = root.querySelector('.recent-activity-panel');
+  const backdrop = root.querySelector('.recent-activity-backdrop');
+  const closeBtn = root.querySelector('.recent-activity-close');
+  const bodyEl = root.querySelector('.recent-activity-panel-body');
+  if (!btn || !panel || !backdrop || !closeBtn || !bodyEl) return;
+
+  const close = () => {
+    panel.classList.add('hidden');
+    backdrop.classList.add('hidden');
+    btn.setAttribute('aria-expanded', 'false');
+  };
+
+  const open = async () => {
+    panel.classList.remove('hidden');
+    backdrop.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+    bodyEl.innerHTML = '<div class="muted" style="padding:16px;">Loading…</div>';
+    try {
+      const items = await fetchJSON(
+        `/api/initiatives/recent-activity?type=${encodeURIComponent(initiativeType)}&limit=20`
+      );
+      bodyEl.innerHTML = formatRecentActivityHtml(items);
+    } catch (e) {
+      bodyEl.innerHTML = `<div class="error" style="padding:16px;">Failed to load: ${escapeHtml(e.message || String(e))}</div>`;
+    }
+  };
+
+  btn.onclick = () => {
+    if (panel.classList.contains('hidden')) open();
+    else close();
+  };
+  closeBtn.onclick = close;
+  backdrop.onclick = close;
 }
 
 function initiativeRow(i, crData = null, colVisibility = null) {
@@ -983,8 +1475,9 @@ function initiativeRow(i, crData = null, colVisibility = null) {
     <td class="col-name" style="display: ${colVisibility['col-name'] !== false ? 'table-cell' : 'none'}"><strong><a href="#view/${i.id}">${i.name}</a></strong></td>
     <td class="col-priority" style="display: ${colVisibility['col-priority'] !== false ? 'table-cell' : 'none'}"><span class="priority-badge priority-${priorityClass}">${i.priority}</span></td>
     <td class="col-status" style="display: ${colVisibility['col-status'] !== false ? 'table-cell' : 'none'}"><span class="status-badge status-${statusClass}">${i.status}</span></td>
-    <td class="col-milestone" style="display: ${colVisibility['col-milestone'] !== false ? 'table-cell' : 'none'}">${i.milestone}</td>
+    <td class="col-milestone" style="display: ${colVisibility['col-milestone'] !== false ? 'table-cell' : 'none'}">${escapeHtml(normalizeCrMilestoneForDisplay(i))}</td>
     <td class="col-department" style="display: ${colVisibility['col-department'] !== false ? 'table-cell' : 'none'}">${dep}</td>
+    <td class="col-system-impacted" style="display: ${colVisibility['col-system-impacted'] !== false ? 'table-cell' : 'none'}" title="${escapeHtml(dwsSystemNamesFromInitiative(i))}">${escapeHtml(dwsSystemNamesFromInitiative(i))}</td>
     <td class="col-owner" style="display: ${colVisibility['col-owner'] !== false ? 'table-cell' : 'none'}">${bo}</td>
     <td class="col-pic" style="display: ${colVisibility['col-pic'] !== false ? 'table-cell' : 'none'}">${itpic}</td>
     <td class="col-start-date" style="display: ${colVisibility['col-start-date'] !== false ? 'table-cell' : 'none'}">${i.startDate?.slice(0,10) || ''}</td>
@@ -1042,30 +1535,170 @@ function initScrollableTables() {
   });
 }
 
+/** Sync a top horizontal scrollbar with `.table-wrapper` (used on Project + CR lists). */
+function initTableScrollPairs() {
+  document.querySelectorAll('.table-scroll-pair').forEach((pair) => {
+    const top = pair.querySelector('.table-scroll-top');
+    const inner = pair.querySelector('.table-scroll-top-inner');
+    const wrap = pair.querySelector('.table-wrapper');
+    if (!top || !inner || !wrap) return;
+
+    const syncInnerWidth = () => {
+      inner.style.width = `${Math.max(wrap.scrollWidth, wrap.clientWidth)}px`;
+    };
+
+    let syncing = false;
+    const onTopScroll = () => {
+      if (syncing) return;
+      syncing = true;
+      wrap.scrollLeft = top.scrollLeft;
+      syncing = false;
+    };
+    const onWrapScroll = () => {
+      if (syncing) return;
+      syncing = true;
+      top.scrollLeft = wrap.scrollLeft;
+      syncing = false;
+      const { scrollLeft, scrollWidth, clientWidth } = wrap;
+      wrap.classList.toggle('has-left-shadow', scrollLeft > 1);
+      wrap.classList.toggle('has-right-shadow', scrollWidth - clientWidth - scrollLeft > 1);
+    };
+
+    top.addEventListener('scroll', onTopScroll);
+    wrap.addEventListener('scroll', onWrapScroll);
+
+    syncInnerWidth();
+    const ro = new ResizeObserver(() => syncInnerWidth());
+    ro.observe(wrap);
+    const table = wrap.querySelector('table');
+    if (table) ro.observe(table);
+
+    onWrapScroll();
+  });
+}
+
+function escapeCsvField(val) {
+  const t = String(val ?? '').replace(/"/g, '""');
+  if (/[",\n\r]/.test(t)) return `"${t}"`;
+  return t;
+}
+
+function exportCellValueForCR(i, key) {
+  switch (key) {
+    case 'departmentId':
+      return nameById(LOOKUPS.departments, i.departmentId);
+    case 'businessOwnerId':
+      return nameById(LOOKUPS.users, i.businessOwnerId);
+    case 'itPicId':
+      return nameById(LOOKUPS.users, i.itPicId);
+    case 'systemImpactedIds':
+      return dwsSystemNamesFromInitiative(i);
+    case 'milestone':
+      // Export the same milestone label shown in the UI (CR uses phase label when present)
+      return normalizeCrMilestoneForDisplay(i);
+    case 'startDate':
+    case 'endDate':
+    case 'createdAt':
+    case 'planStartDate':
+    case 'planEndDate':
+      return (i[key] || '').toString().slice(0, 10);
+    case 'ageCreatedToStart': {
+      if (!i.createdAt || !i.startDate) return '';
+      const c = new Date(i.createdAt);
+      const s = new Date(i.startDate);
+      if (isNaN(c.getTime()) || isNaN(s.getTime())) return '';
+      const d = calculateWorkingDays(c, s);
+      return d !== null && d !== undefined ? String(d) : '';
+    }
+    case 'cycleTime': {
+      if (!i.startDate) return '';
+      const startDate = new Date(i.startDate);
+      if (isNaN(startDate.getTime())) return '';
+      if (i.endDate) {
+        const endDate = new Date(i.endDate);
+        if (isNaN(endDate.getTime())) return '';
+        const endInclusive = new Date(endDate);
+        endInclusive.setDate(endInclusive.getDate() + 1);
+        const d = calculateWorkingDays(startDate, endInclusive);
+        return d !== null && d !== undefined ? String(d) : '';
+      }
+      const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const d = calculateWorkingDays(startDate, tomorrow);
+      return d !== null && d !== undefined ? String(d) : '';
+    }
+    default:
+      return (i[key] ?? '').toString();
+  }
+}
+
+window.exportCRListToExcel = function exportCRListToExcel() {
+  const pack = window.__crListExport;
+  if (!pack || !Array.isArray(pack.rows) || pack.rows.length === 0) {
+    alert('No CR rows to export. Apply filters or refresh the list.');
+    return;
+  }
+  const colVisibility = pack.colVisibility || getDefaultColumns('crlist');
+  const columns = crListColumnDefinitions().filter(
+    (c) => c.key !== 'actions' && colVisibility[c.class] !== false
+  );
+  const header = columns.map((c) => escapeCsvField(c.label)).join(',');
+  const rows = pack.rows.map(({ initiative: i }) =>
+    columns.map((c) => escapeCsvField(exportCellValueForCR(i, c.key))).join(',')
+  );
+  const bom = '\uFEFF';
+  const blob = new Blob([bom + header + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `CR_List_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
 async function renderList() {
   console.log('renderList called');
   setActive('#list');
+  // Show immediate loading state so users see navigation worked even if data fetch fails later.
+  app.innerHTML = `
+    <div class="card">
+      <h2 style="margin-top:0;">Project List</h2>
+      <p class="muted">Loading projects...</p>
+    </div>
+  `;
+  let stage = 'init';
+  const setStage = (s) => {
+    stage = s;
+    const p = app.querySelector('p.muted');
+    if (p) p.textContent = `Loading projects... (${s})`;
+  };
   try {
-    await ensureLookups();
-    console.log('Lookups loaded successfully');
-  } catch (error) {
-    console.error('Error loading lookups:', error);
-    app.innerHTML = `<div class="error">Error loading lookups: ${error.message}</div>`;
-    return;
-  }
+    setStage('lookups');
+    try {
+      await ensureLookups();
+      console.log('Lookups loaded successfully');
+    } catch (error) {
+      console.error('Error loading lookups:', error);
+      app.innerHTML = `<div class="error">Error loading lookups: ${error.message}</div>`;
+      return;
+    }
 
-  // Apply access control for Project List
-  const access = await getUserAccess();
-  const user = currentUser;
-  if (!access || !user) {
-    app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You must be logged in to view Project List.</p></div>`;
-    return;
-  }
-  if (!access.canViewProjectList) {
-    app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You do not have access to Project List.</p></div>`;
-    return;
-  }
-  const urlParams = new URLSearchParams(location.search);
+    // Apply access control for Project List
+    setStage('access');
+    const access = await getUserAccess();
+    const user = currentUser;
+    if (!access || !user) {
+      app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You must be logged in to view Project List.</p></div>`;
+      return;
+    }
+    if (!access.canViewProjectList) {
+      app.innerHTML = `<div class="card"><h2>Access Denied</h2><p class="error">You do not have access to Project List.</p></div>`;
+      return;
+    }
+    const urlParams = new URLSearchParams(location.search);
   // Use project-specific search key to keep Project and CR searches separate
   const q = urlParams.get('project_q') || '';
   // Parse multi-value filters (comma-separated)
@@ -1093,6 +1726,7 @@ async function renderList() {
     itPicId: parseFilter('project_itPicId'),
     itPmId: parseFilter('project_itPmId'),
     itManagerId: parseFilter('project_itManagerId'),
+    systemImpactedId: parseFilter('project_systemImpactedId'),
     createdAt: parseDateFilter('project_createdAt'),
     startDate: parseDateFilter('project_startDate'),
     endDate: parseDateFilter('project_endDate')
@@ -1109,16 +1743,19 @@ async function renderList() {
   if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
   if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
   if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
+  if (filter.systemImpactedId.length) apiQs.set('systemImpactedId', filter.systemImpactedId.join(','));
   
-  console.log('Fetching data from API...');
-  let data;
-  try {
-    data = await fetchJSON('/api/initiatives?' + apiQs.toString());
-  } catch (e) {
-    console.error('Failed to fetch initiatives:', e);
-    app.innerHTML = `<div class="error">Failed to load initiatives: ${e.message}</div>`;
-    return;
-  }
+    console.log('Fetching data from API...');
+    let data;
+    try {
+      setStage('fetch projects');
+      data = await fetchJSON('/api/initiatives?' + apiQs.toString());
+    } catch (e) {
+      console.error('Failed to fetch initiatives:', e);
+      app.innerHTML = `<div class="error">Failed to load initiatives: ${e.message}</div>`;
+      return;
+    }
+    setStage('render');
 
   // For internal ICs, restrict Project List visibility to projects where they are part of the project team
   if (access.restrictProjectVisibilityToOwnTeamOnly && user) {
@@ -1149,35 +1786,25 @@ async function renderList() {
     data = data.filter(i => isUserInInitiativeTeam(i, userId));
   }
   
-  // Calculate milestone counts from filtered data
-  // Database stores: "Preparation", "Business Requirement", "Tech Assessment", "Planning", "Development", "Testing", "Live"
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
-  const milestoneCounts = {};
-  // Display names for the graph (same as database values)
-  const milestoneDisplayNames = {
-    'Preparation': 'Preparation',
-    'Business Requirement': 'Business Requirement',
-    'Tech Assessment': 'Tech Assessment',
-    'Planning': 'Planning',
-    'Development': 'Development',
-    'Testing': 'Testing',
-    'Live': 'Live'
-  };
-  // Milestone colors mapping
+  // Project List milestone distribution (canonical milestones only)
+  // Correct order: Preparation -> Business Requirement -> Tech Assessment -> Planning -> Development -> Testing -> Live
+  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live']; // used for filtering
+  const uiMilestones = milestones;
+  const milestoneCounts = Object.fromEntries(milestones.map((m) => [m, 0]));
+  const milestoneDisplayNames = Object.fromEntries(milestones.map((m) => [m, m]));
   const milestoneColors = {
     'Preparation': '#8b5cf6', // Purple
-    'Business Requirement': '#3b82f6', // Blue
+    'Business Requirement': '#0ea5e9', // Sky
     'Tech Assessment': '#06b6d4', // Cyan
-    'Planning': '#10b981', // Green
+    'Planning': '#6366f1', // Indigo
     'Development': '#f59e0b', // Amber
     'Testing': '#ef4444', // Red
-    'Live': '#22c55e' // Green
+    'Live': '#22c55e', // Green
   };
-  milestones.forEach(m => milestoneCounts[m] = 0);
+
   data.forEach(i => {
-    if (i.milestone && milestoneCounts.hasOwnProperty(i.milestone)) {
-      milestoneCounts[i.milestone]++;
-    }
+    const m = i?.milestone;
+    if (m && milestoneCounts[m] !== undefined) milestoneCounts[m] += 1;
   });
   // Apply client-side filtering for date filters
   if (filter.createdAt) {
@@ -1274,7 +1901,10 @@ async function renderList() {
     };
     data = data.slice().sort((a,b) => {
       let va, vb;
-      if (key.endsWith('Id')) {
+      if (key === 'systemImpactedIds') {
+        va = dwsSystemNamesFromInitiative(a).toLowerCase();
+        vb = dwsSystemNamesFromInitiative(b).toLowerCase();
+      } else if (key.endsWith('Id')) {
         va = nameFor(key, a[key]);
         vb = nameFor(key, b[key]);
       } else if (key === 'businessImpact' || key === 'remark' || key === 'documentationLink') {
@@ -1289,7 +1919,7 @@ async function renderList() {
   }
   
   // Get column visibility preferences
-  const colVisibility = getColumnVisibility('list') || getDefaultColumns('list');
+  const colVisibility = resolveColumnVisibility('list');
   
   // Column definitions
   const columns = [
@@ -1301,6 +1931,7 @@ async function renderList() {
     { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
     { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
     { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
+    { key: 'systemImpactedIds', class: 'col-system-impacted', label: 'System Impacted', sortable: true },
     { key: 'startDate', class: 'col-start-date', label: 'Actual Start Date', sortable: true },
     { key: 'createdAt', class: 'col-create-date', label: 'Create Date', sortable: true },
     { key: 'endDate', class: 'col-end-date', label: 'Actual End Date', sortable: true },
@@ -1389,9 +2020,9 @@ async function renderList() {
     <div class="milestone-graph">
       <h3>Milestone Distribution</h3>
       <div class="milestone-flow">
-        ${milestones.map((m, index) => {
+        ${uiMilestones.map((m, index) => {
           const count = milestoneCounts[m] || 0;
-          const isLast = index === milestones.length - 1;
+          const isLast = index === uiMilestones.length - 1;
           const displayName = milestoneDisplayNames[m] || m;
           const color = milestoneColors[m] || 'var(--brand)';
           return `
@@ -1503,6 +2134,19 @@ async function renderList() {
               `).join('')}
             </div>
           </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fSystemImpacted">
+              System Impacted ${filter.systemImpactedId.length > 0 ? `(${filter.systemImpactedId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fSystemImpacted">
+              ${(LOOKUPS.dwsApplications || []).map(a => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${a.id}" ${filter.systemImpactedId.includes(a.id) ? 'checked' : ''}>
+                  ${a.systemName}
+                </label>
+              `).join('')}
+            </div>
+          </div>
         </div>
         <div class="date-filters-group" id="date-filters">
           <div class="date-filter-wrapper">
@@ -1558,20 +2202,23 @@ async function renderList() {
         </div>
       </div>
     </div>
-    <div class="table-wrapper">
-      <table id="initiatives-table">
-        <thead>
-          <tr>
-            ${columns.map(col => {
-              const visible = colVisibility[col.class] !== false;
-              const sortClass = col.sortable ? 'sortable' : '';
-              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-            }).join('')}
-          </tr>
-        </thead>
-        <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
-      </table>
+    <div class="table-scroll-pair">
+      <div class="table-scroll-top" aria-hidden="true"><div class="table-scroll-top-inner"></div></div>
+      <div class="table-wrapper">
+        <table id="initiatives-table">
+          <thead>
+            <tr>
+              ${columns.map(col => {
+                const visible = colVisibility[col.class] !== false;
+                const sortClass = col.sortable ? 'sortable' : '';
+                const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+                return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+              }).join('')}
+            </tr>
+          </thead>
+          <tbody>${data.map(i => initiativeRow(i, null, colVisibility)).join('')}</tbody>
+        </table>
+      </div>
     </div>
     <div id="column-settings-modal" class="modal hidden">
       <div class="modal-content column-settings-modal">
@@ -1595,11 +2242,14 @@ async function renderList() {
         </div>
       </div>
     </div>
+    ${recentActivityFabMarkup('Project')}
   `;
 
   // Initialize horizontal scroll affordance for the main initiatives table.
   initScrollableTables();
-  
+  initTableScrollPairs();
+  wireRecentActivityFab();
+
   // Multi-select dropdown handlers (for checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
@@ -1678,7 +2328,8 @@ async function renderList() {
       'fMilestone': 'project_milestone',
       'fItPic': 'project_itPicId',
       'fItPm': 'project_itPmId',
-      'fItManager': 'project_itManagerId'
+      'fItManager': 'project_itManagerId',
+      'fSystemImpacted': 'project_systemImpactedId'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -1739,66 +2390,6 @@ async function renderList() {
       }
     });
   }
-  // Column settings functions
-  window.showColumnSettings = (viewType) => {
-    const modalId = viewType === 'crlist' ? 'column-settings-modal-cr' : 'column-settings-modal';
-    const modal = document.getElementById(modalId);
-    if (modal) modal.classList.remove('hidden');
-  };
-  
-  window.saveColumnSettings = (viewType) => {
-    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
-    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
-    const visibility = {};
-    checkboxes.forEach(cb => {
-      visibility[cb.dataset.col] = cb.checked;
-    });
-    // Always keep actions visible
-    visibility['col-actions'] = true;
-    saveColumnVisibility(viewType, visibility);
-    closeColumnSettings();
-    if (viewType === 'list') {
-      renderList();
-    } else if (viewType === 'crlist') {
-      renderCRList();
-    }
-  };
-  
-  window.closeColumnSettings = () => {
-    const modal = document.getElementById('column-settings-modal');
-    const modalCr = document.getElementById('column-settings-modal-cr');
-    if (modal) modal.classList.add('hidden');
-    if (modalCr) modalCr.classList.add('hidden');
-  };
-  
-  window.checkAllColumns = (viewType) => {
-    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
-    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
-    checkboxes.forEach(cb => {
-      cb.checked = true;
-    });
-  };
-  
-  window.uncheckAllColumns = (viewType) => {
-    const checkboxId = viewType === 'crlist' ? '#column-checkboxes-cr' : '#column-checkboxes';
-    const checkboxes = document.querySelectorAll(`${checkboxId} input[type="checkbox"]`);
-    checkboxes.forEach(cb => {
-      cb.checked = false;
-    });
-  };
-  
-  // Close modal when clicking backdrop
-  setTimeout(() => {
-    const modals = document.querySelectorAll('.modal');
-    modals.forEach(modal => {
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-          closeColumnSettings();
-        }
-      });
-    });
-  }, 100);
-  
   // Add resize handles to ALL columns (not just sortable) - Project List
   document.querySelectorAll('thead th').forEach(th => {
     // Skip actions column
@@ -1897,8 +2488,22 @@ async function renderList() {
   document.querySelectorAll('button.delete').forEach(btn => {
     btn.onclick = async () => {
       if (!confirm('Delete this initiative?')) return;
-      await fetch(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
-      renderList();
+      try {
+        const result = await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        if (result?.trashId) {
+          const undo = confirm('Initiative deleted. Undo?');
+          if (undo) {
+            await fetchJSON(`/api/initiatives/restore/${result.trashId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({}),
+            });
+          }
+        }
+        renderList();
+      } catch (e) {
+        alert('Failed to delete initiative: ' + (e.message || String(e)));
+      }
     };
   });
   document.querySelectorAll('button.view').forEach(btn => {
@@ -1911,18 +2516,22 @@ async function renderList() {
   // Apply persisted column widths for Project List table
   applyColumnWidths('list', '#initiatives-table');
 
-  // Expand/collapse handler for Description/Remark cells (event delegation)
-  const initiativesTable = document.getElementById('initiatives-table');
-  if (initiativesTable) {
-    initiativesTable.addEventListener('click', (e) => {
-      const btn = e.target.closest?.('button.cell-toggle');
-      if (!btn) return;
-      e.preventDefault();
-      const td = btn.closest('td.cell-expandable');
-      if (!td) return;
-      const expanded = td.classList.toggle('expanded');
-      btn.textContent = expanded ? 'Less' : 'More';
-    });
+    // Expand/collapse handler for Description/Remark cells (event delegation)
+    const initiativesTable = document.getElementById('initiatives-table');
+    if (initiativesTable) {
+      initiativesTable.addEventListener('click', (e) => {
+        const btn = e.target.closest?.('button.cell-toggle');
+        if (!btn) return;
+        e.preventDefault();
+        const td = btn.closest('td.cell-expandable');
+        if (!td) return;
+        const expanded = td.classList.toggle('expanded');
+        btn.textContent = expanded ? 'Less' : 'More';
+      });
+    }
+  } catch (e) {
+    console.error('renderList failed at stage:', stage, e);
+    app.innerHTML = `<div class="card"><h2>Project List Error</h2><p class="error">Stage: ${escapeHtml(stage)}<br/>${escapeHtml(e?.message || String(e))}</p></div>`;
   }
 }
 
@@ -2160,9 +2769,12 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
   const itPicUsers = filterUsersByRole(LOOKUPS.users, 'itPic');
   const itManagerUsers = filterUsersByRole(LOOKUPS.users, 'itManager');
   const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
+  const dwsAppOptions = (LOOKUPS.dwsApplications || []).map(a => ({ id: a.id, name: a.systemName }));
   
   // Determine selected type: from initiative if exists, otherwise from defaultType
   const selectedType = initiative ? initiative.type : defaultType;
+  const currentMilestone = initiative?.milestone || '';
+  const selectedCrUiMilestone = selectedType === 'CR' ? currentMilestone : currentMilestone;
   
   const fields = [
     formRow('Type', `<select name="type" id="typeSelect" required><option value="Project" ${selectedType === 'Project' ? 'selected' : ''}>Project</option><option value="CR" ${selectedType === 'CR' ? 'selected' : ''}>CR</option></select>`),
@@ -2176,8 +2788,15 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
     formRow('IT PIC', createMultiSelect('itPicIds', itPicUsers, initiative?.itPicIds || (initiative?.itPicId ? [initiative.itPicId] : []))),
     formRow('IT PM', createSearchableSelect('itPmId', itPmUsers, initiative?.itPmId || '', 'Select...', true)),
     formRow('IT Manager', createMultiSelect('itManagerIds', itManagerUsers, initiative?.itManagerIds || [])),
+    ...(selectedType === 'CR'
+      ? [formRow('System Impacted', createMultiSelect('systemImpactedIds', dwsAppOptions, initiative?.systemImpactedIds || []))]
+      : []),
     formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => option(s, s, initiative?.status === s)).join('')}</select>`),
-    formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, initiative?.milestone === m)).join('')}</select>`),
+    formRow('Milestone', `<select name="milestone">${
+      selectedType === 'CR'
+        ? CR_MILESTONE_UI_OPTIONS.map(m => option(m, m, selectedCrUiMilestone === m)).join('')
+        : ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, currentMilestone === m)).join('')
+    }</select>`),
     formRow('Actual Start Date', `<input type="date" name="startDate" value="${initiative?.startDate?.slice(0,10) || ''}" />`),
     formRow('Actual End Date', `<input type="date" name="endDate" value="${initiative?.endDate?.slice(0,10) || ''}" />`),
     formRow('Plan Start Date', `<input type="date" name="planStartDate" value="${initiative?.planStartDate?.slice(0,10) || ''}" required />`),
@@ -2437,6 +3056,7 @@ async function renderNew(defaultType = 'Project') {
     const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
     const itPicIds = obj.itPicIds ? obj.itPicIds.split(',').filter(Boolean) : [];
     const itManagerIds = obj.itManagerIds ? obj.itManagerIds.split(',').filter(Boolean) : [];
+    const systemImpactedIds = obj.systemImpactedIds ? obj.systemImpactedIds.split(',').filter(Boolean) : [];
     
     const payload = {
       type: obj.type,
@@ -2450,7 +3070,9 @@ async function renderNew(defaultType = 'Project') {
       itPicIds: itPicIds.length > 0 ? itPicIds : null,
       itPmId: obj.itPmId || null,
       itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
+      systemImpactedIds: systemImpactedIds.length > 0 ? systemImpactedIds : null,
       status: obj.status,
+      // No extra column: for CR we store the CR phase directly in `milestone`.
       milestone: obj.milestone,
       startDate: obj.startDate,
       endDate: obj.endDate || null,
@@ -2531,30 +3153,48 @@ async function renderView(id) {
   const itPmName = i.itPmId ? nameById(LOOKUPS.users, i.itPmId) : 'None';
   const itManagerNames = (i.itManagerIds || []).map(id => nameById(LOOKUPS.users, id)).filter(Boolean).join(', ') || 'None';
   
-  // Fetch comments and tasks
+  // Fetch comments, tasks, and meeting notes
   let comments = [];
   let tasks = [];
+  let meetingNotes = [];
   try {
-    comments = await fetchJSON(`/api/comments/initiative/${id}`);
-    tasks = await fetchJSON(`/api/tasks/initiative/${id}`);
+    const [commentRows, taskRows, meetingRows] = await Promise.all([
+      fetchJSON(`/api/comments/initiative/${id}`),
+      fetchJSON(`/api/tasks/initiative/${id}`),
+      fetchJSON(`/api/meeting-notes/initiative/${id}`),
+    ]);
+    comments = commentRows;
+    tasks = taskRows;
+    meetingNotes = meetingRows;
   } catch (e) {
-    console.error('Error fetching comments/tasks:', e);
+    console.error('Error fetching comments/tasks/meeting notes:', e);
   }
   
   // Sort tasks by Milestone and Start Date (Ascending)
-  // Milestone order: None -> Business Requirement -> Tech Assessment -> Planning -> Development -> Testing -> Live Preparation
-  const milestoneOrder = {
+  const baseMilestoneOrder = {
     '': 0,
     'none': 0,
-    'business requirement': 1,
-    'tech assessment': 2,
-    'planning': 3,
-    'development': 4,
-    'testing': 5,
-    'live preparation': 6,
-    'live': 6,
-    'preparation': 0
+    preparation: 1,
+    'business requirement': 2,
+    'tech assessment': 3,
+    planning: 4,
+    development: 5,
+    testing: 6,
+    'live preparation': 7,
+    live: 8,
   };
+  const crPhaseMilestoneOrder = {
+    'user initiate': 10,
+    'cr created': 20,
+    'cr signed sec 2 and 3': 30,
+    fsd: 40,
+    development: 50,
+    sit: 60,
+    uat: 70,
+    live: 80,
+  };
+  const milestoneOrder =
+    i.type === 'CR' ? { ...baseMilestoneOrder, ...crPhaseMilestoneOrder } : baseMilestoneOrder;
   
   tasks.sort((a, b) => {
     // First sort by milestone
@@ -2756,8 +3396,9 @@ async function renderView(id) {
         <div><div class="muted">Priority</div><div><span class="priority-badge priority-${i.priority}">${i.priority}</span></div></div>
         <div><div class="muted">Status</div><div><span class="status-badge status-${i.status?.replace(/\s+/g, '-')}">${i.status}</span></div></div>
         <div><div class="muted">% Completion</div><div><strong>${completionPercent}%</strong></div></div>
-        <div><div class="muted">Milestone</div><div>${i.milestone}</div></div>
+        <div><div class="muted">Milestone</div><div>${escapeHtml(normalizeCrMilestoneForDisplay(i))}</div></div>
         <div><div class="muted">Department</div><div>${depName}</div></div>
+        ${i.type === 'CR' ? `<div><div class="muted">System Impacted</div><div>${escapeHtml(dwsSystemNamesFromInitiative(i) || '')}</div></div>` : ''}
         <div><div class="muted">Actual Start Date</div><div>${i.startDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">Actual End Date</div><div>${i.endDate?.slice(0,10) || ''}</div></div>
         <div><div class="muted">Plan Start Date</div><div>${i.planStartDate?.slice(0,10) || ''}</div></div>
@@ -2827,6 +3468,9 @@ async function renderView(id) {
         <button id="tab-comments" class="tab-btn active" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid var(--brand); margin-bottom: -2px; color: var(--brand);">
           💬 Comments <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${comments.length}</span>
         </button>
+        <button id="tab-meeting-notes" class="tab-btn" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--muted);">
+          🗒️ Meeting Notes <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${meetingNotes.length}</span>
+        </button>
         <button id="tab-activity" class="tab-btn" style="padding: 12px 24px; border: none; background: none; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--muted);">
           📋 Activity Log <span style="background: var(--gray-200); padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 6px;">${i.changeHistory?.length || 0}</span>
         </button>
@@ -2869,6 +3513,11 @@ async function renderView(id) {
           </div>
           <button id="add-comment-btn" class="primary">Add Comment</button>
         </div>
+      </div>
+
+      <!-- Meeting Notes Tab Content -->
+      <div id="tab-content-meeting-notes" class="tab-content" style="display: none;">
+        ${renderMeetingNotesTabContent(meetingNotes)}
       </div>
       
       <!-- Activity Log Tab Content -->
@@ -2949,16 +3598,19 @@ async function renderView(id) {
               <th>Status</th>
               <th>Start Date</th>
               <th>End Date</th>
+              <th>Aging</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            ${tasks.length === 0 ? '<tr><td colspan="7" class="muted" style="text-align: center; padding: 20px;">No tasks yet</td></tr>' : ''}
+            ${tasks.length === 0 ? '<tr><td colspan="8" class="muted" style="text-align: center; padding: 20px;">No tasks yet</td></tr>' : ''}
             ${tasks.map(t => {
               const assignee = nameById(LOOKUPS.users, t.assigneeId) || 'Unassigned';
               const taskStatus = (t.status || 'not started').toLowerCase();
               const taskStatusLabels = { 'not started': 'Not Started', 'in progress': 'In Progress', 'at risk': 'At Risk', 'cancel': 'Cancelled', 'done': 'Done' };
               const taskStatusLabel = taskStatusLabels[taskStatus] || t.status || 'Not Started';
+              const agingDays = computeTaskAgingDays(t.startDate, t.endDate);
+              const agingCell = agingDays !== null ? `${agingDays} day${agingDays === 1 ? '' : 's'}` : '—';
               return `
                 <tr>
                   <td><strong>${t.name}</strong>${t.description ? `<br><small class="muted">${t.description}</small>` : ''}</td>
@@ -2967,6 +3619,7 @@ async function renderView(id) {
                   <td><span class="status-badge status-${taskStatus.replace(/\s+/g, '-')}">${taskStatusLabel}</span></td>
                   <td>${t.startDate ? t.startDate.slice(0,10) : '-'}</td>
                   <td>${t.endDate ? t.endDate.slice(0,10) : '-'}</td>
+                  <td>${agingCell}</td>
                   <td>
                     <button class="edit-task-btn" data-id="${t.id}" style="margin-right: 4px;">Edit</button>
                     <button class="delete-task-btn" data-id="${t.id}" style="color: var(--danger);">Delete</button>
@@ -3148,15 +3801,17 @@ async function renderView(id) {
   // Setup @mention autocomplete for comment textarea
   setupMentionAutocomplete('new-comment');
   
-  // Tab switching for Comments/Activity Log
+  // Tab switching for Comments/Meeting Notes/Activity Log
   const tabComments = document.getElementById('tab-comments');
+  const tabMeetingNotes = document.getElementById('tab-meeting-notes');
   const tabActivity = document.getElementById('tab-activity');
   const contentComments = document.getElementById('tab-content-comments');
+  const contentMeetingNotes = document.getElementById('tab-content-meeting-notes');
   const contentActivity = document.getElementById('tab-content-activity');
   
   const switchTab = (activeTab) => {
     // Update tab buttons
-    [tabComments, tabActivity].forEach(tab => {
+    [tabComments, tabMeetingNotes, tabActivity].forEach(tab => {
       tab.style.borderBottomColor = 'transparent';
       tab.style.color = 'var(--muted)';
       tab.style.fontWeight = '500';
@@ -3168,14 +3823,21 @@ async function renderView(id) {
     // Show/hide content
     if (activeTab === tabComments) {
       contentComments.style.display = 'block';
+      contentMeetingNotes.style.display = 'none';
+      contentActivity.style.display = 'none';
+    } else if (activeTab === tabMeetingNotes) {
+      contentComments.style.display = 'none';
+      contentMeetingNotes.style.display = 'block';
       contentActivity.style.display = 'none';
     } else {
       contentComments.style.display = 'none';
+      contentMeetingNotes.style.display = 'none';
       contentActivity.style.display = 'block';
     }
   };
   
   tabComments.onclick = () => switchTab(tabComments);
+  tabMeetingNotes.onclick = () => switchTab(tabMeetingNotes);
   tabActivity.onclick = () => switchTab(tabActivity);
   
   // Edit mode toggle button - replace view with edit form
@@ -3189,6 +3851,7 @@ async function renderView(id) {
     const itPmUsers = filterUsersByRole(LOOKUPS.users, 'itPm');
     
     const card = document.querySelector('.card');
+    const crUiSelectedMilestone = i.type === 'CR' ? (i.milestone || '') : (i.milestone || '');
     card.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
         <h2 style="margin: 0;">Edit Initiative</h2>
@@ -3199,13 +3862,23 @@ async function renderView(id) {
       </div>
       <form id="edit-form" class="form">
         ${formRow('Initiative Name', `<input name="name" value="${(i.name || '').replace(/"/g, '&quot;')}" required />`)}
-        ${formRow('Ticket', `<input name="ticket" value="${(i.ticket || '').replace(/"/g, '&quot;')}" readonly style="background: #f0f0f0;" />`)}
+        ${formRow(
+          'Ticket',
+          i.type === 'CR'
+            ? `<input name="ticket" value="${(i.ticket || '').replace(/"/g, '&quot;')}" placeholder="e.g. CR11052026002" />`
+            : `<input name="ticket" value="${(i.ticket || '').replace(/"/g, '&quot;')}" readonly style="background: #f0f0f0;" />`
+        )}
         ${formRow('Type', `<input name="type" value="${i.type}" readonly style="background: #f0f0f0;" />`)}
         ${formRow('Create Date', `<input type="date" value="${i.createdAt?.slice(0,10) || ''}" readonly style="background: #f0f0f0;" />`)}
         ${formRow('Priority', `<select name="priority">${['P0','P1','P2'].map(p => `<option value="${p}" ${i.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
           ${formRow('Status', `<select name="status">${['Not Started','On Hold','On Track','At Risk','Delayed','Live','Cancelled'].map(s => `<option value="${s}" ${i.status && i.status.toLowerCase() === s.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}</select>`)}
-        ${formRow('Milestone', `<select name="milestone">${['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
+        ${formRow('Milestone', `<select name="milestone">${
+          i.type === 'CR'
+            ? CR_MILESTONE_UI_OPTIONS.map(m => `<option value="${m}" ${crUiSelectedMilestone === m ? 'selected' : ''}>${m}</option>`).join('')
+            : ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')
+        }</select>`)}
         ${formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, i.departmentId || '', 'Select...'))}
+        ${i.type === 'CR' ? formRow('System Impacted', createMultiSelect('systemImpactedIds', (LOOKUPS.dwsApplications || []).map(a => ({ id: a.id, name: a.systemName })), i.systemImpactedIds || [])) : ''}
         ${formRow('Actual Start Date', `<input type="date" name="startDate" value="${i.startDate?.slice(0,10) || ''}" />`)}
         ${formRow('Actual End Date', `<input type="date" name="endDate" value="${i.endDate?.slice(0,10) || ''}" />`)}
         ${formRow('Plan Start Date', `<input type="date" name="planStartDate" value="${i.planStartDate?.slice(0,10) || ''}" required />`)}
@@ -3248,6 +3921,7 @@ async function renderView(id) {
       const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
       const itPicIds = obj.itPicIds ? obj.itPicIds.split(',').filter(Boolean) : [];
       const itManagerIds = obj.itManagerIds ? obj.itManagerIds.split(',').filter(Boolean) : [];
+      const systemImpactedIds = obj.systemImpactedIds ? obj.systemImpactedIds.split(',').filter(Boolean) : [];
       
       // Debug logging
       console.log('[Frontend] Edit form data:', {
@@ -3267,6 +3941,7 @@ async function renderView(id) {
         itPicIds: itPicIds.length > 0 ? itPicIds : null,
         itPmId: obj.itPmId || null,
         itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
+        systemImpactedIds: systemImpactedIds.length > 0 ? systemImpactedIds : null,
       status: obj.status,
       milestone: obj.milestone,
       startDate: obj.startDate,
@@ -3281,6 +3956,7 @@ async function renderView(id) {
       // CR dates removed - no longer used
       if (i.type === 'CR') {
         payload.cr = {};
+        payload.ticket = (obj.ticket || '').trim() || null;
       }
       
       try {
@@ -3357,6 +4033,68 @@ async function renderView(id) {
         renderView(id);
       } catch (e) {
         alert('Failed to delete comment: ' + e.message);
+      }
+    };
+  });
+
+  // Meeting notes actions
+  const openMeetingTabAndRefresh = () => {
+    renderView(id);
+    setTimeout(() => {
+      const noteTab = document.getElementById('tab-meeting-notes');
+      if (noteTab) noteTab.click();
+    }, 0);
+  };
+
+  const newMeetingBtn = document.getElementById('new-meeting-note-btn');
+  if (newMeetingBtn) {
+    newMeetingBtn.onclick = () => showMeetingNoteModal(id, null, openMeetingTabAndRefresh);
+  }
+
+  document.querySelectorAll('.meeting-note-view-btn').forEach((btn) => {
+    btn.onclick = () => showMeetingNoteModal(id, btn.dataset.id, openMeetingTabAndRefresh, true);
+  });
+  document.querySelectorAll('.meeting-note-edit-btn').forEach((btn) => {
+    btn.onclick = () => showMeetingNoteModal(id, btn.dataset.id, openMeetingTabAndRefresh, false);
+  });
+  document.querySelectorAll('.meeting-note-send-btn').forEach((btn) => {
+    btn.onclick = async () => {
+      const noteId = btn.dataset.id;
+      try {
+        const response = await fetchJSON(`/api/meeting-notes/${noteId}/send-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (response.ok === false) {
+          alert(response.error || 'Failed to send meeting notes email');
+          return;
+        }
+        alert('Meeting notes email sent successfully.');
+        openMeetingTabAndRefresh();
+      } catch (e) {
+        alert(`Failed to send email: ${e.message}`);
+      }
+    };
+  });
+  document.querySelectorAll('.meeting-note-duplicate-btn').forEach((btn) => {
+    btn.onclick = async () => {
+      try {
+        await fetchJSON(`/api/meeting-notes/${btn.dataset.id}/duplicate`, { method: 'POST' });
+        openMeetingTabAndRefresh();
+      } catch (e) {
+        alert(`Failed to duplicate meeting note: ${e.message}`);
+      }
+    };
+  });
+  document.querySelectorAll('.meeting-note-delete-btn').forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm('Remove this draft meeting note from the list?')) return;
+      try {
+        await fetchJSON(`/api/meeting-notes/${btn.dataset.id}`, { method: 'DELETE' });
+        openMeetingTabAndRefresh();
+      } catch (e) {
+        alert(`Failed to delete meeting note: ${e.message}`);
       }
     };
   });
@@ -3540,6 +4278,518 @@ function downloadTaskTemplate() {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+function getMeetingNoteStatusChip(status) {
+  const normalized = String(status || 'Draft').toLowerCase();
+  const palette = {
+    draft: { bg: '#e2e8f0', color: '#334155' },
+    published: { bg: '#d1fae5', color: '#065f46' },
+  };
+  const style = palette[normalized] || palette.draft;
+  const label = status || 'Draft';
+  return `<span style="display:inline-block;padding:4px 10px;border-radius:999px;background:${style.bg};color:${style.color};font-size:12px;font-weight:600;">${escapeHtml(label)}</span>`;
+}
+
+function renderMeetingNotesTabContent(meetingNotes = []) {
+  const rows = (meetingNotes || []).slice().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap;">
+      <div class="muted" style="font-size:13px;">Structured notes, email traceability, and version history.</div>
+      <button id="new-meeting-note-btn" class="primary">+ New Meeting Note</button>
+    </div>
+    <div class="table-wrapper">
+      <table style="width:100%;">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Meeting Date</th>
+            <th>Status</th>
+            <th>Version</th>
+            <th>Updated</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.length === 0 ? '<tr><td colspan="6" class="muted" style="text-align:center;padding:20px;">No meeting notes yet</td></tr>' : rows.map((note) => `
+            <tr>
+              <td><strong>${escapeHtml(note.title || 'Untitled')}</strong><br><span class="muted">${escapeHtml(note.meetingType || 'General')}</span></td>
+              <td>${note.meetingDate ? new Date(note.meetingDate).toLocaleString() : '-'}</td>
+              <td>${getMeetingNoteStatusChip(note.status)}</td>
+              <td>v${Number(note.version || 1)}</td>
+              <td>${note.updatedAt ? new Date(note.updatedAt).toLocaleString() : '-'}</td>
+              <td style="white-space:nowrap;">
+                <button class="meeting-note-view-btn" data-id="${note.id}" style="margin-right:4px;">View</button>
+                <button class="meeting-note-edit-btn" data-id="${note.id}" style="margin-right:4px;">Edit</button>
+                ${note.status === 'Published' ? `<button class="meeting-note-send-btn" data-id="${note.id}" style="margin-right:4px;">Send</button>` : ''}
+                <button class="meeting-note-duplicate-btn" data-id="${note.id}" style="margin-right:4px;">Duplicate</button>
+                ${note.status === 'Draft' ? `<button type="button" class="meeting-note-delete-btn" data-id="${note.id}">Delete</button>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/** Display token for meeting note participant field (prefer @Name when userId resolves). */
+function formatMeetingNoteParticipantToken(participant, users = []) {
+  if (!participant) return '';
+  const list = users || [];
+  if (participant.userId) {
+    const u = list.find((x) => x.id === participant.userId);
+    if (u) {
+      const label = (u.name || u.email || '').trim();
+      if (label) return `@${label}`;
+    }
+  }
+  if (participant.name && String(participant.name).trim()) return String(participant.name).trim();
+  if (participant.email && String(participant.email).trim()) return String(participant.email).trim();
+  if (participant.userId) return participant.userId;
+  return '';
+}
+
+function formatMeetingNoteOwnerInput(ownerId, ownerName, users = []) {
+  if (ownerId) {
+    const u = (users || []).find((x) => x.id === ownerId);
+    if (u) {
+      const label = (u.name || u.email || '').trim();
+      if (label) return `@${label}`;
+    }
+  }
+  const name = (ownerName || '').trim();
+  if (name) return name;
+  return ownerId || '';
+}
+
+async function showMeetingNoteModal(initiativeId, noteId = null, onSaved = null, readOnly = false) {
+  await ensureLookups();
+  await getCurrentUser();
+
+  let note = null;
+  if (noteId) {
+    try {
+      note = await fetchJSON(`/api/meeting-notes/${noteId}`);
+    } catch (e) {
+      alert(`Unable to load meeting note: ${e.message}`);
+      return;
+    }
+  }
+
+  const users = LOOKUPS.users || [];
+  const participantsText = (note?.participants || [])
+    .map((p) => formatMeetingNoteParticipantToken(p, users))
+    .filter(Boolean)
+    .join(', ');
+  const stakeholdersText = (note?.participants || [])
+    .filter((p) => p.role === 'Stakeholder')
+    .map((p) => formatMeetingNoteParticipantToken(p, users))
+    .filter(Boolean)
+    .join(', ');
+
+  const actionItems = (note?.actionItems || [])
+    .slice()
+    .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  const actionItemsRows = actionItems.length > 0 ? actionItems : [{ description: '', ownerId: '', dueDate: '', priority: '', status: 'Not Started' }];
+  const isPublishedEdit = !!(noteId && note?.status === 'Published');
+  const renderActionRow = (item, index) => {
+    const ownerDisplay = formatMeetingNoteOwnerInput(item.ownerId, item.ownerName, users);
+    return `
+    <tr class="meeting-note-action-row">
+      <td><input name="mn_action_description_${index}" ${readOnly ? 'disabled' : ''} value="${escapeHtml(item.description || '')}" placeholder="Action item" /></td>
+      <td><input class="meeting-note-mention-input" name="mn_action_owner_${index}" ${readOnly ? 'disabled' : ''} value="${escapeHtml(ownerDisplay)}" placeholder="Type @ to pick user or enter free text" /></td>
+      <td><input type="date" name="mn_action_due_${index}" ${readOnly ? 'disabled' : ''} value="${(item.dueDate || '').slice(0, 10)}" /></td>
+      <td>
+        <select name="mn_action_priority_${index}" ${readOnly ? 'disabled' : ''}>
+          <option value="">-</option>
+          ${['Low', 'Medium', 'High'].map((p) => `<option value="${p}" ${item.priority === p ? 'selected' : ''}>${p}</option>`).join('')}
+        </select>
+      </td>
+      <td>
+        <select name="mn_action_status_${index}" ${readOnly ? 'disabled' : ''}>
+          ${['Not Started', 'In Progress', 'Done', 'Blocked', 'Cancelled'].map((s) => `<option value="${s}" ${item.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td>${readOnly ? '' : '<button type="button" class="meeting-note-remove-action-btn">Remove</button>'}</td>
+    </tr>
+  `;
+  };
+
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content meeting-note-modal-content">
+      <div class="meeting-note-modal-header">
+        <div>
+          <h3 style="margin:0;">${note ? (readOnly ? 'View Meeting Note' : 'Edit Meeting Note') : 'New Meeting Note'}</h3>
+          <div class="muted" style="margin-top:4px;">Capture structured outcomes and send to participants.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${note ? getMeetingNoteStatusChip(note.status) : ''}
+          ${note ? `<span class="muted">Version v${note.version || 1}</span>` : ''}
+          <button type="button" id="close-meeting-note-modal">✕</button>
+        </div>
+      </div>
+      <form id="meeting-note-form" class="form meeting-note-form-grid">
+        <div class="meeting-note-section">
+          <h4>Meeting Metadata</h4>
+        ${formRow('Meeting Title', `<input name="title" ${readOnly ? 'disabled' : ''} required value="${escapeHtml(note?.title || '')}" />`)}
+        <div class="form-row-inline">
+          <div>${formRow('Meeting Type', `<input name="meetingType" ${readOnly ? 'disabled' : ''} required value="${escapeHtml(note?.meetingType || 'General')}" />`)}</div>
+          <div>${formRow('Meeting Date/Time', `<input type="datetime-local" name="meetingDate" ${readOnly ? 'disabled' : ''} required value="${note?.meetingDate ? new Date(note.meetingDate).toISOString().slice(0, 16) : ''}" />`)}</div>
+        </div>
+        ${formRow('Facilitator', createSearchableSelect('facilitatorId', LOOKUPS.users, note?.facilitatorId || currentUser?.id || '', 'Select...'))}
+        ${formRow('Note Taker', createSearchableSelect('noteTakerId', LOOKUPS.users, note?.noteTakerId || currentUser?.id || '', 'Select...'))}
+        </div>
+
+        <div class="meeting-note-section">
+          <h4>Participants</h4>
+        ${formRow('Participants (comma-separated, @ supported)', `<input class="meeting-note-mention-input" name="participantsText" ${readOnly ? 'disabled' : ''} placeholder="Type @ to pick users or enter free text names/emails" value="${escapeHtml(participantsText)}" />`)}
+        ${formRow('Stakeholders (comma-separated, @ supported)', `<input class="meeting-note-mention-input" name="stakeholdersText" ${readOnly ? 'disabled' : ''} placeholder="Type @ to pick users or enter free text names/emails" value="${escapeHtml(stakeholdersText)}" />`)}
+        </div>
+
+        <div class="meeting-note-section">
+          <h4>Structured Notes</h4>
+        ${formRow('Agenda', `<textarea name="agenda" ${readOnly ? 'disabled' : ''}>${escapeHtml(note?.agenda || '')}</textarea>`)}
+        ${formRow('Discussion', `<textarea name="discussion" ${readOnly ? 'disabled' : ''}>${escapeHtml(note?.discussion || '')}</textarea>`)}
+        ${formRow('Decisions', `<textarea name="decisions" ${readOnly ? 'disabled' : ''}>${escapeHtml(note?.decisions || '')}</textarea>`)}
+        ${formRow('Risks', `<textarea name="risks" ${readOnly ? 'disabled' : ''}>${escapeHtml(note?.risks || '')}</textarea>`)}
+        ${formRow('Next Meeting', `<input type="datetime-local" name="nextMeetingAt" ${readOnly ? 'disabled' : ''} value="${note?.nextMeetingAt ? new Date(note.nextMeetingAt).toISOString().slice(0, 16) : ''}" />`)}
+        </div>
+
+        <div class="meeting-note-section" style="grid-column: 1 / -1;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <h4 style="margin:0;">Action Items</h4>
+            ${readOnly ? '' : '<button type="button" id="meeting-note-add-action-btn">+ Add Action</button>'}
+          </div>
+          <div class="table-wrapper">
+            <table class="meeting-note-actions-table">
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th>Owner</th>
+                  <th>Due Date</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th style="width:90px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="meeting-note-action-items-body">
+                ${actionItemsRows.map((item, index) => renderActionRow(item, index)).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="muted" style="margin-top:8px;">Use user ID/email in Owner for assignment mapping.</div>
+        </div>
+
+        <div class="meeting-note-section meeting-note-email-preview hidden" id="meeting-note-email-preview-panel">
+          <h4>Email Preview</h4>
+          <div class="muted">Subject</div>
+          <input id="meeting-note-preview-subject" value="Meeting Notes - ${escapeHtml(note?.title || '')}" disabled />
+          <div class="muted" style="margin-top:8px;">To (auto from Participants)</div>
+          <input id="meeting-note-preview-to" value="${escapeHtml(participantsText)}" disabled />
+          <div class="muted" style="margin-top:8px;">CC (auto from Stakeholders)</div>
+          <input id="meeting-note-preview-cc" value="${escapeHtml(stakeholdersText)}" disabled />
+        </div>
+
+        ${!readOnly ? `
+          <div class="meeting-note-send-email-block">
+            <label class="meeting-note-send-email-label" for="meeting-note-send-email">
+              <input type="checkbox" id="meeting-note-send-email" checked />
+              Send email to participants
+            </label>
+            <p class="muted meeting-note-send-email-help">${isPublishedEdit ? 'When checked, an email is sent after you save changes (same recipients as before, based on current participants).' : 'When checked, an email is sent right after the note is published.'}</p>
+          </div>
+          <div class="form-actions meeting-note-form-actions">
+            <button type="button" id="meeting-note-cancel-btn">Cancel</button>
+            <button type="button" id="meeting-note-preview-btn">Preview Email</button>
+            ${isPublishedEdit ? '' : '<button type="button" id="meeting-note-save-btn">Save Draft</button>'}
+            ${isPublishedEdit ? '' : '<button type="button" id="meeting-note-publish-btn" class="primary">Publish</button>'}
+            ${isPublishedEdit ? '<button type="button" class="primary" id="meeting-note-save-changes-btn">Save changes</button>' : ''}
+          </div>
+        ` : ''}
+      </form>
+    </div>
+  `;
+
+  const removeModal = () => modal.remove();
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) removeModal();
+  });
+  document.body.appendChild(modal);
+
+  const closeBtn = document.getElementById('close-meeting-note-modal');
+  if (closeBtn) closeBtn.onclick = removeModal;
+  const cancelBtn = document.getElementById('meeting-note-cancel-btn');
+  if (cancelBtn) cancelBtn.onclick = removeModal;
+
+  try {
+    initializeSearchableSelects();
+  } catch (e) {
+    console.error('Meeting note modal searchable select initialization error:', e);
+  }
+  setupMeetingNoteMentionInputs(modal);
+
+  if (readOnly) return;
+
+  const actionItemsBody = document.getElementById('meeting-note-action-items-body');
+  const addActionBtn = document.getElementById('meeting-note-add-action-btn');
+  const previewBtn = document.getElementById('meeting-note-preview-btn');
+  const previewPanel = document.getElementById('meeting-note-email-preview-panel');
+
+  const refreshPreview = () => {
+    const title = document.querySelector('#meeting-note-form input[name="title"]')?.value || '';
+    const participantsValue = document.querySelector('#meeting-note-form input[name="participantsText"]')?.value || '';
+    const stakeholdersValue = document.querySelector('#meeting-note-form input[name="stakeholdersText"]')?.value || '';
+    const subjectEl = document.getElementById('meeting-note-preview-subject');
+    const toEl = document.getElementById('meeting-note-preview-to');
+    const ccEl = document.getElementById('meeting-note-preview-cc');
+    if (subjectEl) subjectEl.value = `Meeting Notes - ${title}`.trim();
+    if (toEl) toEl.value = participantsValue;
+    if (ccEl) ccEl.value = stakeholdersValue;
+  };
+
+  const reindexActionRows = () => {
+    if (!actionItemsBody) return;
+    Array.from(actionItemsBody.querySelectorAll('.meeting-note-action-row')).forEach((row, index) => {
+      const inputs = row.querySelectorAll('input,select');
+      if (inputs[0]) inputs[0].name = `mn_action_description_${index}`;
+      if (inputs[1]) inputs[1].name = `mn_action_owner_${index}`;
+      if (inputs[2]) inputs[2].name = `mn_action_due_${index}`;
+      if (inputs[3]) inputs[3].name = `mn_action_priority_${index}`;
+      if (inputs[4]) inputs[4].name = `mn_action_status_${index}`;
+    });
+  };
+
+  const bindRemoveButtons = () => {
+    actionItemsBody.querySelectorAll('.meeting-note-remove-action-btn').forEach((btn) => {
+      btn.onclick = () => {
+        const rows = actionItemsBody.querySelectorAll('.meeting-note-action-row');
+        if (rows.length === 1) return;
+        btn.closest('.meeting-note-action-row')?.remove();
+        reindexActionRows();
+        bindRemoveButtons();
+      };
+    });
+  };
+  bindRemoveButtons();
+
+  if (addActionBtn) {
+    addActionBtn.onclick = () => {
+      const nextIndex = actionItemsBody.querySelectorAll('.meeting-note-action-row').length;
+      actionItemsBody.insertAdjacentHTML('beforeend', renderActionRow({ status: 'Not Started' }, nextIndex));
+      reindexActionRows();
+      bindRemoveButtons();
+      setupMeetingNoteMentionInputs(modal);
+    };
+  }
+
+  if (previewBtn && previewPanel) {
+    previewBtn.onclick = () => {
+      refreshPreview();
+      previewPanel.classList.toggle('hidden');
+      previewBtn.textContent = previewPanel.classList.contains('hidden') ? 'Preview Email' : 'Hide Preview';
+    };
+  }
+
+  const parseParticipants = (fd) => {
+    const parseList = (value, role) =>
+      String(value || '')
+        .replace(/\s+@(?=[a-zA-Z])/g, ', @')
+        .split(',')
+        .map((v) => v.trim().replace(/^@+/, ''))
+        .filter(Boolean)
+        .map((valueItem) => {
+          const normalized = valueItem.toLowerCase().replace(/\s+/g, ' ').trim();
+          const user = LOOKUPS.users.find((u) => (
+            u.id === valueItem
+            || (u.email || '').toLowerCase() === normalized
+            || (u.name || '').toLowerCase().replace(/\s+/g, ' ').trim() === normalized
+          ));
+          if (user) {
+            return { userId: user.id, email: user.email || null, name: user.name || null, role };
+          }
+          if (valueItem.includes('@')) {
+            return { userId: null, email: valueItem, name: valueItem, role };
+          }
+          return { userId: valueItem, email: null, name: valueItem, role };
+        });
+
+    return [...parseList(fd.get('participantsText'), 'Attendee'), ...parseList(fd.get('stakeholdersText'), 'Stakeholder')];
+  };
+
+  const parseActionItems = () =>
+    Array.from(document.querySelectorAll('#meeting-note-action-items-body .meeting-note-action-row'))
+      .map((row, index) => {
+        const description = (row.querySelector(`input[name="mn_action_description_${index}"]`)?.value || '').trim();
+        const ownerRaw = (row.querySelector(`input[name="mn_action_owner_${index}"]`)?.value || '').trim().replace(/^@+/, '');
+        const dueDate = (row.querySelector(`input[name="mn_action_due_${index}"]`)?.value || '').trim();
+        const priority = (row.querySelector(`select[name="mn_action_priority_${index}"]`)?.value || '').trim();
+        const status = (row.querySelector(`select[name="mn_action_status_${index}"]`)?.value || '').trim();
+        if (!description) return null;
+        const ownerNormalized = ownerRaw.toLowerCase().replace(/\s+/g, ' ').trim();
+        const ownerUser = LOOKUPS.users.find((u) => (
+          u.id === ownerRaw
+          || (u.email || '').toLowerCase() === ownerNormalized
+          || (u.name || '').toLowerCase().replace(/\s+/g, ' ').trim() === ownerNormalized
+        ));
+        return {
+          description,
+          ownerId: ownerUser ? ownerUser.id : (ownerRaw || null),
+          ownerName: ownerUser ? ownerUser.name : (ownerRaw || null),
+          dueDate: dueDate || null,
+          priority: priority || null,
+          status: status || 'Not Started',
+          orderIndex: index,
+        };
+      })
+      .filter(Boolean);
+
+  const buildPayload = (status) => {
+    const form = document.getElementById('meeting-note-form');
+    const fd = new FormData(form);
+    return {
+      initiativeId,
+      title: String(fd.get('title') || '').trim(),
+      meetingType: String(fd.get('meetingType') || '').trim(),
+      meetingDate: fd.get('meetingDate') ? new Date(fd.get('meetingDate')).toISOString() : null,
+      facilitatorId: fd.get('facilitatorId') || null,
+      noteTakerId: fd.get('noteTakerId') || null,
+      agenda: String(fd.get('agenda') || '').trim(),
+      discussion: String(fd.get('discussion') || '').trim(),
+      decisions: String(fd.get('decisions') || '').trim(),
+      risks: String(fd.get('risks') || '').trim(),
+      nextMeetingAt: fd.get('nextMeetingAt') ? new Date(fd.get('nextMeetingAt')).toISOString() : null,
+      status,
+      participants: parseParticipants(fd),
+      actionItems: parseActionItems(),
+    };
+  };
+
+  const sendIfChecked = async (id) => {
+    const sendEmail = document.getElementById('meeting-note-send-email')?.checked !== false;
+    if (!sendEmail || !id) return;
+    const sendRes = await fetchJSON(`/api/meeting-notes/${id}/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (sendRes.ok === false) {
+      alert(sendRes.error || 'Failed to send meeting notes email');
+      return false;
+    }
+    return true;
+  };
+
+  const saveNote = async ({ mode } = {}) => {
+    try {
+      const payloadDraft = buildPayload('Draft');
+      const payloadPublished = buildPayload('Published');
+      if (!payloadDraft.title || !payloadDraft.meetingDate) {
+        alert('Meeting title and meeting date are required.');
+        return;
+      }
+
+      let saved = null;
+      let effectiveId = noteId;
+
+      if (mode === 'draft') {
+        const payload = payloadDraft;
+        if (noteId) {
+          const response = await fetchJSON(`/api/meeting-notes/${noteId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (response.ok === false) {
+            alert(response.error || 'Failed to update meeting note');
+            return;
+          }
+          saved = response.note;
+        } else {
+          const response = await fetchJSON('/api/meeting-notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          if (!response.id) {
+            alert(response.error || 'Failed to create meeting note');
+            return;
+          }
+          saved = response;
+        }
+        effectiveId = saved?.id;
+      } else if (mode === 'publish') {
+        if (!noteId) {
+          const created = await fetchJSON('/api/meeting-notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payloadDraft),
+          });
+          if (!created.id) {
+            alert(created.error || 'Failed to create meeting note');
+            return;
+          }
+          effectiveId = created.id;
+          const updated = await fetchJSON(`/api/meeting-notes/${effectiveId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payloadPublished, initiativeId }),
+          });
+          if (updated.ok === false) {
+            alert(updated.error || 'Failed to publish meeting note');
+            return;
+          }
+          saved = updated.note;
+        } else {
+          const updated = await fetchJSON(`/api/meeting-notes/${noteId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payloadPublished),
+          });
+          if (updated.ok === false) {
+            alert(updated.error || 'Failed to update meeting note');
+            return;
+          }
+          saved = updated.note;
+          effectiveId = saved.id;
+        }
+
+        const publishRes = await fetchJSON(`/api/meeting-notes/${effectiveId}/publish`, { method: 'POST' });
+        if (publishRes.ok === false) {
+          alert(publishRes.error);
+          return;
+        }
+
+        const sendOk = await sendIfChecked(effectiveId);
+        if (sendOk === false) return;
+      } else if (mode === 'savePublished') {
+        const updated = await fetchJSON(`/api/meeting-notes/${noteId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payloadPublished),
+        });
+        if (updated.ok === false) {
+          alert(updated.error || 'Failed to update meeting note');
+          return;
+        }
+        saved = updated.note;
+        effectiveId = saved.id;
+        const sendOk = await sendIfChecked(effectiveId);
+        if (sendOk === false) return;
+      }
+
+      removeModal();
+      if (typeof onSaved === 'function') onSaved();
+    } catch (e) {
+      alert(`Meeting note action failed: ${e.message}`);
+    }
+  };
+
+  document.getElementById('meeting-note-save-btn')?.addEventListener('click', () => saveNote({ mode: 'draft' }));
+  document.getElementById('meeting-note-publish-btn')?.addEventListener('click', () => saveNote({ mode: 'publish' }));
+  document.getElementById('meeting-note-save-changes-btn')?.addEventListener('click', () => saveNote({ mode: 'savePublished' }));
 }
 
 // Gantt Chart rendering function
@@ -3773,6 +5023,27 @@ async function showTaskModal(initiativeId, taskId = null) {
     }
   }
   
+  // Fetch initiative type so CR can use the newest milestone phases
+  let initiativeType = 'Project';
+  try {
+    const init = await fetchJSON(`/api/initiatives/${initiativeId}`);
+    initiativeType = init?.type || 'Project';
+  } catch {
+    // If this fails, fall back to Project milestone options
+  }
+
+  const milestoneOptions =
+    initiativeType === 'CR'
+      ? CR_MILESTONE_UI_OPTIONS.map((m) => ({ value: m, label: m }))
+      : [
+          { value: 'Business Requirement', label: 'Business Requirement' },
+          { value: 'Tech Assessment', label: 'Tech Assessment' },
+          { value: 'Planning', label: 'Planning' },
+          { value: 'Development', label: 'Development' },
+          { value: 'Testing', label: 'Testing' },
+          { value: 'Live Preparation', label: 'Live Preparation' },
+        ];
+
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.innerHTML = `
@@ -3824,14 +5095,7 @@ async function showTaskModal(initiativeId, taskId = null) {
           <label>Milestone</label>
           <select name="milestone" style="width: 100%;">
             <option value="">None</option>
-            ${[
-              { value: 'Business Requirement', label: 'Business Requirement' },
-              { value: 'Tech Assessment', label: 'Tech Assessment' },
-              { value: 'Planning', label: 'Planning' },
-              { value: 'Development', label: 'Development' },
-              { value: 'Testing', label: 'Testing' },
-              { value: 'Live Preparation', label: 'Live Preparation' }
-            ].map(m => 
+            ${milestoneOptions.map(m => 
               `<option value="${m.value}" ${task?.milestone === m.value ? 'selected' : ''}>${m.label}</option>`
             ).join('')}
           </select>
@@ -4116,6 +5380,7 @@ async function renderEdit(id) {
     const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
     const itPicIds = obj.itPicIds ? obj.itPicIds.split(',').filter(Boolean) : [];
     const itManagerIds = obj.itManagerIds ? obj.itManagerIds.split(',').filter(Boolean) : [];
+    const systemImpactedIds = obj.systemImpactedIds ? obj.systemImpactedIds.split(',').filter(Boolean) : [];
     
     const payload = {
       name: obj.name,
@@ -4128,7 +5393,10 @@ async function renderEdit(id) {
       itPicIds: itPicIds.length > 0 ? itPicIds : null,
       itPmId: obj.itPmId || null,
       itManagerIds: itManagerIds.length > 0 ? itManagerIds : null,
+      systemImpactedIds: systemImpactedIds.length > 0 ? systemImpactedIds : null,
       status: obj.status,
+      // For CR, the form milestone dropdown is the CR phase label (UI value).
+      // Persist canonical milestone in `milestone` and the detailed phase in `crMilestonePhase`.
       milestone: obj.milestone,
       startDate: obj.startDate,
       endDate: obj.endDate || null,
@@ -4213,6 +5481,7 @@ async function renderCRList() {
     itPicId: parseFilter('cr_itPicId'),
     itPmId: parseFilter('cr_itPmId'),
     itManagerId: parseFilter('cr_itManagerId'),
+    systemImpactedId: parseFilter('cr_systemImpactedId'),
     createdAt: parseDateFilter('cr_createdAt'),
     startDate: parseDateFilter('cr_startDate'),
     endDate: parseDateFilter('cr_endDate')
@@ -4229,6 +5498,7 @@ async function renderCRList() {
   if (filter.milestone.length) apiQs.set('milestone', filter.milestone.join(','));
   if (filter.itPicId.length) apiQs.set('itPicId', filter.itPicId.join(','));
   if (filter.itPmId.length) apiQs.set('itPmId', filter.itPmId.join(','));
+  if (filter.systemImpactedId.length) apiQs.set('systemImpactedId', filter.systemImpactedId.join(','));
   
   let data;
   try {
@@ -4304,35 +5574,26 @@ async function renderCRList() {
     return false;
   });
   
-  // Calculate milestone counts from filtered data
-  // Database stores: "Preparation", "Business Requirement", "Tech Assessment", "Planning", "Development", "Testing", "Live"
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
-  const milestoneCounts = {};
-  // Display names for the graph (same as database values)
-  const milestoneDisplayNames = {
-    'Preparation': 'Preparation',
-    'Business Requirement': 'Business Requirement',
-    'Tech Assessment': 'Tech Assessment',
-    'Planning': 'Planning',
-    'Development': 'Development',
-    'Testing': 'Testing',
-    'Live': 'Live'
-  };
-  // Milestone colors mapping
+  // Calculate milestone counts from filtered data (CR list)
+  // No extra column: CR phase is stored directly in `milestone`.
+  const uiMilestones = CR_MILESTONE_UI_OPTIONS;
+  const milestoneCounts = Object.fromEntries(uiMilestones.map((m) => [m, 0]));
+
+  // Display names for the graph (same as UI labels)
+  const milestoneDisplayNames = Object.fromEntries(uiMilestones.map((m) => [m, m]));
+
+  // Milestone colors mapping (align with Project list palette)
   const milestoneColors = {
-    'Preparation': '#8b5cf6', // Purple
-    'Business Requirement': '#3b82f6', // Blue
-    'Tech Assessment': '#06b6d4', // Cyan
-    'Planning': '#10b981', // Green
+    'User Initiate': '#8b5cf6', // Purple
+    'FSD': '#06b6d4', // Cyan
     'Development': '#f59e0b', // Amber
-    'Testing': '#ef4444', // Red
+    'SIT': '#ef4444', // Red
     'Live': '#22c55e' // Green
   };
-  milestones.forEach(m => milestoneCounts[m] = 0);
+
   data.forEach(i => {
-    if (i.milestone && milestoneCounts.hasOwnProperty(i.milestone)) {
-      milestoneCounts[i.milestone]++;
-    }
+    const m = i?.milestone || '';
+    if (m && milestoneCounts[m] !== undefined) milestoneCounts[m] += 1;
   });
   
   // CR data is now included in the API response
@@ -4350,9 +5611,15 @@ async function renderCRList() {
     };
     dataWithCR.sort((a,b) => {
       let va, vb;
-      if (key.endsWith('Id')) {
+      if (key === 'systemImpactedIds') {
+        va = dwsSystemNamesFromInitiative(a.initiative).toLowerCase();
+        vb = dwsSystemNamesFromInitiative(b.initiative).toLowerCase();
+      } else if (key.endsWith('Id')) {
         va = nameFor(key, a.initiative[key]);
         vb = nameFor(key, b.initiative[key]);
+      } else if (key === 'milestone') {
+        va = String(normalizeCrMilestoneForDisplay(a.initiative) || '').toLowerCase();
+        vb = String(normalizeCrMilestoneForDisplay(b.initiative) || '').toLowerCase();
       } else if (key === 'businessImpact' || key === 'remark' || key === 'documentationLink') {
         va = String(a.initiative[key] || '').toLowerCase();
         vb = String(b.initiative[key] || '').toLowerCase();
@@ -4365,40 +5632,21 @@ async function renderCRList() {
   }
   
   // Get column visibility preferences
-  const colVisibility = getColumnVisibility('crlist') || getDefaultColumns('crlist');
-  
-  // Column definitions for CR List
-  const columns = [
-    { key: 'ticket', class: 'col-ticket', label: 'Ticket', sortable: true },
-    { key: 'name', class: 'col-name', label: 'CR Name', sortable: true },
-    { key: 'priority', class: 'col-priority', label: 'Priority', sortable: true },
-    { key: 'status', class: 'col-status', label: 'Status', sortable: true },
-    { key: 'milestone', class: 'col-milestone', label: 'Milestone', sortable: true },
-    { key: 'departmentId', class: 'col-department', label: 'Department', sortable: true },
-    { key: 'businessOwnerId', class: 'col-owner', label: 'Business Owner', sortable: true },
-    { key: 'itPicId', class: 'col-pic', label: 'IT PIC', sortable: true },
-    { key: 'startDate', class: 'col-date', label: 'Start Date', sortable: true },
-    { key: 'createdAt', class: 'col-date', label: 'Create Date', sortable: true },
-    { key: 'endDate', class: 'col-date', label: 'End Date', sortable: true },
-    { key: 'planStartDate', class: 'col-plan-start-date', label: 'Plan Start Date', sortable: true },
-    { key: 'planEndDate', class: 'col-plan-end-date', label: 'Plan End Date', sortable: true },
-    { key: 'ageCreatedToStart', class: 'col-age-created-to-start', label: 'Age Created to Start', sortable: false },
-    { key: 'cycleTime', class: 'col-cycle-time', label: 'Cycle Time (Age Start to End)', sortable: false },
-    { key: 'businessImpact', class: 'col-impact', label: 'Business Impact', sortable: true },
-    { key: 'remark', class: 'col-remark', label: 'Remark', sortable: true },
-    { key: 'documentationLink', class: 'col-doc', label: 'CR Doc Link', sortable: true },
-    { key: 'actions', class: 'col-actions', label: 'Actions', sortable: false }
-  ];
+  const colVisibility = resolveColumnVisibility('crlist');
+
+  const columns = crListColumnDefinitions();
   const access = await getUserAccess();
   const canCreateCR = !access || access.canCreateCR !== false || access.isAdmin;
+
+  window.__crListExport = { rows: dataWithCR, colVisibility };
 
   app.innerHTML = `
     <div class="milestone-graph">
       <h3>Milestone Distribution</h3>
       <div class="milestone-flow">
-        ${milestones.map((m, index) => {
+        ${uiMilestones.map((m, index) => {
           const count = milestoneCounts[m] || 0;
-          const isLast = index === milestones.length - 1;
+          const isLast = index === uiMilestones.length - 1;
           const displayName = milestoneDisplayNames[m] || m;
           const color = milestoneColors[m] || 'var(--brand)';
           return `
@@ -4463,10 +5711,10 @@ async function renderCRList() {
               Milestone ${filter.milestone.length > 0 ? `(${filter.milestone.length})` : ''}
             </button>
             <div class="multi-select-dropdown" id="dropdown-fMilestone">
-              ${milestones.map(m => `
+              ${CR_MILESTONE_UI_OPTIONS.map(m => `
                 <label class="multi-select-option">
                   <input type="checkbox" value="${m}" ${filter.milestone.includes(m) ? 'checked' : ''}>
-                  ${milestoneDisplayNames[m] || m}
+                  ${m}
                 </label>
               `).join('')}
             </div>
@@ -4506,6 +5754,19 @@ async function renderCRList() {
                 <label class="multi-select-option">
                   <input type="checkbox" value="${u.id}" ${filter.itManagerId.includes(u.id) ? 'checked' : ''}>
                   ${u.name}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="multi-select-wrapper">
+            <button class="multi-select-btn" data-filter="fSystemImpacted">
+              System Impacted ${filter.systemImpactedId.length > 0 ? `(${filter.systemImpactedId.length})` : ''}
+            </button>
+            <div class="multi-select-dropdown" id="dropdown-fSystemImpacted">
+              ${(LOOKUPS.dwsApplications || []).map(a => `
+                <label class="multi-select-option">
+                  <input type="checkbox" value="${a.id}" ${filter.systemImpactedId.includes(a.id) ? 'checked' : ''}>
+                  ${escapeHtml(a.systemName)}
                 </label>
               `).join('')}
             </div>
@@ -4560,25 +5821,29 @@ async function renderCRList() {
         </div>
         <div class="action-group">
           <button id="btn-columns" onclick="showColumnSettings('crlist')" title="Column Settings" class="icon-btn">⚙️</button>
+          <button type="button" class="btn-secondary" onclick="exportCRListToExcel()" title="Download filtered rows as CSV (opens in Microsoft Excel)">Export Excel</button>
           <button id="apply-filters-btn" class="primary" onclick="applyFiltersCR()">Apply Filters</button>
           ${canCreateCR ? '<a href="#new/CR"><button class="primary">+ New CR</button></a>' : ''}
         </div>
       </div>
     </div>
-    <div class="table-wrapper">
-      <table id="cr-table">
-        <thead>
-          <tr>
-            ${columns.map(col => {
-              const visible = colVisibility[col.class] !== false;
-              const sortClass = col.sortable ? 'sortable' : '';
-              const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
-              return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
-            }).join('')}
-          </tr>
-        </thead>
-        <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
-      </table>
+    <div class="table-scroll-pair">
+      <div class="table-scroll-top" aria-hidden="true"><div class="table-scroll-top-inner"></div></div>
+      <div class="table-wrapper">
+        <table id="cr-table">
+          <thead>
+            <tr>
+              ${columns.map(col => {
+                const visible = colVisibility[col.class] !== false;
+                const sortClass = col.sortable ? 'sortable' : '';
+                const sortIndicator = sortParam && sortParam.startsWith(`${col.key}:`) ? (sortParam.includes(':desc') ? ' ↓' : ' ↑') : '';
+                return `<th class="${sortClass} ${col.class}" data-key="${col.key}" data-col="${col.class}" style="display: ${visible ? 'table-cell' : 'none'}">${col.label}${sortIndicator}</th>`;
+              }).join('')}
+            </tr>
+          </thead>
+          <tbody>${dataWithCR.map(item => initiativeRow(item.initiative, item.crData, colVisibility)).join('')}</tbody>
+        </table>
+      </div>
     </div>
     <div id="column-settings-modal-cr" class="modal hidden">
       <div class="modal-content column-settings-modal">
@@ -4602,7 +5867,13 @@ async function renderCRList() {
         </div>
       </div>
     </div>
+    ${recentActivityFabMarkup('CR')}
   `;
+
+  initScrollableTables();
+  initTableScrollPairs();
+  wireRecentActivityFab();
+
   // Multi-select dropdown handlers (checkbox filters)
   document.querySelectorAll('.multi-select-btn').forEach(btn => {
     btn.onclick = (e) => {
@@ -4675,7 +5946,8 @@ async function renderCRList() {
       'fMilestone': 'cr_milestone',
       'fItPic': 'cr_itPicId',
       'fItPm': 'cr_itPmId',
-      'fItManager': 'cr_itManagerId'
+      'fItManager': 'cr_itManagerId',
+      'fSystemImpacted': 'cr_systemImpactedId'
     };
     
     Object.entries(filterMap).forEach(([filterId, paramKey]) => {
@@ -4822,8 +6094,22 @@ async function renderCRList() {
   document.querySelectorAll('button.delete').forEach(btn => {
     btn.onclick = async () => {
       if (!confirm('Delete this CR?')) return;
-      await fetch(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
-      renderCRList();
+      try {
+        const result = await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        if (result?.trashId) {
+          const undo = confirm('CR deleted. Undo?');
+          if (undo) {
+            await fetchJSON(`/api/initiatives/restore/${result.trashId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({}),
+            });
+          }
+        }
+        renderCRList();
+      } catch (e) {
+        alert('Failed to delete CR: ' + (e.message || String(e)));
+      }
     };
   });
   document.querySelectorAll('button.view').forEach(btn => {
@@ -4856,6 +6142,17 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
   console.log('showInitiativesModal called:', filterType, filterValue, title, initiativeType);
   const apiQs = new URLSearchParams();
   apiQs.set('type', initiativeType);
+
+  // Preserve current dashboard filters for Project drilldowns
+  const urlParams = new URLSearchParams(location.search || '');
+  if (initiativeType === 'Project') {
+    const depId = urlParams.get('departmentId') || '';
+    const itPmId = urlParams.get('itPmId') || '';
+    const teamMemberId = urlParams.get('teamMemberId') || '';
+    if (depId) apiQs.set('departmentId', depId);
+    if (itPmId) apiQs.set('itPmId', itPmId);
+    if (teamMemberId) apiQs.set('teamMemberId', teamMemberId);
+  }
   
   if (filterType === 'status') {
     apiQs.set('status', filterValue);
@@ -4867,11 +6164,15 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
     apiQs.set('departmentId', filterValue);
   } else if (filterType === 'all') {
     // Show all projects
+  } else if (filterType === 'allExCancelled') {
+    // Show all projects excluding CANCELLED (client-side filter)
   } else if (filterType === 'open') {
     // For "open" CRs, we'll fetch all and filter out LIVE ones
     // Don't set any status filter, we'll filter client-side
   } else if (filterType === 'inProgress') {
     // For "In Progress Projects", we'll fetch all projects and filter client-side
+  } else if (filterType === 'deptGroup') {
+    // Department Group breakdown: filter client-side by group + status bucket
   }
   
   try {
@@ -4885,11 +6186,61 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
       });
     }
 
+    // Filter out CANCELLED projects for "allExCancelled"
+    if (filterType === 'allExCancelled' && initiativeType === 'Project') {
+      initiatives = initiatives.filter(i => {
+        const status = (i.status || '').toUpperCase().trim();
+        return status !== 'CANCELLED';
+      });
+    }
+
     // Filter to only in-progress project statuses for "inProgress" filter
     if (filterType === 'inProgress' && initiativeType === 'Project') {
       initiatives = initiatives.filter(i => {
         const status = (i.status || '').toUpperCase().trim();
         return status === 'ON TRACK' || status === 'AT RISK' || status === 'DELAYED';
+      });
+    }
+
+    // Filter by Department Group when requested
+    if (filterType === 'deptGroup' && initiativeType === 'Project') {
+      const [groupKeyRaw, bucketRaw] = String(filterValue || '').split('|');
+      const groupKey = (groupKeyRaw || '').trim() || 'Support';
+      const bucket = (bucketRaw || 'TOTAL').toUpperCase().trim();
+
+      const normalizeDeptName = (name) => {
+        const n = String(name || '').trim();
+        if (!n) return n;
+        const low = n.toLowerCase();
+        if (low === 'operation') return 'Industrial';
+        if (low === 'trader') return 'Commercial';
+        return n;
+      };
+      const departmentGroup = (deptName) => {
+        const n = normalizeDeptName(deptName);
+        const low = String(n || '').trim().toLowerCase();
+        if (!low) return 'Support';
+        if (low === 'industrial') return 'Industrial';
+        if (low === 'commercial') return 'Commercial';
+        if (low === 'logistic') return 'Logistic';
+        if (low === 'exim') return 'EXIM';
+        if (low === 'fabtic') return 'FABTIC';
+        if (low === 'procurement' || low === 'hc' || low === 'sustainability') return 'Support';
+        return 'Support';
+      };
+      const deptNameById = (id) => normalizeDeptName(nameById(LOOKUPS.departments || [], id));
+      const statusU = (s) => String(s || '').toUpperCase().trim();
+
+      initiatives = initiatives.filter(p => {
+        const grp = departmentGroup(deptNameById(p.departmentId));
+        if (grp !== groupKey) return false;
+        const s = statusU(p.status);
+        if (bucket === 'TOTAL') return s !== 'CANCELLED';
+        if (bucket === 'LIVE') return s === 'LIVE';
+        if (bucket === 'IN_PROGRESS') return s === 'ON TRACK' || s === 'AT RISK' || s === 'DELAYED';
+        if (bucket === 'NOT_STARTED') return s === 'NOT STARTED';
+        if (bucket === 'ON_HOLD') return s === 'ON HOLD';
+        return true;
       });
     }
     
@@ -5327,7 +6678,7 @@ async function renderDashboard() {
       .reduce((sum, s) => sum + (s.c || 0), 0);
   };
   const notStartedProjects = statusCount('NOT STARTED');
-  const liveProjects = d.liveCount || statusCount('LIVE') || 0;
+  const liveProjects = statusCount('LIVE') || 0;
   const cancelledProjects = statusCount('CANCELLED');
   const onHoldProjects = statusCount('ON HOLD');
   const onTrackProjects = statusCount('ON TRACK');
@@ -5335,6 +6686,57 @@ async function renderDashboard() {
   const delayedProjects = statusCount('DELAYED');
   const inProgressProjects = onTrackProjects + atRiskProjects + delayedProjects;
   const totalProjectsExCancelled = (d.projects || 0) - cancelledProjects;
+
+  // Department Group breakdowns for the Project Summary KPIs (computed from filtered initiatives)
+  const normalizeDeptName = (name) => {
+    const n = String(name || '').trim();
+    if (!n) return n;
+    const low = n.toLowerCase();
+    if (low === 'operation') return 'Industrial';
+    if (low === 'trader') return 'Commercial';
+    return n;
+  };
+  const departmentGroup = (deptName) => {
+    const n = normalizeDeptName(deptName);
+    const low = String(n || '').trim().toLowerCase();
+    if (!low) return 'Support';
+    if (low === 'industrial') return 'Industrial';
+    if (low === 'commercial') return 'Commercial';
+    if (low === 'logistic') return 'Logistic';
+    if (low === 'exim') return 'EXIM';
+    if (low === 'fabtic') return 'FABTIC';
+    if (low === 'procurement' || low === 'hc' || low === 'sustainability') return 'Support';
+    return 'Support';
+  };
+  const deptNameById = (id) => normalizeDeptName(nameById(LOOKUPS.departments || [], id));
+  const initGroupCounts = () => ({
+    Industrial: 0,
+    Commercial: 0,
+    Logistic: 0,
+    EXIM: 0,
+    FABTIC: 0,
+    Support: 0,
+  });
+  const groupCountsFor = (projects, predicate) => {
+    const counts = initGroupCounts();
+    (projects || []).forEach(p => {
+      if (!predicate(p)) return;
+      const grp = departmentGroup(deptNameById(p.departmentId));
+      counts[grp] = (counts[grp] || 0) + 1;
+    });
+    return counts;
+  };
+  const statusU = (p) => String(p?.status || '').toUpperCase().trim();
+  const kpiProjects = Array.isArray(projectsForCalendar) ? projectsForCalendar : [];
+  const breakdownTotal = groupCountsFor(kpiProjects, p => statusU(p) !== 'CANCELLED');
+  const breakdownLive = groupCountsFor(kpiProjects, p => statusU(p) === 'LIVE');
+  const breakdownInProgress = groupCountsFor(kpiProjects, p => {
+    const s = statusU(p);
+    return s === 'ON TRACK' || s === 'AT RISK' || s === 'DELAYED';
+  });
+  const breakdownNotStarted = groupCountsFor(kpiProjects, p => statusU(p) === 'NOT STARTED');
+  const breakdownOnHold = groupCountsFor(kpiProjects, p => statusU(p) === 'ON HOLD');
+  const getGroup = (counts, groupName) => (counts && counts[groupName] ? counts[groupName] : 0);
 
   // Normalize status labels for Status Distribution (combine different casings)
   const combinedStatusMap = {};
@@ -5364,40 +6766,181 @@ async function renderDashboard() {
         ` : ''}
       </div>
     </div>
-    <div class="kpis">
-      <div class="card clickable-card" data-filter-type="all" data-filter-value="" data-title="All Projects" data-initiative-type="Project" style="cursor: pointer;">
-        <div class="muted">Total Projects</div>
-        <div style="font-size:32px;font-weight:700;color: var(--brand)">${totalProjectsExCancelled}</div>
-      </div>
-      <div class="card clickable-card" data-filter-type="status" data-filter-value="LIVE" data-title="Live Projects" style="cursor: pointer;">
-        <div class="muted">Live Projects</div>
-        <div style="font-size:32px;font-weight:700;color: #3b82f6">${d.liveCount || 0}</div>
-      </div>
-      <div class="card clickable-card" data-filter-type="inProgress" data-filter-value="" data-title="In Progress Projects" data-initiative-type="Project" style="cursor: pointer; border-left: 4px solid var(--success);">
-        <div class="muted">In Progress Projects</div>
-        <div style="font-size:32px;font-weight:700;color: var(--success)">${inProgressProjects}</div>
-        <div class="muted" style="margin-top: 6px; font-size: 12px;">
-          On Track + At Risk + Delayed
+    <div class="card" style="margin-bottom: 24px;">
+      <div style="display:flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+        <div>
+          <div style="display:flex; align-items:center; gap: 10px;">
+            <div style="width: 10px; height: 10px; border-radius: 50%; background: var(--brand);"></div>
+            <h3 style="margin: 0;">Project Summary</h3>
+          </div>
+          <div class="muted" style="font-size: 12px; margin-top: 6px;">
+            Click any metric to drill down to the project list.
+          </div>
+        </div>
+        <div style="display:flex; gap: 10px; align-items:center; flex-wrap: wrap;">
+          <div style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 999px; background: #f8fafc; font-size: 12px; color: var(--muted);">
+            Excludes <strong style="color: var(--text);">CANCELLED</strong> from Total
+          </div>
         </div>
       </div>
-      <div class="card clickable-card" data-filter-type="status" data-filter-value="NOT STARTED" data-title="Not Started Projects" style="cursor: pointer;">
-        <div class="muted">Not Started Projects</div>
-        <div style="font-size:32px;font-weight:700;color: var(--muted)">${notStartedProjects}</div>
+
+      <div style="margin-top: 16px; display:grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: stretch;">
+        <div style="display:grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 12px;">
+          ${(() => {
+            const tile = ({ label, value, color, bg, border, filterType, filterValue, title }) => `
+              <div class="clickable-card"
+                   data-filter-type="${filterType}"
+                   data-filter-value="${filterValue || ''}"
+                   data-title="${escapeHtml(title)}"
+                   data-initiative-type="Project"
+                   style="cursor:pointer; border: 1px solid ${border}; background: ${bg}; border-radius: 12px; padding: 14px 14px 12px; transition: transform .12s ease, box-shadow .12s ease; display:flex; flex-direction:column; min-height: 170px;">
+                <div style="display:flex; justify-content: space-between; align-items: center; gap: 10px;">
+                  <div class="muted" style="font-size: 12px; font-weight: 700; letter-spacing: .2px;">${label}</div>
+                  <div style="width: 10px; height: 10px; border-radius: 3px; background: ${color};"></div>
+                </div>
+                <div style="margin-top: 10px; margin-bottom: 8px; font-size: 30px; font-weight: 900; color: ${color}; line-height: 1;">${value}</div>
+                <div class="muted" style="margin-top:auto; font-size: 11px; line-height: 1.3;">
+                  Click to drill down
+                </div>
+              </div>
+            `;
+
+            return [
+              tile({
+                label: 'Total',
+                value: totalProjectsExCancelled,
+                color: 'var(--brand)',
+                bg: '#eff6ff',
+                border: '#bfdbfe',
+                filterType: 'allExCancelled',
+                filterValue: '',
+                title: 'All Projects (Excl. Cancelled)',
+              }),
+              tile({
+                label: 'Live',
+                value: liveProjects,
+                color: '#3b82f6',
+                bg: '#eff6ff',
+                border: '#bfdbfe',
+                filterType: 'status',
+                filterValue: 'LIVE',
+                title: 'Live Projects',
+              }),
+              tile({
+                label: 'In Progress',
+                value: inProgressProjects,
+                color: 'var(--success)',
+                bg: '#ecfdf5',
+                border: '#bbf7d0',
+                filterType: 'inProgress',
+                filterValue: '',
+                title: 'In Progress Projects',
+              }),
+              tile({
+                label: 'Not Started',
+                value: notStartedProjects,
+                color: '#64748b',
+                bg: '#f8fafc',
+                border: '#e2e8f0',
+                filterType: 'status',
+                filterValue: 'NOT STARTED',
+                title: 'Not Started Projects',
+              }),
+              tile({
+                label: 'On Hold',
+                value: onHoldProjects,
+                color: '#334155',
+                bg: '#f1f5f9',
+                border: '#e2e8f0',
+                filterType: 'status',
+                filterValue: 'ON HOLD',
+                title: 'On Hold Projects',
+              }),
+            ].join('');
+          })()}
+        </div>
+
+        <div style="border: 1px solid #fed7aa; background: linear-gradient(135deg, #fff7ed 0%, #ffffff 60%); border-radius: 12px; padding: 14px;">
+          <div style="display:flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <div class="muted" style="font-size: 12px; font-weight: 800; letter-spacing: .2px;">Avg Project Aging (Working Days)</div>
+            <div style="width: 10px; height: 10px; border-radius: 3px; background: var(--warning);"></div>
+          </div>
+          <div style="display:flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 10px;">
+            <div>
+              <div style="font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
+              <div style="font-size: 36px; font-weight: 950; color: var(--warning); line-height: 1;">${projectAgingMetrics.avgTotalAge}</div>
+            </div>
+            <div style="font-size: 12px; color: var(--muted); text-align: right; line-height: 1.5;">
+              <div><strong style="color: var(--text);">${projectAgingMetrics.avgAgeCreatedToStart}</strong> Created→Start</div>
+              <div><strong style="color: var(--text);">${projectAgingMetrics.avgCycleTime}</strong> Start→End/Now</div>
+            </div>
+          </div>
+          <div class="muted" style="margin-top: 10px; font-size: 12px;">
+            Total Age = (Create→Start) + (Start→End/Now).
+          </div>
+        </div>
       </div>
-      <div class="card" style="border-left: 4px solid var(--warning);">
-        <div class="muted">Average Project Aging (Days)</div>
-        <div style="display:flex; align-items:baseline; justify-content: space-between; gap: 12px; margin-top: 6px;">
+
+      <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px;">
+        <div style="display:flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;">
           <div>
-            <div style="font-size:12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
-            <div style="font-size:34px;font-weight:800;color: var(--warning); line-height: 1;">${projectAgingMetrics.avgTotalAge}</div>
-          </div>
-          <div style="font-size: 12px; color: var(--muted); text-align: right;">
-            <div><strong>${projectAgingMetrics.avgAgeCreatedToStart}</strong> Avg Age Created→Start</div>
-            <div><strong>${projectAgingMetrics.avgCycleTime}</strong> Avg Cycle Time (Start→End)</div>
+            <div style="font-size: 12px; font-weight: 900; color: var(--text);">By Department Group</div>
+            <div class="muted" style="font-size: 11px; margin-top: 2px;">Counts are based on the current dashboard filters.</div>
           </div>
         </div>
-        <div class="muted" style="margin-top: 10px; font-size: 12px;">
-          Total Age = (Create→Start) + (Start→End/Now). For ongoing projects, End uses today.
+        <div class="table-wrapper" style="margin-top: 10px; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 12px;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:left; padding: 10px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); background: #f8fafc;">Department Group</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #b91c1c; border-bottom: 1px solid var(--border); background: #fef2f2;">Total</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #1d4ed8; border-bottom: 1px solid var(--border); background: #eff6ff;">Live</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #047857; border-bottom: 1px solid var(--border); background: #ecfdf5;">In Progress</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #475569; border-bottom: 1px solid var(--border); background: #f8fafc;">Not Started</th>
+                <th style="position: sticky; top: 0; z-index: 2; text-align:right; padding: 10px 12px; font-size: 12px; color: #0f172a; border-bottom: 1px solid var(--border); background: #f1f5f9;">On Hold</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(() => {
+                const groups = [
+                  { key: 'Industrial', label: 'Industrial' },
+                  { key: 'Commercial', label: 'Commercial' },
+                  { key: 'Logistic', label: 'Logistic' },
+                  { key: 'EXIM', label: 'EXIM' },
+                  { key: 'FABTIC', label: 'FABTIC' },
+                  { key: 'Support', label: 'Support (Procurement, HC, Sustainability)' },
+                ];
+
+                const row = (g, i) => {
+                  const bg = i % 2 === 0 ? '#ffffff' : '#fbfdff';
+                  const makeCell = (value, bucket, color) => `
+                    <td style="padding: 10px 12px; border-bottom: 1px solid var(--border); text-align:right; font-size: 13px; font-weight: 950; color: ${color};">
+                      <span class="clickable-chart-item"
+                            data-filter-type="deptGroup"
+                            data-filter-value="${g.key}|${bucket}"
+                            data-title="${g.label} - ${bucket.replace('_', ' ')}"
+                            data-initiative-type="Project"
+                            style="cursor:pointer;">
+                        ${value}
+                      </span>
+                    </td>
+                  `;
+                  return `
+                    <tr style="background: ${bg};">
+                      <td style="padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 800; color: #0f172a;">${g.label}</td>
+                      ${makeCell(getGroup(breakdownTotal, g.key), 'TOTAL', '#b91c1c')}
+                      ${makeCell(getGroup(breakdownLive, g.key), 'LIVE', '#1d4ed8')}
+                      ${makeCell(getGroup(breakdownInProgress, g.key), 'IN_PROGRESS', '#047857')}
+                      ${makeCell(getGroup(breakdownNotStarted, g.key), 'NOT_STARTED', '#475569')}
+                      ${makeCell(getGroup(breakdownOnHold, g.key), 'ON_HOLD', '#0f172a')}
+                    </tr>
+                  `;
+                };
+
+                return groups.map(row).join('');
+              })()}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -6057,17 +7600,46 @@ async function renderDashboard() {
     };
 
     const today = new Date();
+    const normalizeDeptNameForCal = (name) => {
+      const n = String(name || '').trim();
+      if (!n) return n;
+      const low = n.toLowerCase();
+      if (low === 'operation') return 'Industrial';
+      if (low === 'trader') return 'Commercial';
+      return n;
+    };
+    const departmentGroupForCal = (deptName) => {
+      const n = normalizeDeptNameForCal(deptName);
+      const low = String(n || '').trim().toLowerCase();
+      if (!low) return 'Support';
+      if (low === 'industrial') return 'Industrial';
+      if (low === 'commercial') return 'Commercial';
+      if (low === 'logistic') return 'Logistic';
+      if (low === 'exim') return 'EXIM';
+      if (low === 'fabtic') return 'FABTIC';
+      if (low === 'procurement' || low === 'hc' || low === 'sustainability') return 'Support';
+      return 'Support';
+    };
+    const deptNameByIdCal = (id) => normalizeDeptNameForCal(nameById(LOOKUPS.departments || [], id));
+
     const projects = rows
-      .map(p => ({
-        id: p.id,
-        name: String(p.name || 'Untitled'),
-        status: String(p.status || '').toUpperCase().trim(),
-        planStart: parseDate(p.planStartDate),
-        planEnd: parseDate(p.planEndDate),
-        actualStart: parseDate(p.startDate),
-        actualEnd: parseDate(p.endDate),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map(p => {
+        const group = departmentGroupForCal(deptNameByIdCal(p.departmentId));
+        return {
+          id: p.id,
+          name: String(p.name || 'Untitled'),
+          status: String(p.status || '').toUpperCase().trim(),
+          planStart: parseDate(p.planStartDate),
+          planEnd: parseDate(p.planEndDate),
+          actualStart: parseDate(p.startDate),
+          actualEnd: parseDate(p.endDate),
+          deptGroup: group,
+        };
+      })
+      .sort((a, b) => {
+        if (a.deptGroup === b.deptGroup) return a.name.localeCompare(b.name);
+        return a.deptGroup.localeCompare(b.deptGroup);
+      });
 
     const allDates = [];
     projects.forEach(p => {
@@ -6105,7 +7677,7 @@ async function renderDashboard() {
     const rightPad = 16;
 
     const maxNameLen = Math.max(...projects.map(p => p.name.length), 10);
-    const namesW = Math.max(280, Math.min(620, Math.round(maxNameLen * 7.2 + 56)));
+    const namesW = Math.max(340, Math.min(680, Math.round(maxNameLen * 7.2 + 56)));
 
     const timelineW = (months.length * monthW) + rightPad;
     const height = topPad + (projects.length * rowH) + 16;
@@ -6182,9 +7754,14 @@ async function renderDashboard() {
     const nameRows = projects.map((p, i) => {
       const y = topPad + i * rowH;
       const badge = statusColors(p.status);
+      const showGroup = i === 0 || projects[i - 1].deptGroup !== p.deptGroup;
+      const groupLabel = showGroup ? escapeHtml(p.deptGroup) : '';
       return `
         <div style="height:${rowH}px; display:flex; align-items:center; gap:10px; padding: 6px 12px; border-bottom: 1px solid #f1f5f9;">
-          <span style="width:10px; height:10px; border-radius: 3px; background:${badge.fill}; flex: 0 0 auto;"></span>
+          <div style="width: 110px; flex: 0 0 auto; font-size: 11px; font-weight: 700; color:#334155; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${groupLabel}">
+            ${groupLabel}
+          </div>
+          <span style="width:8px; height:8px; border-radius: 3px; background:${badge.fill}; flex: 0 0 auto;"></span>
           <div style="flex: 1; min-width: 0; cursor: pointer;" onclick="location.hash='#view/${p.id}'" title="${escapeHtml(p.name)}">
             <div style="font-weight: 700; color:#0f172a; font-size: 12px; line-height: 1.2; display:-webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
               ${escapeHtml(p.name)}
@@ -6200,7 +7777,7 @@ async function renderDashboard() {
         <div style="display:grid; grid-template-columns: ${namesW}px ${timelineW}px; min-width: ${namesW + timelineW}px;">
           <div style="position: sticky; left: 0; z-index: 2; background: #ffffff; border-right: 1px solid #e2e8f0;">
             <div style="height:${topPad}px; position: sticky; top: 0; z-index: 3; background: #ffffff; border-bottom: 1px solid #e2e8f0; display:flex; align-items:center; padding: 0 12px; font-weight: 800; color:#334155;">
-              Project
+              Dept Group / Project
             </div>
             ${nameRows}
           </div>
@@ -7096,6 +8673,8 @@ async function renderAdminRoles() {
           canViewCRList: true,
           canCreateCR: true,
           canEditCR: true,
+          canViewMasterDwsApplication: false,
+          canViewManagementDashboard: false,
         },
         // Internal IC
         {
@@ -7113,6 +8692,8 @@ async function renderAdminRoles() {
           canViewCRList: true,
           canCreateCR: true,
           canEditCR: true,
+          canViewMasterDwsApplication: false,
+          canViewManagementDashboard: false,
         },
         // Internal Manager
         {
@@ -7130,6 +8711,8 @@ async function renderAdminRoles() {
           canViewCRList: true,
           canCreateCR: true,
           canEditCR: true,
+          canViewMasterDwsApplication: false,
+          canViewManagementDashboard: false,
         },
         // Management (any domain)
         {
@@ -7147,6 +8730,8 @@ async function renderAdminRoles() {
           canViewCRList: true,
           canCreateCR: true,
           canEditCR: true,
+          canViewMasterDwsApplication: false,
+          canViewManagementDashboard: false,
         },
       ];
     };
@@ -7183,6 +8768,8 @@ async function renderAdminRoles() {
                     <th>CR Dashboard</th>
                     <th>CR List</th>
                     <th>CR Create/Edit</th>
+                    <th>Master DWS Application</th>
+                    <th>Management Dashboard</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -7222,6 +8809,12 @@ async function renderAdminRoles() {
                         <td style="text-align: center;">
                           <input type="checkbox" class="access-checkbox" data-field="canCreateCR" ${r.canCreateCR ? 'checked' : ''} />
                           <input type="checkbox" class="access-checkbox" data-field="canEditCR" ${r.canEditCR ? 'checked' : ''} style="margin-left: 4px;" />
+                        </td>
+                        <td style="text-align: center;">
+                          <input type="checkbox" class="access-checkbox" data-field="canViewMasterDwsApplication" ${r.canViewMasterDwsApplication ? 'checked' : ''} />
+                        </td>
+                        <td style="text-align: center;">
+                          <input type="checkbox" class="access-checkbox" data-field="canViewManagementDashboard" ${r.canViewManagementDashboard ? 'checked' : ''} />
                         </td>
                       </tr>
                     `;
@@ -7295,6 +8888,8 @@ async function renderAdminRoles() {
             canViewCRList: getCheckboxVal('canViewCRList'),
             canCreateCR: getCheckboxVal('canCreateCR'),
             canEditCR: getCheckboxVal('canEditCR'),
+            canViewMasterDwsApplication: getCheckboxVal('canViewMasterDwsApplication'),
+            canViewManagementDashboard: getCheckboxVal('canViewManagementDashboard'),
           };
         });
 
@@ -7324,6 +8919,523 @@ async function renderAdminRoles() {
   }
 }
 
+async function renderMasterDwsApplications() {
+  setActive('#master-dws');
+  await ensureLookups();
+
+  const load = async () => {
+    const items = await fetchJSON('/api/dws-applications');
+    return Array.isArray(items) ? items : [];
+  };
+
+  let apps = [];
+  try {
+    apps = await load();
+  } catch (e) {
+    app.innerHTML = `<div class="error">Failed to load Master DWS Applications: ${e.message}</div>`;
+    return;
+  }
+
+  const escape = (s) => escapeHtml(String(s ?? ''));
+
+  app.innerHTML = `
+    <div class="card">
+      <div style="display:flex; justify-content: space-between; align-items:center; gap:12px; flex-wrap: wrap;">
+        <h2 style="margin:0;">Master DWS Application</h2>
+        <button class="primary" id="btn-add-dws">+ Add Application</button>
+      </div>
+      <p class="muted" style="margin-top:8px;">Used as the source for CR field “System Impacted”.</p>
+
+      <div style="margin-top: 16px; overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>System Name</th>
+              <th>Production URL</th>
+              <th>Staging URL</th>
+              <th>Github URL</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${apps.map(a => `
+              <tr>
+                <td><strong>${escape(a.systemName)}</strong></td>
+                <td>${a.productionUrl ? `<a href="${escape(a.productionUrl)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">-</span>'}</td>
+                <td>${a.stagingUrl ? `<a href="${escape(a.stagingUrl)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">-</span>'}</td>
+                <td style="max-width:320px;white-space:pre-wrap;word-break:break-word;">${a.githubUrl ? escape(String(a.githubUrl)) : '<span class="muted">-</span>'}</td>
+                <td style="white-space:nowrap;">
+                  <button data-action="edit" data-id="${escape(a.id)}">Edit</button>
+                  <button data-action="delete" data-id="${escape(a.id)}" style="color: var(--danger); margin-left: 8px;">Delete</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  const openModal = (mode, existing) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 720px;">
+        <h3 style="margin-top:0;">${mode === 'create' ? 'Add' : 'Edit'} DWS Application</h3>
+        <form id="dws-form" class="form">
+          ${formRow('System Name *', `<input name="systemName" value="${escape(existing?.systemName || '')}" required />`)}
+          ${formRow('System Production URL', `<input name="productionUrl" type="url" value="${escape(existing?.productionUrl || '')}" placeholder="https://..." />`)}
+          ${formRow('System Staging URL', `<input name="stagingUrl" type="url" value="${escape(existing?.stagingUrl || '')}" placeholder="https://..." />`)}
+          ${formRow('Github URL', `<textarea name="githubUrl" rows="3" style="width:100%;resize:vertical;" placeholder="Repository link or description...">${escape(existing?.githubUrl || '')}</textarea>`)}
+          <div style="display:flex; gap: 12px;">
+            <button type="submit" class="primary">${mode === 'create' ? 'Create' : 'Save'}</button>
+            <button type="button" id="btn-cancel">Cancel</button>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#btn-cancel').onclick = () => modal.remove();
+    modal.onclick = (e) => {
+      if (e.target === modal) modal.remove();
+    };
+
+    modal.querySelector('#dws-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = {
+        systemName: fd.get('systemName'),
+        productionUrl: fd.get('productionUrl') || null,
+        stagingUrl: fd.get('stagingUrl') || null,
+        githubUrl: (fd.get('githubUrl') || '').trim() || null,
+      };
+      try {
+        if (mode === 'create') {
+          await fetchJSON('/api/dws-applications', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+        } else {
+          await fetchJSON(`/api/dws-applications/${existing.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+        }
+        // Refresh lookups and page
+        LOOKUPS = { users: [], departments: [], dwsApplications: [] };
+        await ensureLookups();
+        modal.remove();
+        renderMasterDwsApplications();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    };
+  };
+
+  document.getElementById('btn-add-dws').onclick = () => openModal('create');
+
+  app.querySelectorAll('button[data-action="edit"]').forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.dataset.id;
+      const existing = apps.find((a) => a.id === id);
+      openModal('edit', existing);
+    };
+  });
+
+  app.querySelectorAll('button[data-action="delete"]').forEach((btn) => {
+    btn.onclick = async () => {
+      const id = btn.dataset.id;
+      const existing = apps.find((a) => a.id === id);
+      if (!confirm(`Delete "${existing?.systemName || 'this application'}"?`)) return;
+      try {
+        await fetchJSON(`/api/dws-applications/${id}`, { method: 'DELETE' });
+        LOOKUPS = { users: [], departments: [], dwsApplications: [] };
+        await ensureLookups();
+        renderMasterDwsApplications();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    };
+  });
+}
+
+async function renderManagementDashboard() {
+  setActive('#management-dashboard');
+  await ensureLookups();
+
+  let data;
+  try {
+    data = await fetchJSON('/api/management-dashboard');
+  } catch (e) {
+    app.innerHTML = `<div class="error">Failed to load Management Dashboard: ${escapeHtml(e.message || String(e))}</div>`;
+    return;
+  }
+
+  const status = String(data?.portfolioStatus || 'GREEN').toUpperCase();
+  const statusColor = status === 'RED' ? '#ef4444' : status === 'AMBER' ? '#f59e0b' : '#22c55e';
+  const notes = data?.notes || { portfolioStatus: status, highlights: '', criticalAlerts: '', updatedAt: null, updatedBy: null };
+
+  const crFunnel = Array.isArray(data?.crFunnel) ? data.crFunnel : [];
+  const timeline = Array.isArray(data?.timelineProgress) ? data.timelineProgress : [];
+  const itProjectLived = Array.isArray(data?.itProjectLived) ? data.itProjectLived : [];
+  const topCrs = Array.isArray(data?.highPriorityCrs) ? data.highPriorityCrs : [];
+  const risks = Array.isArray(data?.risksBlockers) ? data.risksBlockers : [];
+
+  const ownerName = (ownerId) => ownerId ? nameById(LOOKUPS.users, ownerId) : '';
+
+  const parseDate = (s) => {
+    if (!s) return null;
+    const d = new Date(String(s).slice(0, 10));
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const quarterKey = (d) => {
+    const q = Math.floor(d.getMonth() / 3) + 1;
+    return `${d.getFullYear()}-Q${q}`;
+  };
+  const quarterLabel = (key) => {
+    const [y, qRaw] = key.split('-Q');
+    return `Q${qRaw} ${y}`;
+  };
+
+  // Timeline axis: from earliest planStartDate to latest planEndDate (fallbacks to start/end)
+  const timelineDates = timeline.flatMap((p) => {
+    const s = parseDate(p.planStartDate) || parseDate(p.startDate) || parseDate(p.createdAt);
+    const e = parseDate(p.planEndDate) || parseDate(p.endDate) || parseDate(p.updatedAt);
+    return [s, e].filter(Boolean);
+  });
+  const minDate = timelineDates.length ? new Date(Math.min(...timelineDates.map((d) => d.getTime()))) : new Date();
+  const maxDate = timelineDates.length ? new Date(Math.max(...timelineDates.map((d) => d.getTime()))) : new Date();
+  const startAxis = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+  const endAxis = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+  // expand a bit
+  startAxis.setMonth(startAxis.getMonth() - 3);
+  endAxis.setMonth(endAxis.getMonth() + 3);
+
+  const quarters = [];
+  const cursor = new Date(startAxis);
+  // normalize to quarter start
+  cursor.setMonth(Math.floor(cursor.getMonth() / 3) * 3, 1);
+  while (cursor <= endAxis && quarters.length < 12) {
+    quarters.push(quarterKey(cursor));
+    cursor.setMonth(cursor.getMonth() + 3, 1);
+  }
+
+  const projectMilestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
+  const milestonePct = (m) => {
+    const idx = projectMilestones.findIndex((x) => String(x).toLowerCase() === String(m || '').toLowerCase());
+    if (idx < 0) return 0;
+    return Math.round((idx / (projectMilestones.length - 1)) * 100);
+  };
+
+  const fmtDate = (s) => (s ? String(s).slice(0, 10) : '');
+
+  app.innerHTML = `
+    <div class="mgmt-dashboard">
+      <div class="mgmt-header">
+        <div>DOWNSTREAM IT PROJECT & CR WEEKLY DASHBOARD</div>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end;">
+          <div class="asof">As of ${new Date().toLocaleDateString()}</div>
+          <button id="btn-mgmt-download" data-export-hide="1" style="background:#ffffff; border:1px solid rgba(255,255,255,.6); font-weight:900;">Download (HD)</button>
+        </div>
+      </div>
+
+      <div class="mgmt-top-row">
+        <div class="mgmt-status-box">
+          <div>
+            <div class="mgmt-status-title">PORTFOLIO STATUS</div>
+            <div class="muted" style="margin-top:4px;">(Overall)</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <select id="mgmt-portfolio-status" style="max-width: 140px;">
+              ${['GREEN','AMBER','RED'].map(s => `<option value="${s}" ${status === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div class="mgmt-notes-box">
+          <div style="display:grid; grid-template-columns: 1fr; gap: 12px;">
+            <div>
+              <div style="font-weight:900; color:#0f172a;">HIGHLIGHTS</div>
+              <textarea id="mgmt-highlights" placeholder="Type highlights...">${escapeHtml(notes.highlights || '')}</textarea>
+            </div>
+          </div>
+          <div class="mgmt-notes-actions">
+            <div class="muted" style="margin-right:auto; align-self:center;">
+              ${notes.updatedAt ? `Last updated: <strong>${escapeHtml(String(notes.updatedAt).replace('T',' ').slice(0,16))}</strong>` : 'Not saved yet'}
+            </div>
+            <button class="primary" id="btn-save-mgmt" data-export-hide="1">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mgmt-section">
+        <div class="mgmt-section-title">TIMELINE PROGRESS</div>
+        <div class="mgmt-body">
+          <div class="mgmt-timeline">
+            <table>
+              <thead>
+                <tr>
+                  <th class="sticky-col">PROJECT / MILESTONE</th>
+                  ${quarters.map(q => `<th>${quarterLabel(q)}</th>`).join('')}
+                  <th style="min-width:70px;">%</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${timeline.length ? timeline.map(p => {
+                  const s = parseDate(p.planStartDate) || parseDate(p.startDate) || parseDate(p.createdAt);
+                  const e = parseDate(p.planEndDate) || parseDate(p.endDate) || parseDate(p.updatedAt);
+                  const sKey = s ? quarterKey(new Date(s.getFullYear(), s.getMonth(), 1)) : null;
+                  const eKey = e ? quarterKey(new Date(e.getFullYear(), e.getMonth(), 1)) : null;
+                  const sIdx = sKey ? quarters.indexOf(sKey) : -1;
+                  const eIdx = eKey ? quarters.indexOf(eKey) : -1;
+                  const pct = (Number.isFinite(Number(p.percentCompletion))
+                    ? Math.max(0, Math.min(100, Math.round(Number(p.percentCompletion))))
+                    : milestonePct(p.milestone));
+                  const statusCls = (() => {
+                    const raw = String(p.status || '').toLowerCase().trim().replace(/\s+/g, '-');
+                    if (raw === 'on-track') return 'status-on-track';
+                    if (raw === 'at-risk') return 'status-at-risk';
+                    if (raw === 'delayed') return 'status-delayed';
+                    if (raw === 'live') return 'status-live';
+                    return '';
+                  })();
+
+                  return `
+                    <tr>
+                      <td class="sticky-col">
+                        <strong>${escapeHtml(p.name)}</strong>
+                        <span class="sub">${escapeHtml(p.milestone || '')} • ${escapeHtml(p.status || '')}</span>
+                      </td>
+                      ${quarters.map((_, idx) => {
+                        const inside = sIdx >= 0 && eIdx >= 0 ? (idx >= sIdx && idx <= eIdx) : false;
+                        return `<td>${inside ? `<div class="mgmt-bar-wrap"><div class="mgmt-bar ${statusCls}" style="width:100%"></div></div>` : ''}</td>`;
+                      }).join('')}
+                      <td><div class="mgmt-percent">${pct}%</div></td>
+                    </tr>
+                  `;
+                }).join('') : `<tr><td class="muted" colspan="${quarters.length + 2}">No projects found</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="mgmt-section">
+        <div class="mgmt-section-title">IT PROJECT LIVED</div>
+        <div class="mgmt-body">
+          <div class="mgmt-timeline">
+            <table class="mgmt-simple-table" style="min-width:720px;">
+              <thead>
+                <tr>
+                  <th>PROJECT / MILESTONE</th>
+                  <th>ACTUAL START DATE</th>
+                  <th>ACTUAL END DATE</th>
+                  <th>LIVE AGING (DAYS)</th>
+                  <th>REMARKS</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itProjectLived.length
+                  ? itProjectLived.map((row) => {
+                    const aging =
+                      row.liveAgingDays === null || row.liveAgingDays === undefined
+                        ? '—'
+                        : `${row.liveAgingDays} day${Number(row.liveAgingDays) === 1 ? '' : 's'}`;
+                    return `
+                    <tr>
+                      <td>
+                        <strong>${escapeHtml(row.name || '')}</strong>
+                        <div class="muted" style="font-size:12px;margin-top:2px;">${escapeHtml(row.milestone || '')}</div>
+                      </td>
+                      <td>${escapeHtml(fmtDate(row.startDate) || '—')}</td>
+                      <td>${escapeHtml(fmtDate(row.endDate) || '—')}</td>
+                      <td>${escapeHtml(aging)}</td>
+                      <td style="max-width:360px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(row.remark || '')}</td>
+                    </tr>`;
+                  }).join('')
+                  : `<tr><td class="muted" colspan="5">No live projects found</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="mgmt-body">
+        <div class="mgmt-bottom-grid">
+          <div class="mgmt-box">
+            <div class="box-title">CHANGE REQUEST (CR) FUNNEL</div>
+            <div class="box-body">
+              <table class="mgmt-simple-table">
+                <thead><tr><th>CR Summary</th><th>Count</th></tr></thead>
+                <tbody>
+                  ${crFunnel.length
+                    ? crFunnel.map((r) => `
+                      <tr><td>${escapeHtml(r.milestone || '—')}</td><td>${Number(r.count || 0)}</td></tr>
+                    `).join('')
+                    : `<tr><td class="muted" colspan="2">No CRs found</td></tr>`
+                  }
+                </tbody>
+              </table>
+
+              <div style="margin-top: 10px; font-weight:900; color:#0f172a;">HIGH PRIORITY CRs (TOP 5)</div>
+              <table class="mgmt-simple-table" style="margin-top:6px;">
+                <thead><tr><th>CR</th><th>Plan End</th><th>Status</th></tr></thead>
+                <tbody>
+                  ${topCrs.length ? topCrs.map(c => `
+                    <tr>
+                      <td>${escapeHtml((c.ticket ? `${c.ticket}: ` : '') + c.name)}</td>
+                      <td>${escapeHtml(fmtDate(c.planEndDate) || '')}</td>
+                      <td>${escapeHtml(c.status || '')}</td>
+                    </tr>
+                  `).join('') : `<tr><td class="muted" colspan="3">No P0 CRs found</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="mgmt-box">
+            <div class="box-title">CRITICAL RISKS & BLOCKERS</div>
+            <div class="box-body">
+              <table class="mgmt-simple-table">
+                <thead>
+                  <tr><th>Initiative Name</th><th>Remark</th></tr>
+                </thead>
+                <tbody>
+                  ${risks.length ? risks.map(r => `
+                    <tr>
+                      <td>${escapeHtml(r.issue || '')}<div class="muted" style="font-size: 12px;">${escapeHtml(r.type || '')} • ${escapeHtml(r.status || '')}</div></td>
+                      <td>${escapeHtml(r.remark || '')}</td>
+                    </tr>
+                  `).join('') : `<tr><td class="muted" colspan="2">No risks/blockers detected</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const btnSave = document.getElementById('btn-save-mgmt');
+  const btnDownload = document.getElementById('btn-mgmt-download');
+  const statusSelect = document.getElementById('mgmt-portfolio-status');
+  const applyStatusSelectStyle = () => {
+    const v = String(statusSelect?.value || 'GREEN').toUpperCase();
+    const color = v === 'RED' ? '#ef4444' : v === 'AMBER' ? '#f59e0b' : '#22c55e';
+    if (statusSelect) {
+      statusSelect.style.borderColor = color;
+      statusSelect.style.color = color;
+      statusSelect.style.fontWeight = '900';
+      statusSelect.style.background = '#fff';
+    }
+  };
+  if (statusSelect) {
+    statusSelect.onchange = applyStatusSelectStyle;
+    applyStatusSelectStyle();
+  }
+
+  if (btnDownload) {
+    btnDownload.onclick = async () => {
+      try {
+        const root = document.querySelector('.mgmt-dashboard');
+        if (!root) {
+          alert('Dashboard not found');
+          return;
+        }
+        const h2c = window.html2canvas;
+        if (typeof h2c !== 'function') {
+          alert('Image export is not available (html2canvas not loaded).');
+          return;
+        }
+
+        const canvas = await h2c(root, {
+          backgroundColor: '#ffffff',
+          scale: 3, // HD
+          useCORS: true,
+          scrollX: 0,
+          scrollY: -window.scrollY,
+          windowWidth: Math.max(document.documentElement.clientWidth, root.scrollWidth),
+          windowHeight: Math.max(document.documentElement.clientHeight, root.scrollHeight),
+          onclone: (doc) => {
+            try {
+              const clonedRoot = doc.querySelector('.mgmt-dashboard');
+              if (!clonedRoot) return;
+
+              // Remove action buttons in export
+              clonedRoot.querySelectorAll('[data-export-hide="1"]').forEach((el) => {
+                el.style.display = 'none';
+              });
+
+              // Ensure timeline container doesn't clip content in export
+              const t = clonedRoot.querySelector('.mgmt-timeline');
+              if (t) t.style.overflow = 'visible';
+
+              // Replace textareas (Highlights) with a full-height div so wording is fully captured.
+              clonedRoot.querySelectorAll('textarea').forEach((ta) => {
+                const text = ta.value ?? ta.textContent ?? '';
+                const div = doc.createElement('div');
+                const cs = doc.defaultView?.getComputedStyle(ta);
+                if (cs) {
+                  div.style.font = cs.font;
+                  div.style.fontSize = cs.fontSize;
+                  div.style.fontFamily = cs.fontFamily;
+                  div.style.fontWeight = cs.fontWeight;
+                  div.style.lineHeight = cs.lineHeight;
+                  div.style.color = cs.color;
+                  div.style.padding = cs.padding;
+                  div.style.border = cs.border;
+                  div.style.borderRadius = cs.borderRadius;
+                  div.style.background = cs.background;
+                  div.style.width = cs.width;
+                  div.style.boxSizing = cs.boxSizing;
+                  div.style.minHeight = cs.minHeight;
+                }
+                div.style.whiteSpace = 'pre-wrap';
+                div.style.overflow = 'visible';
+                div.textContent = text;
+                ta.replaceWith(div);
+              });
+            } catch {
+              /* ignore */
+            }
+          },
+        });
+
+        const pngUrl = canvas.toDataURL('image/png');
+        const a = document.createElement('a');
+        a.href = pngUrl;
+        a.download = `Management_Dashboard_${new Date().toISOString().slice(0, 10)}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch (e) {
+        alert(e?.message || String(e));
+      }
+    };
+  }
+
+  btnSave.onclick = async () => {
+    const highlights = document.getElementById('mgmt-highlights').value || '';
+    const criticalAlerts = '';
+    const portfolioStatus = document.getElementById('mgmt-portfolio-status')?.value || 'GREEN';
+    try {
+      await fetchJSON('/api/management-dashboard/notes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ highlights, criticalAlerts, portfolioStatus }),
+      });
+      alert('Saved');
+      renderManagementDashboard();
+    } catch (e) {
+      alert(e.message || String(e));
+    }
+  };
+}
+
 async function renderCRDashboard() {
   setActive('#crdashboard');
   await ensureLookups();
@@ -7332,11 +9444,16 @@ async function renderCRDashboard() {
   const urlParams = new URLSearchParams(location.search);
   const selectedDepartmentId = urlParams.get('departmentId') || '';
   const selectedItManagerId = urlParams.get('itManagerId') || '';
-  
+  const selectedSystemImpactedIds = (urlParams.get('systemImpactedId') || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   // Build API query string with filters
   const apiQs = new URLSearchParams();
   if (selectedDepartmentId) apiQs.set('departmentId', selectedDepartmentId);
   if (selectedItManagerId) apiQs.set('itManagerId', selectedItManagerId);
+  if (selectedSystemImpactedIds.length) apiQs.set('systemImpactedId', selectedSystemImpactedIds.join(','));
   
   const d = await fetchJSON('/api/cr-dashboard?' + apiQs.toString());
 
@@ -7357,10 +9474,11 @@ async function renderCRDashboard() {
 
   try {
     // Fetch CR initiatives with dates so we can compute all age metrics.
-    // Apply the same dashboard filters (departmentId and itManagerId).
+    // Apply the same dashboard filters (department, IT manager, system impacted).
     const crQs = new URLSearchParams();
     crQs.set('type', 'CR');
     if (selectedDepartmentId) crQs.set('departmentId', selectedDepartmentId);
+    if (selectedSystemImpactedIds.length) crQs.set('systemImpactedId', selectedSystemImpactedIds.join(','));
     const crInitiatives = await fetchJSON('/api/initiatives?' + crQs.toString());
 
     // Role/type based IT Manager filter is stored on initiative.itManagerIds (array or CSV)
@@ -7370,6 +9488,13 @@ async function renderCRDashboard() {
         const raw = i.itManagerIds || i.itManagerId || [];
         const ids = Array.isArray(raw) ? raw : String(raw).split(',').map(v => v.trim()).filter(Boolean);
         return ids.includes(selectedItManagerId);
+      });
+    }
+    if (selectedSystemImpactedIds.length) {
+      filteredCRs = filteredCRs.filter((i) => {
+        const raw = i.systemImpactedIds ?? i.systemImpactedId;
+        const ids = Array.isArray(raw) ? raw : String(raw || '').split(',').map((v) => v.trim()).filter(Boolean);
+        return selectedSystemImpactedIds.some((sel) => ids.includes(sel));
       });
     }
 
@@ -7698,11 +9823,32 @@ async function renderCRDashboard() {
     .sort((a, b) => a.label.localeCompare(b.label));
   
   app.innerHTML = `
-    <div class="card" style="margin-bottom: 24px; padding: 20px;">
+    <div class="card" id="cr-dashboard-filters" style="margin-bottom: 24px; padding: 20px;">
       <div style="display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap;">
         ${createFilterDropdown('filter-department-cr', 'Department', departmentOptions, selectedDepartmentId, 'updateCRDashboardFilters()')}
         ${createFilterDropdown('filter-itmanager-cr', 'IT Manager', itManagerOptions, selectedItManagerId, 'updateCRDashboardFilters()')}
-        ${(selectedDepartmentId || selectedItManagerId) ? `
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;">System impacted</label>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <div class="multi-select-wrapper" style="position: relative;">
+              <button type="button" class="multi-select-btn" data-filter="fSystemImpacted-cr" style="min-width: 200px; text-align: left;">
+                ${selectedSystemImpactedIds.length ? `System impacted (${selectedSystemImpactedIds.length})` : 'All system impacted'}
+              </button>
+              <div class="multi-select-dropdown" id="dropdown-fSystemImpacted-cr">
+                ${(LOOKUPS.dwsApplications || []).map((a) => `
+                  <label class="multi-select-option">
+                    <input type="checkbox" value="${a.id}" ${selectedSystemImpactedIds.includes(a.id) ? 'checked' : ''}>
+                    ${escapeHtml(a.systemName || '')}
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+            <button type="button" onclick="updateCRDashboardFilters()" style="padding: 10px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text);">
+              Apply
+            </button>
+          </div>
+        </div>
+        ${(selectedDepartmentId || selectedItManagerId || selectedSystemImpactedIds.length) ? `
           <button onclick="clearCRDashboardFilters()" style="padding: 10px 16px; background: var(--gray-100); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text);">
             Clear Filters
           </button>
@@ -8535,15 +10681,48 @@ async function renderCRDashboard() {
   window.updateCRDashboardFilters = () => {
     const departmentId = document.getElementById('filter-department-cr')?.value || '';
     const itManagerId = document.getElementById('filter-itmanager-cr')?.value || '';
+    const sysBoxes = document.querySelectorAll('#dropdown-fSystemImpacted-cr input[type="checkbox"]:checked');
+    const systemImpactedIds = Array.from(sysBoxes).map((cb) => cb.value);
     const params = new URLSearchParams();
     if (departmentId) params.set('departmentId', departmentId);
     if (itManagerId) params.set('itManagerId', itManagerId);
+    if (systemImpactedIds.length) params.set('systemImpactedId', systemImpactedIds.join(','));
     location.search = params.toString();
   };
-  
+
   window.clearCRDashboardFilters = () => {
     location.search = '';
   };
+
+  const dashFilterRoot = document.getElementById('cr-dashboard-filters');
+  if (dashFilterRoot) {
+    dashFilterRoot.querySelectorAll('.multi-select-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const filterId = btn.dataset.filter;
+        if (!filterId) return;
+        const dropdown = document.getElementById(`dropdown-${filterId}`);
+        if (!dropdown) return;
+        const isOpen = dropdown.classList.contains('open');
+        document.querySelectorAll('.multi-select-dropdown, .date-filter-dropdown').forEach((d) => d.classList.remove('open'));
+        document.body.classList.remove('dropdown-open');
+        if (!isOpen) {
+          dropdown.classList.add('open');
+          document.body.classList.add('dropdown-open');
+        }
+      });
+    });
+    if (window.__crDashDocClick) {
+      document.removeEventListener('click', window.__crDashDocClick);
+    }
+    window.__crDashDocClick = (e) => {
+      if (!dashFilterRoot.contains(e.target)) {
+        dashFilterRoot.querySelectorAll('.multi-select-dropdown.open').forEach((d) => d.classList.remove('open'));
+        document.body.classList.remove('dropdown-open');
+      }
+    };
+    document.addEventListener('click', window.__crDashDocClick);
+  }
 }
 
 function renderAuth() {
@@ -8692,8 +10871,8 @@ function renderAuth() {
 }
 
 // Protected routes that require authentication
-const PROTECTED_ROUTES = ['#list', '#crlist', '#dashboard', '#crdashboard', '#new', '#user-dashboard', '#admin', '#admin-users', '#admin-roles'];
-const ADMIN_ROUTES = ['#admin', '#admin-users', '#admin-roles'];
+const PROTECTED_ROUTES = ['#list', '#crlist', '#dashboard', '#crdashboard', '#new', '#user-dashboard', '#admin', '#admin-users', '#admin-roles', '#master-dws', '#management-dashboard'];
+const ADMIN_ROUTES = ['#admin', '#admin-users', '#admin-roles', '#master-dws', '#management-dashboard'];
 
 async function requireAuth() {
   const token = getToken();
@@ -8814,8 +10993,14 @@ async function updateNavAuth() {
   const profileMenuName = document.getElementById('profile-menu-name');
   const adminLinks = document.querySelectorAll('.admin-link');
   const protectedLinks = document.querySelectorAll('.protected-link');
+  const navMasterDws = document.getElementById('nav-master-dws');
+  const navManagementDashboard = document.getElementById('nav-management-dashboard');
   
-  const user = currentUser;
+  // Ensure currentUser is populated from token/profile so nav doesn't "disappear" after refresh.
+  let user = currentUser;
+  if (!user && getToken()) {
+    user = await getCurrentUser();
+  }
   if (user) {
     // Compute fine-grained access rules (based on email domain + type)
     const access = await getUserAccess();
@@ -8876,6 +11061,18 @@ async function updateNavAuth() {
       adminLinks.forEach(link => link.classList.remove('hidden'));
     } else {
       adminLinks.forEach(link => link.classList.add('hidden'));
+    }
+
+    // Master DWS Application must be visible ONLY when Role = "Admin"
+    if (navMasterDws) {
+      const role = String(user.role || '').trim().toLowerCase();
+      navMasterDws.classList.toggle('hidden', !(user.isAdmin || role === 'admin'));
+    }
+
+    // Management Dashboard must be visible ONLY when Role = "Admin"
+    if (navManagementDashboard) {
+      const role = String(user.role || '').trim().toLowerCase();
+      navManagementDashboard.classList.toggle('hidden', !(user.isAdmin || role === 'admin'));
     }
   } else {
     // Hide profile menu and notifications, show login link
@@ -8944,6 +11141,8 @@ async function router() {
     if (h.startsWith('#user-dashboard')) return renderUserDashboard();
     if (h.startsWith('#admin-users')) return renderAdminUsers();
     if (h.startsWith('#admin-roles')) return renderAdminRoles();
+    if (h.startsWith('#master-dws')) return renderMasterDwsApplications();
+    if (h.startsWith('#management-dashboard')) return renderManagementDashboard();
     if (h.startsWith('#profile')) return renderProfile();
     if (h.startsWith('#new')) {
       const parts = h.split('/');

@@ -1316,6 +1316,27 @@ button.primary:hover {
   color: var(--brand-hover);
   text-decoration: underline;
 }
+/* Synced top + bottom horizontal scroll for wide lists */
+.table-scroll-pair {
+  max-width: 100%;
+}
+
+.table-scroll-top {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  height: 14px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: var(--color-bg-lighter);
+  scrollbar-width: thin;
+}
+
+.table-scroll-top-inner {
+  height: 1px;
+}
+
 /* Monday.com-inspired table styles */
 .table-wrapper {
   background: var(--color-bg-lighter);
@@ -3518,6 +3539,259 @@ button.btn-fixed.primary:hover {
   display: none !important;
 }
 
+/* --- Management Dashboard (reference-style) --- */
+.mgmt-dashboard {
+  background: linear-gradient(180deg, #e6eef6 0%, #f7fafc 40%, #eef2f7 100%);
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.mgmt-header {
+  background: #0b3b5a;
+  color: #fff;
+  padding: 14px 16px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mgmt-header .asof {
+  font-weight: 700;
+  opacity: 0.95;
+}
+
+.mgmt-top-row {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 12px;
+  padding: 12px;
+  background: #d7e3ef;
+}
+
+.mgmt-status-box {
+  background: #ffffffcc;
+  border: 1px solid #b6c6d6;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mgmt-status-title {
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.mgmt-status-pill {
+  font-weight: 900;
+  font-size: 18px;
+}
+
+.mgmt-notes-box {
+  background: #ffffffcc;
+  border: 1px solid #b6c6d6;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.mgmt-notes-box textarea {
+  min-height: 54px;
+  max-height: 160px;
+}
+
+.mgmt-notes-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.mgmt-section {
+  margin: 0;
+  border-top: 1px solid #b6c6d6;
+}
+
+.mgmt-section-title {
+  background: linear-gradient(180deg, #0f5b82 0%, #0b4a6a 100%);
+  color: #fff;
+  font-weight: 900;
+  padding: 10px 12px;
+  letter-spacing: 0.4px;
+}
+
+.mgmt-body {
+  padding: 12px;
+  background: #e9f1f8;
+}
+
+.mgmt-timeline {
+  background: #fff;
+  border: 1px solid #b6c6d6;
+  border-radius: 10px;
+  overflow: auto;
+}
+
+.mgmt-timeline table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+
+.mgmt-timeline th,
+.mgmt-timeline td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.mgmt-timeline thead th {
+  background: #dbe8f4;
+  color: #0f172a;
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+.mgmt-timeline .sticky-col {
+  position: sticky;
+  left: 0;
+  background: #ffffff;
+  z-index: 2;
+  min-width: 260px;
+  max-width: 360px;
+}
+
+.mgmt-timeline .sticky-col .sub {
+  display: block;
+  color: #64748b;
+  font-weight: 700;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.mgmt-bar {
+  height: 14px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #3aa6c8 0%, #2b7aa0 100%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.55);
+}
+
+/* Timeline bar colors aligned to Project List status palette */
+.mgmt-bar.status-on-track { background: #22c55e; }
+.mgmt-bar.status-at-risk { background: #f59e0b; }
+.mgmt-bar.status-delayed { background: #ef4444; }
+.mgmt-bar.status-live { background: #3b82f6; }
+
+.mgmt-bar-wrap {
+  position: relative;
+  height: 16px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+.mgmt-percent {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid #0b4a6a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  color: #0b4a6a;
+  margin-left: 10px;
+  flex: 0 0 auto;
+}
+
+.mgmt-bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.mgmt-box {
+  background: #fff;
+  border: 1px solid #b6c6d6;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.mgmt-box .box-title {
+  background: linear-gradient(180deg, #0f5b82 0%, #0b4a6a 100%);
+  color: #fff;
+  font-weight: 900;
+  padding: 10px 12px;
+}
+
+.mgmt-box .box-body {
+  padding: 10px 12px;
+}
+
+.mgmt-funnel {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.mgmt-funnel-nums {
+  display: grid;
+  grid-template-rows: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.mgmt-funnel-nums .n {
+  background: #e6f0f8;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+  font-weight: 900;
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.mgmt-simple-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.mgmt-simple-table th,
+.mgmt-simple-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 10px;
+  font-size: 13px;
+  vertical-align: top;
+}
+
+.mgmt-simple-table thead th {
+  background: #dbe8f4;
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .mgmt-top-row {
+    grid-template-columns: 1fr;
+  }
+  .mgmt-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .error {
   padding: var(--spacing-3);
   background: #fee2e2;
@@ -3547,6 +3821,150 @@ button.btn-fixed.primary:hover {
   display: none;
 }
 
+/* Floating recent activity (Project list + CR list) */
+.recent-activity-root {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.recent-activity-root > * {
+  pointer-events: auto;
+}
+
+.recent-activity-fab {
+  position: relative;
+  z-index: 1102;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand);
+  color: white;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.recent-activity-fab:hover {
+  transform: scale(1.06);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.55);
+}
+
+.recent-activity-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  z-index: 1098;
+}
+
+.recent-activity-backdrop.hidden {
+  display: none;
+}
+
+.recent-activity-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(440px, 100vw);
+  height: 100%;
+  max-height: 100dvh;
+  background: var(--surface);
+  box-shadow: -8px 0 32px rgba(15, 23, 42, 0.15);
+  z-index: 1099;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-light);
+}
+
+.recent-activity-panel.hidden {
+  display: none;
+}
+
+.recent-activity-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.recent-activity-panel-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.recent-activity-close {
+  border: none;
+  background: var(--gray-100);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.recent-activity-close:hover {
+  background: var(--gray-200);
+}
+
+.recent-activity-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px 24px;
+}
+
+.recent-activity-item {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.recent-activity-item:last-child {
+  border-bottom: none;
+}
+
+.recent-activity-item-header {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.recent-activity-item-header a {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.recent-activity-item-header a:hover {
+  text-decoration: underline;
+}
+
+.recent-activity-item-meta {
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.recent-activity-changes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .modal-content {
   background: var(--surface);
   border-radius: 8px;
@@ -3556,6 +3974,115 @@ button.btn-fixed.primary:hover {
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
+}
+
+/* Meeting Notes modal polish */
+.meeting-note-modal-content {
+  max-width: 1180px !important;
+  width: 96% !important;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.meeting-note-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.meeting-note-form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.meeting-note-section {
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 14px;
+  background: #fafbfd;
+  grid-column: 1 / -1;
+}
+
+.meeting-note-section h4 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.meeting-note-actions-table th,
+.meeting-note-actions-table td {
+  padding: 8px;
+  vertical-align: middle;
+}
+
+.meeting-note-actions-table input,
+.meeting-note-actions-table select {
+  width: 100%;
+  min-width: 0;
+}
+
+.meeting-note-remove-action-btn {
+  color: var(--danger);
+}
+
+.meeting-note-email-preview input[disabled] {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.meeting-note-mention-autocomplete {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.meeting-note-mention-autocomplete.hidden {
+  display: none !important;
+}
+
+.meeting-note-send-email-block {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--gray-50, #f9fafb);
+}
+
+.meeting-note-send-email-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.meeting-note-send-email-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.meeting-note-send-email-help {
+  margin: 8px 0 0 28px;
+  font-size: 13px;
+}
+
+.meeting-note-form-actions {
+  grid-column: 1 / -1;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+  margin-top: 2px;
 }
 
 /* Column Settings Modal Specific Styles */

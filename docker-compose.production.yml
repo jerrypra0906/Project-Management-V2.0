@@ -1,0 +1,18 @@
+# Docker Compose override for PRODUCTION environment
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.production.yml up
+# 
+# Note: Update nginx.conf.production with your production backend URL before using
+
+version: '3.8'
+
+services:
+  frontend:
+    environment:
+      - NGINX_ENV=production
+    # Override any production-specific settings here
+
+  backend:
+    environment:
+      - NODE_ENV=production
+    # Override any production-specific settings here
+

@@ -1,6 +1,12 @@
 /**
  * Task Status and Milestone Enums with case-insensitive normalization
  */
+import { CR_TASK_DEFINITIONS } from '../crTaskTemplates.js';
+
+const CR_TASK_MILESTONE_VALUES = [...new Set(CR_TASK_DEFINITIONS.map((t) => t.milestone))];
+const CR_TASK_MILESTONE_BY_LOWER = Object.fromEntries(
+  CR_TASK_MILESTONE_VALUES.map((m) => [m.toLowerCase(), m])
+);
 
 // ========== TASK STATUS ENUM ==========
 export const TaskStatus = {
@@ -114,8 +120,8 @@ export const Milestone = {
   LIVE_PREPARATION: 'Live Preparation'
 };
 
-// Valid milestone values (for validation)
-export const VALID_MILESTONES = Object.values(Milestone);
+// Valid milestone values (for validation) — standard workflow + CR phase labels
+export const VALID_MILESTONES = [...Object.values(Milestone), ...CR_TASK_MILESTONE_VALUES];
 
 // Mapping aliases to canonical values (case-insensitive)
 const MILESTONE_ALIASES = {
@@ -161,7 +167,7 @@ const MILESTONE_ALIASES = {
   'user acceptance testing': Milestone.TESTING,
   'system integration testing': Milestone.TESTING,
   
-  // LIVE_PREPARATION aliases
+  // LIVE_PREPARATION aliases (do not use bare "live" — reserved for CR task phase "Live")
   'live preparation': Milestone.LIVE_PREPARATION,
   'livepreparation': Milestone.LIVE_PREPARATION,
   'live_preparation': Milestone.LIVE_PREPARATION,
@@ -172,7 +178,6 @@ const MILESTONE_ALIASES = {
   'deployment': Milestone.LIVE_PREPARATION,
   'release': Milestone.LIVE_PREPARATION,
   'launch': Milestone.LIVE_PREPARATION,
-  'live': Milestone.LIVE_PREPARATION,
   'production': Milestone.LIVE_PREPARATION
 };
 
@@ -192,6 +197,11 @@ export function normalizeMilestone(input, defaultValue = null) {
   // Allow empty/none values
   if (normalized === '' || normalized === 'none' || normalized === 'null') {
     return null;
+  }
+
+  // CR workflow task milestones (exact labels) take precedence over generic aliases
+  if (CR_TASK_MILESTONE_BY_LOWER[normalized]) {
+    return CR_TASK_MILESTONE_BY_LOWER[normalized];
   }
   
   if (MILESTONE_ALIASES[normalized]) {

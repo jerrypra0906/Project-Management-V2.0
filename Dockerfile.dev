@@ -1,0 +1,20 @@
+# Local development Dockerfile (includes devDependencies for nodemon)
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies (including devDependencies)
+COPY package*.json ./
+RUN npm ci
+
+# Copy source (will be overridden by bind mounts in docker-compose.local.yml)
+COPY backend/ ./backend/
+COPY docs/ ./docs/
+
+RUN mkdir -p /app/uploads
+
+ENV NODE_ENV=development
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]
+

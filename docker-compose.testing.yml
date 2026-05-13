@@ -1,0 +1,18 @@
+# Docker Compose override for TESTING/STAGING environment
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.testing.yml up
+# 
+# Note: Update nginx.conf.testing with your testing backend URL before using
+
+version: '3.8'
+
+services:
+  frontend:
+    environment:
+      - NGINX_ENV=testing
+    # Override any testing-specific settings here
+
+  backend:
+    environment:
+      - NODE_ENV=production
+    # Override any testing-specific settings here
+
