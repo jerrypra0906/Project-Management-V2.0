@@ -3619,12 +3619,44 @@ button.btn-fixed.primary:hover {
   border-top: 1px solid #b6c6d6;
 }
 
+.mgmt-section-title,
+.mgmt-box .box-title {
+  justify-content: space-between;
+}
+
 .mgmt-section-title {
   background: linear-gradient(180deg, #0f5b82 0%, #0b4a6a 100%);
   color: #fff;
   font-weight: 900;
   padding: 10px 12px;
   letter-spacing: 0.4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mgmt-section-title-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.mgmt-section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 3px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.2;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+}
+
+.mgmt-box .box-title {
   display: flex;
   align-items: center;
   gap: 10px;

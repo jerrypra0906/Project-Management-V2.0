@@ -9151,6 +9151,17 @@ async function renderManagementDashboard() {
 
   const fmtDate = (s) => (s ? String(s).slice(0, 10) : '');
 
+  const mgmtTitleWithCount = (label, count, unit = 'Project') => {
+    const n = Number(count) || 0;
+    const unitLabel = n === 1 ? unit : `${unit}s`;
+    return `
+      <span class="mgmt-section-title-text">${escapeHtml(label)}</span>
+      <span class="mgmt-section-count" title="${n} ${unitLabel}">${n}</span>
+    `;
+  };
+
+  const crFunnelTotal = crFunnel.reduce((sum, r) => sum + Number(r.count || 0), 0);
+
   app.innerHTML = `
     <div class="mgmt-dashboard">
       <div class="mgmt-header">
@@ -9191,7 +9202,7 @@ async function renderManagementDashboard() {
       </div>
 
       <div class="mgmt-section mgmt-section--warranty">
-        <div class="mgmt-section-title">IT PROJECT LIVE (WARRANTY PERIOD)</div>
+        <div class="mgmt-section-title">${mgmtTitleWithCount('IT PROJECT LIVE (WARRANTY PERIOD)', itProjectLiveWarranty.length)}</div>
         <div class="mgmt-body">
           <div class="mgmt-timeline">
             <table class="mgmt-simple-table" style="min-width:720px;">
@@ -9231,7 +9242,7 @@ async function renderManagementDashboard() {
       </div>
 
       <div class="mgmt-section mgmt-section--timeline">
-        <div class="mgmt-section-title">TIMELINE PROGRESS</div>
+        <div class="mgmt-section-title">${mgmtTitleWithCount('TIMELINE PROGRESS', timeline.length)}</div>
         <div class="mgmt-body">
           <div class="mgmt-timeline">
             <table>
@@ -9283,7 +9294,7 @@ async function renderManagementDashboard() {
       </div>
 
       <div class="mgmt-section mgmt-section--fully-live">
-        <div class="mgmt-section-title">IT PROJECT FULLY LIVE</div>
+        <div class="mgmt-section-title">${mgmtTitleWithCount('IT PROJECT FULLY LIVE', itProjectFullyLive.length)}</div>
           <div class="mgmt-body">
             <div class="mgmt-timeline">
               <table class="mgmt-simple-table" style="min-width:640px;">
@@ -9314,7 +9325,7 @@ async function renderManagementDashboard() {
       </div>
 
       <div class="mgmt-section mgmt-section--not-started">
-        <div class="mgmt-section-title">IT PROJECT NOT STARTED</div>
+        <div class="mgmt-section-title">${mgmtTitleWithCount('IT PROJECT NOT STARTED', itProjectNotStarted.length)}</div>
           <div class="mgmt-body">
             <div class="mgmt-timeline">
               <table class="mgmt-simple-table" style="min-width:640px;">
@@ -9345,7 +9356,7 @@ async function renderManagementDashboard() {
       <div class="mgmt-body mgmt-panel--bottom">
         <div class="mgmt-bottom-grid">
           <div class="mgmt-box mgmt-box--cr-funnel">
-            <div class="box-title">CHANGE REQUEST (CR) FUNNEL</div>
+            <div class="box-title">${mgmtTitleWithCount('CHANGE REQUEST (CR) FUNNEL', crFunnelTotal, 'CR')}</div>
             <div class="box-body">
               <table class="mgmt-simple-table">
                 <thead><tr><th>CR Summary</th><th>Count</th></tr></thead>
@@ -9376,7 +9387,7 @@ async function renderManagementDashboard() {
           </div>
 
           <div class="mgmt-box mgmt-box--risks">
-            <div class="box-title">CRITICAL RISKS & BLOCKERS</div>
+            <div class="box-title">${mgmtTitleWithCount('CRITICAL RISKS & BLOCKERS', risks.length)}</div>
             <div class="box-body">
               <table class="mgmt-simple-table">
                 <thead>
