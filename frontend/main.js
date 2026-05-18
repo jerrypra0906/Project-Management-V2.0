@@ -1199,11 +1199,29 @@ const CR_MILESTONE_UI_OPTIONS = [
   'Live',
 ];
 
+const PROJECT_MILESTONES = [
+  'Preparation',
+  'Business Requirement',
+  'Tech Assessment',
+  'Planning',
+  'Development',
+  'Testing',
+  'Live (Warranty Period)',
+  'Fully Live',
+];
+
+function normalizeProjectMilestoneForDisplay(milestone) {
+  if (milestone === 'Live') return 'Live (Warranty Period)';
+  return milestone || '';
+}
+
 function normalizeCrMilestoneForDisplay(initiative) {
   // With "no extra column" design:
-  // - Project: milestone is canonical (Preparation -> Live)
+  // - Project: milestone is canonical (Preparation -> Fully Live)
   // - CR: milestone stores the CR phase directly (User Initiate -> Live)
-  return initiative?.milestone || '';
+  const m = initiative?.milestone || '';
+  if (initiative?.type === 'Project') return normalizeProjectMilestoneForDisplay(m);
+  return m;
 }
 
 /** Shared formatters for change-history (recent activity FAB + view page). */
@@ -1787,8 +1805,7 @@ async function renderList() {
   }
   
   // Project List milestone distribution (canonical milestones only)
-  // Correct order: Preparation -> Business Requirement -> Tech Assessment -> Planning -> Development -> Testing -> Live
-  const milestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live']; // used for filtering
+  const milestones = PROJECT_MILESTONES;
   const uiMilestones = milestones;
   const milestoneCounts = Object.fromEntries(milestones.map((m) => [m, 0]));
   const milestoneDisplayNames = Object.fromEntries(milestones.map((m) => [m, m]));
@@ -1799,11 +1816,12 @@ async function renderList() {
     'Planning': '#6366f1', // Indigo
     'Development': '#f59e0b', // Amber
     'Testing': '#ef4444', // Red
-    'Live': '#22c55e', // Green
+    'Live (Warranty Period)': '#22c55e', // Green
+    'Fully Live': '#16a34a', // Dark green
   };
 
   data.forEach(i => {
-    const m = i?.milestone;
+    const m = normalizeProjectMilestoneForDisplay(i?.milestone);
     if (m && milestoneCounts[m] !== undefined) milestoneCounts[m] += 1;
   });
   // Apply client-side filtering for date filters
@@ -2795,7 +2813,7 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
     formRow('Milestone', `<select name="milestone">${
       selectedType === 'CR'
         ? CR_MILESTONE_UI_OPTIONS.map(m => option(m, m, selectedCrUiMilestone === m)).join('')
-        : ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => option(m, m, currentMilestone === m)).join('')
+        : PROJECT_MILESTONES.map(m => option(m, m, normalizeProjectMilestoneForDisplay(currentMilestone) === m)).join('')
     }</select>`),
     formRow('Actual Start Date', `<input type="date" name="startDate" value="${initiative?.startDate?.slice(0,10) || ''}" />`),
     formRow('Actual End Date', `<input type="date" name="endDate" value="${initiative?.endDate?.slice(0,10) || ''}" />`),
@@ -3182,6 +3200,8 @@ async function renderView(id) {
     testing: 6,
     'live preparation': 7,
     live: 8,
+    'live (warranty period)': 9,
+    'fully live': 10,
   };
   const crPhaseMilestoneOrder = {
     'user initiate': 10,
@@ -3875,7 +3895,7 @@ async function renderView(id) {
         ${formRow('Milestone', `<select name="milestone">${
           i.type === 'CR'
             ? CR_MILESTONE_UI_OPTIONS.map(m => `<option value="${m}" ${crUiSelectedMilestone === m ? 'selected' : ''}>${m}</option>`).join('')
-            : ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'].map(m => `<option value="${m}" ${i.milestone === m ? 'selected' : ''}>${m}</option>`).join('')
+            : PROJECT_MILESTONES.map(m => `<option value="${m}" ${normalizeProjectMilestoneForDisplay(i.milestone) === m ? 'selected' : ''}>${m}</option>`).join('')
         }</select>`)}
         ${formRow('Department', createSearchableSelect('departmentId', LOOKUPS.departments, i.departmentId || '', 'Select...'))}
         ${i.type === 'CR' ? formRow('System Impacted', createMultiSelect('systemImpactedIds', (LOOKUPS.dwsApplications || []).map(a => ({ id: a.id, name: a.systemName })), i.systemImpactedIds || [])) : ''}
@@ -4266,7 +4286,7 @@ function downloadTaskTemplate() {
     exampleRow.join(','),
     'Note: assigneeId should be a user ID from the system',
     'Status options: not started, in progress, at risk, cancel, done',
-    'Milestone options: Business Requirement, Tech Assessment, Planning, Development, Testing, Live Preparation'
+    `Milestone options: ${PROJECT_MILESTONES.join(', ')}`
   ].join('\n');
   
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -5035,14 +5055,7 @@ async function showTaskModal(initiativeId, taskId = null) {
   const milestoneOptions =
     initiativeType === 'CR'
       ? CR_MILESTONE_UI_OPTIONS.map((m) => ({ value: m, label: m }))
-      : [
-          { value: 'Business Requirement', label: 'Business Requirement' },
-          { value: 'Tech Assessment', label: 'Tech Assessment' },
-          { value: 'Planning', label: 'Planning' },
-          { value: 'Development', label: 'Development' },
-          { value: 'Testing', label: 'Testing' },
-          { value: 'Live Preparation', label: 'Live Preparation' },
-        ];
+      : PROJECT_MILESTONES.map((m) => ({ value: m, label: m }));
 
   const modal = document.createElement('div');
   modal.className = 'modal';
@@ -9080,7 +9093,11 @@ async function renderManagementDashboard() {
 
   const crFunnel = Array.isArray(data?.crFunnel) ? data.crFunnel : [];
   const timeline = Array.isArray(data?.timelineProgress) ? data.timelineProgress : [];
-  const itProjectLived = Array.isArray(data?.itProjectLived) ? data.itProjectLived : [];
+  const itProjectLiveWarranty = Array.isArray(data?.itProjectLiveWarranty)
+    ? data.itProjectLiveWarranty
+    : (Array.isArray(data?.itProjectLived) ? data.itProjectLived : []);
+  const itProjectFullyLive = Array.isArray(data?.itProjectFullyLive) ? data.itProjectFullyLive : [];
+  const itProjectNotStarted = Array.isArray(data?.itProjectNotStarted) ? data.itProjectNotStarted : [];
   const topCrs = Array.isArray(data?.highPriorityCrs) ? data.highPriorityCrs : [];
   const risks = Array.isArray(data?.risksBlockers) ? data.risksBlockers : [];
 
@@ -9124,9 +9141,10 @@ async function renderManagementDashboard() {
     cursor.setMonth(cursor.getMonth() + 3, 1);
   }
 
-  const projectMilestones = ['Preparation','Business Requirement','Tech Assessment','Planning','Development','Testing','Live'];
+  const projectMilestones = PROJECT_MILESTONES;
   const milestonePct = (m) => {
-    const idx = projectMilestones.findIndex((x) => String(x).toLowerCase() === String(m || '').toLowerCase());
+    const normalized = normalizeProjectMilestoneForDisplay(m);
+    const idx = projectMilestones.findIndex((x) => String(x).toLowerCase() === String(normalized || '').toLowerCase());
     if (idx < 0) return 0;
     return Math.round((idx / (projectMilestones.length - 1)) * 100);
   };
@@ -9143,7 +9161,7 @@ async function renderManagementDashboard() {
         </div>
       </div>
 
-      <div class="mgmt-top-row">
+      <div class="mgmt-top-row mgmt-panel--overview">
         <div class="mgmt-status-box">
           <div>
             <div class="mgmt-status-title">PORTFOLIO STATUS</div>
@@ -9172,7 +9190,47 @@ async function renderManagementDashboard() {
         </div>
       </div>
 
-      <div class="mgmt-section">
+      <div class="mgmt-section mgmt-section--warranty">
+        <div class="mgmt-section-title">IT PROJECT LIVE (WARRANTY PERIOD)</div>
+        <div class="mgmt-body">
+          <div class="mgmt-timeline">
+            <table class="mgmt-simple-table" style="min-width:720px;">
+              <thead>
+                <tr>
+                  <th>PROJECT / MILESTONE</th>
+                  <th>ACTUAL START DATE</th>
+                  <th>ACTUAL END DATE</th>
+                  <th>LIVE AGING (DAYS)</th>
+                  <th>REMARKS</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itProjectLiveWarranty.length
+                  ? itProjectLiveWarranty.map((row) => {
+                    const aging =
+                      row.liveAgingDays === null || row.liveAgingDays === undefined
+                        ? '—'
+                        : `${row.liveAgingDays} day${Number(row.liveAgingDays) === 1 ? '' : 's'}`;
+                    return `
+                    <tr>
+                      <td>
+                        <strong>${escapeHtml(row.name || '')}</strong>
+                        <div class="muted" style="font-size:12px;margin-top:2px;">${escapeHtml(row.milestone || '')}</div>
+                      </td>
+                      <td>${escapeHtml(fmtDate(row.startDate) || '—')}</td>
+                      <td>${escapeHtml(fmtDate(row.endDate) || '—')}</td>
+                      <td>${escapeHtml(aging)}</td>
+                      <td style="max-width:360px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(row.remark || '')}</td>
+                    </tr>`;
+                  }).join('')
+                  : `<tr><td class="muted" colspan="5">No projects in warranty period</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="mgmt-section mgmt-section--timeline">
         <div class="mgmt-section-title">TIMELINE PROGRESS</div>
         <div class="mgmt-body">
           <div class="mgmt-timeline">
@@ -9224,49 +9282,69 @@ async function renderManagementDashboard() {
         </div>
       </div>
 
-      <div class="mgmt-section">
-        <div class="mgmt-section-title">IT PROJECT LIVED</div>
-        <div class="mgmt-body">
-          <div class="mgmt-timeline">
-            <table class="mgmt-simple-table" style="min-width:720px;">
-              <thead>
-                <tr>
-                  <th>PROJECT / MILESTONE</th>
-                  <th>ACTUAL START DATE</th>
-                  <th>ACTUAL END DATE</th>
-                  <th>LIVE AGING (DAYS)</th>
-                  <th>REMARKS</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${itProjectLived.length
-                  ? itProjectLived.map((row) => {
-                    const aging =
-                      row.liveAgingDays === null || row.liveAgingDays === undefined
-                        ? '—'
-                        : `${row.liveAgingDays} day${Number(row.liveAgingDays) === 1 ? '' : 's'}`;
-                    return `
+      <div class="mgmt-section mgmt-section--fully-live">
+        <div class="mgmt-section-title">IT PROJECT FULLY LIVE</div>
+          <div class="mgmt-body">
+            <div class="mgmt-timeline">
+              <table class="mgmt-simple-table" style="min-width:640px;">
+                <thead>
+                  <tr>
+                    <th>PROJECT</th>
+                    <th>DEPARTMENT</th>
+                    <th>ACTUAL START DATE</th>
+                    <th>ACTUAL END DATE</th>
+                    <th>BUSINESS IMPACT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itProjectFullyLive.length
+                    ? itProjectFullyLive.map((row) => `
                     <tr>
-                      <td>
-                        <strong>${escapeHtml(row.name || '')}</strong>
-                        <div class="muted" style="font-size:12px;margin-top:2px;">${escapeHtml(row.milestone || '')}</div>
-                      </td>
+                      <td><strong>${escapeHtml(row.name || '')}</strong></td>
+                      <td>${escapeHtml(row.department || '—')}</td>
                       <td>${escapeHtml(fmtDate(row.startDate) || '—')}</td>
                       <td>${escapeHtml(fmtDate(row.endDate) || '—')}</td>
-                      <td>${escapeHtml(aging)}</td>
-                      <td style="max-width:360px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(row.remark || '')}</td>
-                    </tr>`;
-                  }).join('')
-                  : `<tr><td class="muted" colspan="5">No live projects found</td></tr>`}
-              </tbody>
-            </table>
+                      <td style="max-width:280px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(row.businessImpact || '')}</td>
+                    </tr>`).join('')
+                    : `<tr><td class="muted" colspan="5">No fully live projects found</td></tr>`}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
       </div>
 
-      <div class="mgmt-body">
+      <div class="mgmt-section mgmt-section--not-started">
+        <div class="mgmt-section-title">IT PROJECT NOT STARTED</div>
+          <div class="mgmt-body">
+            <div class="mgmt-timeline">
+              <table class="mgmt-simple-table" style="min-width:640px;">
+                <thead>
+                  <tr>
+                    <th>PROJECT</th>
+                    <th>PLAN START DATE</th>
+                    <th>DEPARTMENT</th>
+                    <th>BUSINESS IMPACT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itProjectNotStarted.length
+                    ? itProjectNotStarted.map((row) => `
+                    <tr>
+                      <td><strong>${escapeHtml(row.name || '')}</strong></td>
+                      <td>${escapeHtml(fmtDate(row.planStartDate) || '—')}</td>
+                      <td>${escapeHtml(row.department || '—')}</td>
+                      <td style="max-width:280px;white-space:pre-wrap;word-break:break-word;">${escapeHtml(row.businessImpact || '')}</td>
+                    </tr>`).join('')
+                    : `<tr><td class="muted" colspan="4">No not-started projects found</td></tr>`}
+                </tbody>
+              </table>
+            </div>
+          </div>
+      </div>
+
+      <div class="mgmt-body mgmt-panel--bottom">
         <div class="mgmt-bottom-grid">
-          <div class="mgmt-box">
+          <div class="mgmt-box mgmt-box--cr-funnel">
             <div class="box-title">CHANGE REQUEST (CR) FUNNEL</div>
             <div class="box-body">
               <table class="mgmt-simple-table">
@@ -9297,7 +9375,7 @@ async function renderManagementDashboard() {
             </div>
           </div>
 
-          <div class="mgmt-box">
+          <div class="mgmt-box mgmt-box--risks">
             <div class="box-title">CRITICAL RISKS & BLOCKERS</div>
             <div class="box-body">
               <table class="mgmt-simple-table">

@@ -2,6 +2,12 @@ import express from 'express';
 import store from '../store.js';
 import crypto from 'crypto';
 import { requireAdmin } from '../middleware/auth.js';
+import {
+  PROJECT_MILESTONE_LIVE_WARRANTY,
+  PROJECT_MILESTONE_FULLY_LIVE,
+  PROJECT_MILESTONE_LEGACY_LIVE,
+  normalizeProjectMilestone,
+} from '../projectMilestones.js';
 
 const router = express.Router();
 
@@ -24,8 +30,14 @@ function computePortfolioStatus(projects, crs) {
 }
 
 function getMilestoneLabel(m) {
-  const v = String(m || '').trim();
+  const v = normalizeProjectMilestone(String(m || '').trim());
   return v || '—';
+}
+
+function departmentNameById(departments, id) {
+  if (!id) return '—';
+  const dept = (departments || []).find((d) => d.id === id);
+  return dept?.name || '—';
 }
 
 router.use(requireAdmin);
@@ -34,6 +46,7 @@ router.get('/', async (_req, res) => {
   const data = await store.read();
   const initiatives = data.initiatives || [];
   const tasks = data.tasks || [];
+  const departments = data.departments || [];
   const projects = initiatives.filter((i) => i.type === 'Project');
   const crs = initiatives.filter((i) => i.type === 'CR');
 
@@ -122,9 +135,14 @@ router.get('/', async (_req, res) => {
       updatedAt: p.updatedAt || null,
     }));
 
-  // IT Project Lived: all projects in Live status (aging = today − actual end date)
-  const itProjectLived = projects
-    .filter((p) => normalizeStatus(p.status) === 'LIVE')
+  const isLiveWarrantyMilestone = (p) => {
+    const m = normalizeProjectMilestone(p.milestone);
+    return m === PROJECT_MILESTONE_LIVE_WARRANTY || p.milestone === PROJECT_MILESTONE_LEGACY_LIVE;
+  };
+
+  // IT Project Live (Warranty Period): projects at Live (Warranty Period) milestone
+  const itProjectLiveWarranty = projects
+    .filter((p) => isLiveWarrantyMilestone(p))
     .slice()
     .sort((a, b) => {
       const ae = parseDate(a.endDate);
@@ -150,6 +168,38 @@ router.get('/', async (_req, res) => {
         remark: p.remark || null,
       };
     });
+
+  const itProjectFullyLive = projects
+    .filter((p) => p.milestone === PROJECT_MILESTONE_FULLY_LIVE)
+    .slice()
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      department: departmentNameById(departments, p.departmentId),
+      startDate: p.startDate || null,
+      endDate: p.endDate || null,
+      businessImpact: p.businessImpact || null,
+    }));
+
+  const itProjectNotStarted = projects
+    .filter((p) => normalizeStatus(p.status) === 'NOT STARTED')
+    .slice()
+    .sort((a, b) => {
+      const ap = parseDate(a.planStartDate);
+      const bp = parseDate(b.planStartDate);
+      if (ap && bp) return ap.getTime() - bp.getTime();
+      if (ap) return -1;
+      if (bp) return 1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    })
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      planStartDate: p.planStartDate || null,
+      department: departmentNameById(departments, p.departmentId),
+      businessImpact: p.businessImpact || null,
+    }));
 
   // CR funnel: group by CR milestone (phase) instead of fixed buckets.
   const milestoneCounts = new Map();
@@ -234,7 +284,10 @@ router.get('/', async (_req, res) => {
   res.json({
     portfolioStatus,
     timelineProgress: timelineProjects,
-    itProjectLived,
+    itProjectLiveWarranty,
+    itProjectLived: itProjectLiveWarranty,
+    itProjectFullyLive,
+    itProjectNotStarted,
     crFunnel,
     highPriorityCrs,
     risksBlockers,
