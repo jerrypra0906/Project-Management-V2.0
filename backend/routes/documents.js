@@ -7,6 +7,7 @@ import store from '../store.js';
 import crypto from 'crypto';
 import { authenticateToken } from '../middleware/auth.js';
 import { sendCRCreationEmail } from '../services/email.js';
+import { initiativeTriggersCrCreationEmail } from '../services/cr-email-eligibility.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -97,7 +98,7 @@ router.post('/', authenticateToken, upload.single('file'), async (req, res) => {
   // Check if this is a CR and send email with documents (only once)
   try {
     const initiative = data.initiatives.find(i => i.id === initiativeId);
-    if (initiative && initiative.type === 'CR') {
+    if (initiative && initiative.type === 'CR' && initiativeTriggersCrCreationEmail(data, initiative)) {
       // Check if CR was created recently (within 10 minutes) to send email with documents
       const crCreatedAt = new Date(initiative.createdAt);
       const now = new Date();
@@ -148,7 +149,7 @@ router.post('/', authenticateToken, upload.single('file'), async (req, res) => {
             flag.sent = false; // Reset flag on error so we can retry
           });
         } else if (!flag) {
-          console.log(`[CR EMAIL] Email already sent or CR is older than 10 minutes for ${initiative.name}`);
+          console.log(`[CR EMAIL] Skipped for ${initiative.name} (CR creation email only for SAP FICO / SAP NON FICO, or already sent)`);
         }
       }
     }

@@ -17,9 +17,15 @@ function setActive(hash) {
 async function fetchJSON(url, options) {
   // Avoid cached 304 responses by adding a timestamp and disabling cache
   const cacheBuster = (url.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+  const token = localStorage.getItem('pm_token') || localStorage.getItem('token');
+  const customHeaders = (options && options.headers) ? options.headers : {};
+  const headers = { 'Cache-Control': 'no-cache', ...customHeaders };
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   const res = await fetch(url + cacheBuster, {
     cache: 'no-store',
-    headers: { 'Cache-Control': 'no-cache', ...(options && options.headers ? options.headers : {}) },
+    headers,
     ...(options || {})
   });
   if (!res.ok) {
@@ -230,8 +236,12 @@ async function renderList() {
   document.querySelectorAll('button.delete').forEach(btn => {
     btn.onclick = async () => {
       if (!confirm('Delete this initiative?')) return;
-      await fetch(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
-      renderList();
+      try {
+        await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        renderList();
+      } catch (e) {
+        alert('Failed to delete initiative: ' + (e.message || String(e)));
+      }
     };
   });
   document.querySelectorAll('button.view').forEach(btn => {
@@ -752,8 +762,12 @@ async function renderCRList() {
   document.querySelectorAll('button.delete').forEach(btn => {
     btn.onclick = async () => {
       if (!confirm('Delete this CR?')) return;
-      await fetch(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
-      renderCRList();
+      try {
+        await fetchJSON(`/api/initiatives/${btn.dataset.id}`, { method: 'DELETE' });
+        renderCRList();
+      } catch (e) {
+        alert('Failed to delete CR: ' + (e.message || String(e)));
+      }
     };
   });
   document.querySelectorAll('button.view').forEach(btn => {

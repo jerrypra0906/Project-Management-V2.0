@@ -54,24 +54,54 @@ function createEmailTransporter() {
   const fromEmail = process.env.EMAIL_FROM || 'noreply@energi-up.com';
 
   // If SMTP is not configured, return null (will fall back to console logging)
-  if (!smtpHost || !smtpUser || !smtpPassword) {
+  // Allow unauthenticated SMTP (useful for local Mailpit/Mailhog)
+  if (!smtpHost) {
     console.log('[EMAIL] SMTP not configured. Email will be logged to console.');
     return null;
   }
 
-  return nodemailer.createTransport({
+  const transportOptions = {
     host: smtpHost,
     port: smtpPort,
     secure: smtpSecure, // true for 465, false for other ports
-    auth: {
-      user: smtpUser,
-      pass: smtpPassword,
-    },
+    pool: true,
+    maxConnections: process.env.SMTP_MAX_CONNECTIONS ? parseInt(process.env.SMTP_MAX_CONNECTIONS, 10) : 2,
+    maxMessages: process.env.SMTP_MAX_MESSAGES ? parseInt(process.env.SMTP_MAX_MESSAGES, 10) : 20,
     // Optional: Add TLS options if needed
     tls: {
       rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED !== 'false',
     },
-  });
+  };
+
+  if (smtpUser && smtpPassword) {
+    transportOptions.auth = { user: smtpUser, pass: smtpPassword };
+  }
+
+  return nodemailer.createTransport(transportOptions);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientSmtpError(error) {
+  if (!error) return false;
+  const code = String(error.responseCode || error.statusCode || '').trim();
+  const message = String(error.message || '').toLowerCase();
+  const response = String(error.response || '').toLowerCase();
+  const combined = `${message} ${response}`;
+
+  if (code === '421' || combined.includes(' 421 ')) return true;
+  return (
+    combined.includes('server is busy') ||
+    combined.includes('try again later') ||
+    combined.includes('connection closed unexpectedly') ||
+    combined.includes('timeout') ||
+    combined.includes('timed out') ||
+    combined.includes('econnreset') ||
+    combined.includes('econnrefused') ||
+    combined.includes('etimedout')
+  );
 }
 
 export async function sendCRCreationEmail(crData, userLookups, documents = []) {
@@ -140,15 +170,14 @@ export async function sendCRCreationEmail(crData, userLookups, documents = []) {
     });
   }
   
-  // Add stevanus.kurniawan@energi-up.com
-  if (!ccEmails.includes('stevanus.kurniawan@energi-up.com')) {
-    ccEmails.push('stevanus.kurniawan@energi-up.com');
-  }
-  
-  // Add jerry.hakim@energi-up.com
-  if (!ccEmails.includes('jerry.hakim@energi-up.com')) {
-    ccEmails.push('jerry.hakim@energi-up.com');
-  }
+  // Static CC recipients (distribution list)
+  const staticCc = [
+    'it-project@energi-up.com',
+    'irawaty.tjie@energi-up.com',
+  ];
+  staticCc.forEach(addr => {
+    if (addr && !ccEmails.includes(addr)) ccEmails.push(addr);
+  });
   
   // Filter out invalid email addresses
   const validCCEmails = filterValidEmails(ccEmails);
@@ -372,6 +401,250 @@ Please do not reply to this email.
     console.error('[EMAIL ERROR] Stack:', error.stack);
     return false;
   }
+}
+
+const DEFAULT_MEETING_NOTES_EMAIL_TZ = 'Asia/Jakarta';
+
+/**
+ * Format stored ISO datetimes for email readers in a fixed zone (default Jakarta).
+ */
+function formatMeetingNoteDateTimeForEmail(isoLike, fallback = 'Not set') {
+  if (isoLike == null || isoLike === '') return fallback;
+  const raw = String(isoLike).trim();
+  if (!raw) return fallback;
+  const timeZone = process.env.MEETING_NOTES_EMAIL_TZ || DEFAULT_MEETING_NOTES_EMAIL_TZ;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  try {
+    return new Intl.DateTimeFormat('id-ID', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone,
+    }).format(d);
+  } catch {
+    return raw;
+  }
+}
+
+/** Calendar date only (YYYY-MM-DD) — locale label, no UTC shift needed for the day itself */
+function formatMeetingNoteDateOnlyForEmail(value) {
+  if (value == null || value === '') return '-';
+  const s = String(value).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return formatMeetingNoteDateTimeForEmail(value, '-');
+  const [y, m, d] = s.split('-').map((x) => parseInt(x, 10));
+  const local = new Date(y, m - 1, d);
+  try {
+    return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeZone: DEFAULT_MEETING_NOTES_EMAIL_TZ }).format(local);
+  } catch {
+    return s;
+  }
+}
+
+export async function sendMeetingNotesEmail(meetingPayload, recipients, options = {}) {
+  const note = meetingPayload?.note || {};
+  const participants = meetingPayload?.participants || [];
+  const actionItems = meetingPayload?.actionItems || [];
+  const initiative = meetingPayload?.initiative || {};
+  const users = meetingPayload?.users || [];
+  const usersById = new Map((users || []).map((u) => [u.id, u]));
+
+  const meetingDateDisplay = formatMeetingNoteDateTimeForEmail(note.meetingDate, 'N/A');
+  const nextMeetingDisplay = formatMeetingNoteDateTimeForEmail(note.nextMeetingAt, 'Not set');
+
+  const subject = options.subject || `Meeting Notes - ${note.title || 'Untitled'}`;
+  const fromEmail = process.env.EMAIL_FROM || 'noreply@energi-up.com';
+  const toEmails = filterValidEmails(recipients?.to || []);
+  const ccEmails = filterValidEmails(recipients?.cc || []);
+
+  if (toEmails.length === 0) {
+    return {
+      success: false,
+      error: 'No valid recipients',
+      bodySnapshot: '',
+    };
+  }
+
+  const escape = (value) => String(value || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const resolveUserLabel = (raw) => {
+    if (!raw) return '-';
+    if (usersById.has(raw)) {
+      const user = usersById.get(raw);
+      return user?.name || user?.email || raw;
+    }
+    return raw;
+  };
+  const participantsHtml = participants.length > 0
+    ? `<ul>${participants.map((p) => `<li>${escape(p.name || p.email || resolveUserLabel(p.userId) || 'Unknown')} (${escape(p.role || 'Attendee')})</li>`).join('')}</ul>`
+    : '<p>None</p>';
+  const actionRowsHtml = actionItems.length > 0
+    ? `
+      <table border="1" cellspacing="0" cellpadding="6" style="border-collapse: collapse; width: 100%;">
+        <thead>
+          <tr>
+            <th align="left">Action</th>
+            <th align="left">Owner</th>
+            <th align="left">Due Date</th>
+            <th align="left">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${actionItems.map((item) => `
+            <tr>
+              <td>${escape(item.description)}</td>
+              <td>${escape(item.ownerName || resolveUserLabel(item.ownerId) || '-')}</td>
+              <td>${escape(formatMeetingNoteDateOnlyForEmail(item.dueDate))}</td>
+              <td>${escape(item.status || '-')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `
+    : '<p>No action items.</p>';
+
+  const htmlBody = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; }
+          .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+          .header { background: #3b82f6; color: white; padding: 16px 20px; border-radius: 8px 8px 0 0; }
+          .section { border: 1px solid #e5e7eb; border-top: none; padding: 16px 20px; }
+          h2 { margin: 0; font-size: 20px; }
+          h3 { margin: 16px 0 8px; font-size: 16px; color: #111827; }
+          .muted { color: #6b7280; font-size: 12px; }
+          pre { white-space: pre-wrap; background: #f9fafb; padding: 10px; border-radius: 6px; border: 1px solid #e5e7eb; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h2>${escape(subject)}</h2>
+            <div class="muted">Generated by Project Management System</div>
+          </div>
+          <div class="section">
+            <h3>Meeting Info</h3>
+            <p><strong>Initiative:</strong> ${escape(initiative.name || note.initiativeId || 'N/A')}</p>
+            <p><strong>Meeting Title:</strong> ${escape(note.title)}</p>
+            <p><strong>Type:</strong> ${escape(note.meetingType)}</p>
+            <p><strong>Date:</strong> ${escape(meetingDateDisplay)}</p>
+            <p><strong>Facilitator:</strong> ${escape(resolveUserLabel(note.facilitatorId))}</p>
+            <p><strong>Note Taker:</strong> ${escape(resolveUserLabel(note.noteTakerId))}</p>
+            <h3>Participants</h3>
+            ${participantsHtml}
+            <h3>Agenda</h3>
+            <pre>${escape(note.agenda)}</pre>
+            <h3>Discussion</h3>
+            <pre>${escape(note.discussion)}</pre>
+            <h3>Decisions</h3>
+            <pre>${escape(note.decisions)}</pre>
+            <h3>Risks</h3>
+            <pre>${escape(note.risks)}</pre>
+            <h3>Action Items</h3>
+            ${actionRowsHtml}
+            <h3>Next Meeting</h3>
+            <p>${escape(nextMeetingDisplay)}</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const textBody = [
+    subject,
+    '',
+    `Initiative: ${initiative.name || note.initiativeId || 'N/A'}`,
+    `Meeting Title: ${note.title || 'N/A'}`,
+    `Type: ${note.meetingType || 'N/A'}`,
+    `Date: ${meetingDateDisplay}`,
+    `Facilitator: ${resolveUserLabel(note.facilitatorId)}`,
+    `Note Taker: ${resolveUserLabel(note.noteTakerId)}`,
+    '',
+    'Agenda:',
+    note.agenda || '-',
+    '',
+    'Discussion:',
+    note.discussion || '-',
+    '',
+    'Decisions:',
+    note.decisions || '-',
+    '',
+    'Risks:',
+    note.risks || '-',
+    '',
+    'Action Items:',
+    ...(actionItems.length > 0
+      ? actionItems.map((item, index) => `${index + 1}. ${item.description} | Owner: ${item.ownerName || resolveUserLabel(item.ownerId) || '-'} | Due: ${formatMeetingNoteDateOnlyForEmail(item.dueDate)} | Status: ${item.status || '-'}`)
+      : ['None']),
+    '',
+    `Next Meeting: ${nextMeetingDisplay}`,
+  ].join('\n');
+
+  const transporter = createEmailTransporter();
+  const emailContent = {
+    from: `"Project Management System" <${fromEmail}>`,
+    to: toEmails.join(', '),
+    subject,
+    html: htmlBody,
+    text: textBody,
+  };
+  if (ccEmails.length > 0) emailContent.cc = ccEmails.join(', ');
+
+  if (!transporter) {
+    console.log('='.repeat(60));
+    console.log('[MEETING NOTES EMAIL - CONSOLE MODE]');
+    console.log(`To: ${emailContent.to}`);
+    console.log(`CC: ${emailContent.cc || 'None'}`);
+    console.log(`Subject: ${subject}`);
+    console.log(textBody);
+    console.log('='.repeat(60));
+    return {
+      success: true,
+      messageId: null,
+      bodySnapshot: textBody,
+    };
+  }
+
+  const maxAttempts = process.env.SMTP_RETRY_ATTEMPTS ? parseInt(process.env.SMTP_RETRY_ATTEMPTS, 10) : 3;
+  const baseDelayMs = process.env.SMTP_RETRY_BASE_DELAY_MS ? parseInt(process.env.SMTP_RETRY_BASE_DELAY_MS, 10) : 1200;
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= Math.max(1, maxAttempts); attempt++) {
+    try {
+      const info = await transporter.sendMail(emailContent);
+      return {
+        success: true,
+        messageId: info.messageId || null,
+        bodySnapshot: textBody,
+        attempts: attempt,
+      };
+    } catch (error) {
+      lastError = error;
+      const transient = isTransientSmtpError(error);
+      console.error(`[EMAIL ERROR] Meeting notes send attempt ${attempt}/${maxAttempts} failed:`, error.message);
+
+      if (!transient || attempt >= maxAttempts) {
+        break;
+      }
+      const waitMs = baseDelayMs * attempt;
+      console.warn(`[EMAIL RETRY] Transient SMTP error detected. Retrying in ${waitMs}ms...`);
+      await sleep(waitMs);
+    }
+  }
+
+  const isTransient = isTransientSmtpError(lastError);
+  const userFriendly = isTransient
+    ? 'Mail server is busy. Please try again in 1-2 minutes.'
+    : (lastError?.message || 'Failed to send email');
+
+  return {
+    success: false,
+    error: userFriendly,
+    technicalError: lastError?.message || null,
+    bodySnapshot: textBody,
+    attempts: Math.max(1, maxAttempts),
+  };
 }
 
 export async function sendActivationEmail(email, activationToken, baseUrl = 'http://localhost:8080') {

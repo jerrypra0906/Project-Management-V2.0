@@ -14,10 +14,31 @@ export async function authenticateToken(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     
-    // Verify user still exists and is active
+    // API Client token: sub = client:<id>
     const data = await store.read();
-    const user = data.users.find(u => u.id === decoded.sub);
-    
+    const sub = String(decoded.sub || '');
+    if (sub.startsWith('client:')) {
+      const clientInternalId = sub.slice('client:'.length);
+      const apiClient = (data.apiClients || []).find((c) => c.id === clientInternalId);
+      if (!apiClient || apiClient.active === false) {
+        return res.status(401).json({ error: 'API client not found or inactive' });
+      }
+
+      req.user = {
+        type: 'client',
+        id: apiClient.id,
+        name: apiClient.name,
+        clientId: apiClient.clientId,
+        scopes: String(decoded.scopes || '').split(' ').filter(Boolean),
+        isAdmin: false,
+        role: 'ApiClient',
+      };
+      return next();
+    }
+
+    // User token: sub = userId
+    const user = (data.users || []).find(u => u.id === decoded.sub);
+
     if (!user || !user.active) {
       return res.status(401).json({ error: 'User not found or inactive' });
     }
@@ -28,13 +49,14 @@ export async function authenticateToken(req, res, next) {
     }
 
     req.user = {
+      type: 'user',
       id: user.id,
       email: user.email,
       name: user.name,
       isAdmin: !!user.isAdmin,
-      role: user.role
+      role: user.role,
     };
-    
+
     next();
   } catch (error) {
     return res.status(403).json({ error: 'Invalid or expired token' });
@@ -46,5 +68,19 @@ export function requireAdmin(req, res, next) {
     return res.status(403).json({ error: 'Admin access required' });
   }
   next();
+}
+
+export function requireScopes(...requiredScopes) {
+  return (req, res, next) => {
+    // For user tokens, allow (existing UI behavior).
+    if (req.user?.type === 'user') return next();
+
+    const scopes = new Set(req.user?.scopes || []);
+    const ok = requiredScopes.every((s) => scopes.has(s));
+    if (!ok) {
+      return res.status(403).json({ error: 'Insufficient scope' });
+    }
+    next();
+  };
 }
 

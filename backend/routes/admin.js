@@ -247,5 +247,111 @@ router.post('/users/bulk-update-roles', async (req, res) => {
   }
 });
 
+// --- Access Rules Management (for User Access Management Roles) ---
+
+// Get all access rules
+router.get('/access-rules', async (req, res) => {
+  try {
+    const data = await store.read();
+    const rules = data.accessRules || [];
+    return res.json(rules);
+  } catch (e) {
+    console.error('Get access rules error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// Replace all access rules (admin can edit matrix)
+router.post('/access-rules', async (req, res) => {
+  try {
+    const { rules } = req.body || {};
+    if (!Array.isArray(rules)) {
+      return res.status(400).json({ error: 'Rules must be an array' });
+    }
+
+    const data = await store.read();
+    data.accessRules = rules.map(r => ({
+      id: r.id || crypto.randomUUID(),
+      role: r.role || null,
+      type: r.type || null,
+      emailDomain: r.emailDomain || null,
+      canViewProjectDashboard: !!r.canViewProjectDashboard,
+      canViewProjectList: !!r.canViewProjectList,
+      canCreateProject: !!r.canCreateProject,
+      canEditAnyProject: !!r.canEditAnyProject,
+      restrictProjectVisibilityToOwnTeamOnly: !!r.restrictProjectVisibilityToOwnTeamOnly,
+      restrictProjectEditToOwnTeamOnly: !!r.restrictProjectEditToOwnTeamOnly,
+      canViewCRDashboard: !!r.canViewCRDashboard,
+      canViewCRList: !!r.canViewCRList,
+      canCreateCR: !!r.canCreateCR,
+      canEditCR: !!r.canEditCR,
+      canViewMasterDwsApplication: !!r.canViewMasterDwsApplication,
+      canViewManagementDashboard: !!r.canViewManagementDashboard,
+    }));
+
+    await store.write(data);
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('Save access rules error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// --- API Clients (for external integrations) ---
+
+router.get('/api-clients', async (_req, res) => {
+  try {
+    const data = await store.read();
+    const clients = (data.apiClients || []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      clientId: c.clientId,
+      scopes: c.scopes || null,
+      active: c.active !== false,
+      createdAt: c.createdAt,
+    }));
+    return res.json(clients);
+  } catch (e) {
+    console.error('Get api clients error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+router.post('/api-clients', async (req, res) => {
+  try {
+    const { name, clientId, clientSecret, scopes, active } = req.body || {};
+    if (!name || !clientId || !clientSecret) {
+      return res.status(400).json({ error: 'name, clientId and clientSecret are required' });
+    }
+
+    const data = await store.read();
+    const exists = (data.apiClients || []).some(
+      (c) => String(c.clientId || '').toLowerCase() === String(clientId).toLowerCase()
+    );
+    if (exists) {
+      return res.status(409).json({ error: 'clientId already exists' });
+    }
+
+    if (!data.apiClients) data.apiClients = [];
+    const id = crypto.randomUUID();
+    const clientSecretHash = await bcrypt.hash(String(clientSecret), 10);
+    data.apiClients.push({
+      id,
+      name,
+      clientId,
+      clientSecretHash,
+      scopes: String(scopes || 'cr:read cr:write').trim(),
+      active: active !== undefined ? !!active : true,
+      createdAt: new Date().toISOString(),
+    });
+
+    await store.write(data);
+    return res.status(201).json({ ok: true, id });
+  } catch (e) {
+    console.error('Create api client error', e);
+    return res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 export default router;
 

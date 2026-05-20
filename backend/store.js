@@ -64,8 +64,10 @@ async function initializeSchema() {
         "itPicIds" TEXT,
         "itPmId" TEXT,
         "itManagerIds" TEXT,
+        "systemImpactedIds" TEXT,
         "status" TEXT,
         "milestone" TEXT,
+        "crMilestonePhase" TEXT,
         "startDate" TEXT,
         "endDate" TEXT,
         "planStartDate" TEXT,
@@ -85,8 +87,10 @@ async function initializeSchema() {
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itPicIds" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itPmId" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "itManagerIds" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "systemImpactedIds" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "status" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "milestone" TEXT;
+      ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "crMilestonePhase" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "startDate" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "endDate" TEXT;
       ALTER TABLE "initiatives" ADD COLUMN IF NOT EXISTS "planStartDate" TEXT;
@@ -258,6 +262,199 @@ async function initializeSchema() {
       ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "commentId" TEXT;
       ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "read" BOOLEAN DEFAULT FALSE;
       ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      CREATE TABLE IF NOT EXISTS "accessRules" (
+        "id" TEXT PRIMARY KEY,
+        "role" TEXT,
+        "type" TEXT,
+        "emailDomain" TEXT,
+        "canViewProjectDashboard" BOOLEAN,
+        "canViewProjectList" BOOLEAN,
+        "canCreateProject" BOOLEAN,
+        "canEditAnyProject" BOOLEAN,
+        "restrictProjectVisibilityToOwnTeamOnly" BOOLEAN,
+        "restrictProjectEditToOwnTeamOnly" BOOLEAN,
+        "canViewCRDashboard" BOOLEAN,
+        "canViewCRList" BOOLEAN,
+        "canCreateCR" BOOLEAN,
+        "canEditCR" BOOLEAN,
+        "canViewMasterDwsApplication" BOOLEAN,
+        "canViewManagementDashboard" BOOLEAN
+      );
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "role" TEXT;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "type" TEXT;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "emailDomain" TEXT;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewProjectDashboard" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewProjectList" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canCreateProject" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canEditAnyProject" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "restrictProjectVisibilityToOwnTeamOnly" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "restrictProjectEditToOwnTeamOnly" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewCRDashboard" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewCRList" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canCreateCR" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canEditCR" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewMasterDwsApplication" BOOLEAN;
+      ALTER TABLE "accessRules" ADD COLUMN IF NOT EXISTS "canViewManagementDashboard" BOOLEAN;
+
+      CREATE TABLE IF NOT EXISTS "apiClients" (
+        "id" TEXT PRIMARY KEY,
+        "name" TEXT NOT NULL,
+        "clientId" TEXT NOT NULL,
+        "clientSecretHash" TEXT NOT NULL,
+        "scopes" TEXT,
+        "active" BOOLEAN DEFAULT TRUE,
+        "createdAt" TEXT NOT NULL
+      );
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "name" TEXT;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "clientId" TEXT;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "clientSecretHash" TEXT;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "scopes" TEXT;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "active" BOOLEAN DEFAULT TRUE;
+      ALTER TABLE "apiClients" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+
+      CREATE TABLE IF NOT EXISTS "dwsApplications" (
+        "id" TEXT PRIMARY KEY,
+        "systemName" TEXT NOT NULL,
+        "productionUrl" TEXT,
+        "stagingUrl" TEXT,
+        "githubUrl" TEXT,
+        "createdAt" TEXT NOT NULL,
+        "updatedAt" TEXT NOT NULL
+      );
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "systemName" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "productionUrl" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "stagingUrl" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "githubUrl" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      ALTER TABLE "dwsApplications" ADD COLUMN IF NOT EXISTS "updatedAt" TEXT;
+
+      CREATE TABLE IF NOT EXISTS "managementDashboard" (
+        "id" TEXT PRIMARY KEY,
+        "portfolioStatus" TEXT,
+        "highlights" TEXT,
+        "criticalAlerts" TEXT,
+        "updatedBy" TEXT,
+        "updatedAt" TEXT NOT NULL
+      );
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "portfolioStatus" TEXT;
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "highlights" TEXT;
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "criticalAlerts" TEXT;
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "updatedBy" TEXT;
+      ALTER TABLE "managementDashboard" ADD COLUMN IF NOT EXISTS "updatedAt" TEXT;
+      CREATE TABLE IF NOT EXISTS "meetingNotes" (
+        "id" TEXT PRIMARY KEY,
+        "initiativeId" TEXT NOT NULL,
+        "title" TEXT NOT NULL,
+        "meetingType" TEXT NOT NULL,
+        "meetingDate" TEXT NOT NULL,
+        "location" TEXT,
+        "meetingLink" TEXT,
+        "facilitatorId" TEXT NOT NULL,
+        "noteTakerId" TEXT NOT NULL,
+        "agenda" TEXT,
+        "discussion" TEXT,
+        "decisions" TEXT,
+        "risks" TEXT,
+        "nextMeetingAt" TEXT,
+        "status" TEXT NOT NULL,
+        "version" INTEGER NOT NULL DEFAULT 1,
+        "createdBy" TEXT NOT NULL,
+        "createdAt" TEXT NOT NULL,
+        "updatedAt" TEXT NOT NULL,
+        "deletedAt" TEXT
+      );
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "deletedAt" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "initiativeId" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "title" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "meetingType" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "meetingDate" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "location" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "meetingLink" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "facilitatorId" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "noteTakerId" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "agenda" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "discussion" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "decisions" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "risks" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "nextMeetingAt" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "status" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "version" INTEGER DEFAULT 1;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "createdBy" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "createdAt" TEXT;
+      ALTER TABLE "meetingNotes" ADD COLUMN IF NOT EXISTS "updatedAt" TEXT;
+      UPDATE "meetingNotes" SET "status" = 'Published' WHERE "status" IN ('Sent', 'Archived');
+      CREATE TABLE IF NOT EXISTS "meetingNoteParticipants" (
+        "id" TEXT PRIMARY KEY,
+        "meetingNoteId" TEXT NOT NULL,
+        "userId" TEXT,
+        "email" TEXT,
+        "name" TEXT,
+        "role" TEXT NOT NULL
+      );
+      ALTER TABLE "meetingNoteParticipants" ADD COLUMN IF NOT EXISTS "meetingNoteId" TEXT;
+      ALTER TABLE "meetingNoteParticipants" ADD COLUMN IF NOT EXISTS "userId" TEXT;
+      ALTER TABLE "meetingNoteParticipants" ADD COLUMN IF NOT EXISTS "email" TEXT;
+      ALTER TABLE "meetingNoteParticipants" ADD COLUMN IF NOT EXISTS "name" TEXT;
+      ALTER TABLE "meetingNoteParticipants" ADD COLUMN IF NOT EXISTS "role" TEXT;
+      CREATE TABLE IF NOT EXISTS "meetingNoteActionItems" (
+        "id" TEXT PRIMARY KEY,
+        "meetingNoteId" TEXT NOT NULL,
+        "description" TEXT NOT NULL,
+        "ownerId" TEXT,
+        "ownerName" TEXT,
+        "dueDate" TEXT,
+        "priority" TEXT,
+        "status" TEXT NOT NULL,
+        "orderIndex" INTEGER NOT NULL DEFAULT 0
+      );
+      ALTER TABLE "meetingNoteActionItems" ADD COLUMN IF NOT EXISTS "meetingNoteId" TEXT;
+      ALTER TABLE "meetingNoteActionItems" ADD COLUMN IF NOT EXISTS "description" TEXT;
+      ALTER TABLE "meetingNoteActionItems" ADD COLUMN IF NOT EXISTS "ownerId" TEXT;
+      ALTER TABLE "meetingNoteActionItems" ADD COLUMN IF NOT EXISTS "ownerName" TEXT;
+      ALTER TABLE "meetingNoteActionItems" ADD COLUMN IF NOT EXISTS "dueDate" TEXT;
+      ALTER TABLE "meetingNoteActionItems" ADD COLUMN IF NOT EXISTS "priority" TEXT;
+      ALTER TABLE "meetingNoteActionItems" ADD COLUMN IF NOT EXISTS "status" TEXT;
+      ALTER TABLE "meetingNoteActionItems" ADD COLUMN IF NOT EXISTS "orderIndex" INTEGER DEFAULT 0;
+      CREATE TABLE IF NOT EXISTS "meetingNoteEmailLog" (
+        "id" TEXT PRIMARY KEY,
+        "meetingNoteId" TEXT NOT NULL,
+        "subject" TEXT NOT NULL,
+        "toEmails" TEXT NOT NULL,
+        "ccEmails" TEXT,
+        "bodySnapshot" TEXT NOT NULL,
+        "sentBy" TEXT NOT NULL,
+        "sentAt" TEXT NOT NULL,
+        "deliveryStatus" TEXT NOT NULL,
+        "providerMessageId" TEXT,
+        "errorMessage" TEXT
+      );
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "meetingNoteId" TEXT;
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "subject" TEXT;
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "toEmails" TEXT;
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "ccEmails" TEXT;
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "bodySnapshot" TEXT;
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "sentBy" TEXT;
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "sentAt" TEXT;
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "deliveryStatus" TEXT;
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "providerMessageId" TEXT;
+      ALTER TABLE "meetingNoteEmailLog" ADD COLUMN IF NOT EXISTS "errorMessage" TEXT;
+      CREATE TABLE IF NOT EXISTS "meetingNoteHistory" (
+        "id" TEXT PRIMARY KEY,
+        "meetingNoteId" TEXT NOT NULL,
+        "version" INTEGER NOT NULL,
+        "field" TEXT NOT NULL,
+        "oldValue" TEXT,
+        "newValue" TEXT,
+        "changedBy" TEXT NOT NULL,
+        "changedAt" TEXT NOT NULL
+      );
+      ALTER TABLE "meetingNoteHistory" ADD COLUMN IF NOT EXISTS "meetingNoteId" TEXT;
+      ALTER TABLE "meetingNoteHistory" ADD COLUMN IF NOT EXISTS "version" INTEGER;
+      ALTER TABLE "meetingNoteHistory" ADD COLUMN IF NOT EXISTS "field" TEXT;
+      ALTER TABLE "meetingNoteHistory" ADD COLUMN IF NOT EXISTS "oldValue" TEXT;
+      ALTER TABLE "meetingNoteHistory" ADD COLUMN IF NOT EXISTS "newValue" TEXT;
+      ALTER TABLE "meetingNoteHistory" ADD COLUMN IF NOT EXISTS "changedBy" TEXT;
+      ALTER TABLE "meetingNoteHistory" ADD COLUMN IF NOT EXISTS "changedAt" TEXT;
     `;
     await client.query(ddl);
   } finally {
@@ -283,6 +480,15 @@ async function read() {
       'tasks',
       'documents',
       'notifications',
+      'accessRules',
+      'apiClients',
+      'dwsApplications',
+      'managementDashboard',
+      'meetingNotes',
+      'meetingNoteParticipants',
+      'meetingNoteActionItems',
+      'meetingNoteEmailLog',
+      'meetingNoteHistory',
     ];
     for (const table of tables) {
       const res = await client.query(`SELECT * FROM "${table}"`);
@@ -324,8 +530,10 @@ async function read() {
           itPicIds: row.itPicIds || row.itpicids ? (row.itPicIds || row.itpicids).split(',').filter(Boolean) : (row.itPicId || row.itpicid ? [row.itPicId || row.itpicid] : []),
           itPmId: row.itPmId || row.itpmid || null,
           itManagerIds: row.itManagerIds || row.itmanagerids ? (row.itManagerIds || row.itmanagerids).split(',').filter(Boolean) : [],
+          systemImpactedIds: row.systemImpactedIds || row.systemimpactedids ? (row.systemImpactedIds || row.systemimpactedids).split(',').filter(Boolean) : [],
           status: row.status || null,
           milestone: row.milestone || null,
+          crMilestonePhase: row.crMilestonePhase || row.crmilestonephase || null,
           startDate: row.startDate || row.startdate || null,
           endDate: row.endDate || row.enddate || null,
           planStartDate: row.planStartDate || row.planstartdate || null,
@@ -347,6 +555,106 @@ async function read() {
           commentId: row.commentId || row.commentid || null,
           read: row.read !== undefined ? !!row.read : false,
           createdAt: row.createdAt || row.createdat
+        }));
+      } else if (table === 'accessRules') {
+        data[table] = res.rows;
+      } else if (table === 'apiClients') {
+        data[table] = res.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          clientId: row.clientId || row.clientid,
+          clientSecretHash: row.clientSecretHash || row.clientsecrethash,
+          scopes: row.scopes || null,
+          active: row.active !== undefined ? !!row.active : true,
+          createdAt: row.createdAt || row.createdat,
+        }));
+      } else if (table === 'dwsApplications') {
+        data[table] = res.rows.map((row) => ({
+          id: row.id,
+          systemName: row.systemName || row.systemname,
+          productionUrl: row.productionUrl || row.productionurl || null,
+          stagingUrl: row.stagingUrl || row.stagingurl || null,
+          githubUrl: row.githubUrl || row.githuburl || null,
+          createdAt: row.createdAt || row.createdat,
+          updatedAt: row.updatedAt || row.updatedat,
+        }));
+      } else if (table === 'managementDashboard') {
+        data[table] = res.rows.map((row) => ({
+          id: row.id,
+          portfolioStatus: row.portfolioStatus || row.portfoliostatus || null,
+          highlights: row.highlights || null,
+          criticalAlerts: row.criticalAlerts || row.criticalalerts || null,
+          updatedBy: row.updatedBy || row.updatedby || null,
+          updatedAt: row.updatedAt || row.updatedat,
+        }));
+      } else if (table === 'meetingNotes') {
+        data[table] = res.rows.map(row => ({
+          id: row.id,
+          initiativeId: row.initiativeId || row.initiativeid,
+          title: row.title,
+          meetingType: row.meetingType || row.meetingtype,
+          meetingDate: row.meetingDate || row.meetingdate,
+          location: row.location || null,
+          meetingLink: row.meetingLink || row.meetinglink || null,
+          facilitatorId: row.facilitatorId || row.facilitatorid,
+          noteTakerId: row.noteTakerId || row.notetakerid,
+          agenda: row.agenda || null,
+          discussion: row.discussion || null,
+          decisions: row.decisions || null,
+          risks: row.risks || null,
+          nextMeetingAt: row.nextMeetingAt || row.nextmeetingat || null,
+          status: row.status,
+          version: row.version ? Number(row.version) : 1,
+          createdBy: row.createdBy || row.createdby,
+          createdAt: row.createdAt || row.createdat,
+          updatedAt: row.updatedAt || row.updatedat,
+          deletedAt: row.deletedAt || row.deletedat || null,
+        }));
+      } else if (table === 'meetingNoteParticipants') {
+        data[table] = res.rows.map(row => ({
+          id: row.id,
+          meetingNoteId: row.meetingNoteId || row.meetingnoteid,
+          userId: row.userId || row.userid || null,
+          email: row.email || null,
+          name: row.name || null,
+          role: row.role || null,
+        }));
+      } else if (table === 'meetingNoteActionItems') {
+        data[table] = res.rows.map(row => ({
+          id: row.id,
+          meetingNoteId: row.meetingNoteId || row.meetingnoteid,
+          description: row.description,
+          ownerId: row.ownerId || row.ownerid || null,
+          ownerName: row.ownerName || row.ownername || null,
+          dueDate: row.dueDate || row.duedate || null,
+          priority: row.priority || null,
+          status: row.status,
+          orderIndex: row.orderIndex !== undefined ? Number(row.orderIndex) : Number(row.orderindex || 0),
+        }));
+      } else if (table === 'meetingNoteEmailLog') {
+        data[table] = res.rows.map(row => ({
+          id: row.id,
+          meetingNoteId: row.meetingNoteId || row.meetingnoteid,
+          subject: row.subject,
+          toEmails: row.toEmails || row.toemails || null,
+          ccEmails: row.ccEmails || row.ccemails || null,
+          bodySnapshot: row.bodySnapshot || row.bodysnapshot || null,
+          sentBy: row.sentBy || row.sentby || null,
+          sentAt: row.sentAt || row.sentat || null,
+          deliveryStatus: row.deliveryStatus || row.deliverystatus || null,
+          providerMessageId: row.providerMessageId || row.providermessageid || null,
+          errorMessage: row.errorMessage || row.errormessage || null,
+        }));
+      } else if (table === 'meetingNoteHistory') {
+        data[table] = res.rows.map(row => ({
+          id: row.id,
+          meetingNoteId: row.meetingNoteId || row.meetingnoteid,
+          version: row.version !== undefined ? Number(row.version) : 1,
+          field: row.field,
+          oldValue: row.oldValue ?? row.oldvalue ?? null,
+          newValue: row.newValue ?? row.newvalue ?? null,
+          changedBy: row.changedBy || row.changedby || null,
+          changedAt: row.changedAt || row.changedat || null,
         }));
       } else {
         data[table] = res.rows;
@@ -407,6 +715,14 @@ async function write(data) {
     await client.query('DELETE FROM "tasks"');
     await client.query('DELETE FROM "documents"');
     await client.query('DELETE FROM "notifications"');
+    await client.query('DELETE FROM "apiClients"');
+    await client.query('DELETE FROM "dwsApplications"');
+    await client.query('DELETE FROM "managementDashboard"');
+    await client.query('DELETE FROM "meetingNoteParticipants"');
+    await client.query('DELETE FROM "meetingNoteActionItems"');
+    await client.query('DELETE FROM "meetingNoteEmailLog"');
+    await client.query('DELETE FROM "meetingNoteHistory"');
+    await client.query('DELETE FROM "meetingNotes"');
 
     const insertDept = 'INSERT INTO "departments"("id", "name") VALUES ($1, $2)';
     for (const d of data.departments || []) {
@@ -440,17 +756,20 @@ async function write(data) {
     const insertInit = `INSERT INTO "initiatives"(
       "id", "type", "name", "ticket", "description", "businessImpact", "priority",
       "businessOwnerId", "businessUserIds", "departmentId", "itPicId", "itPicIds", "itPmId", "itManagerIds",
-      "status", "milestone", "startDate", "endDate", "planStartDate", "planEndDate", "remark", "documentationLink", "createdAt", "updatedAt"
+      "systemImpactedIds",
+      "status", "milestone", "crMilestonePhase", "startDate", "endDate", "planStartDate", "planEndDate", "remark", "documentationLink", "createdAt", "updatedAt"
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,
       $8,$9,$10,$11,$12,$13,$14,
-      $15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+      $15,
+      $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
     )`;
     for (const i of data.initiatives || []) {
       // Convert arrays to comma-separated strings for storage
       const businessUserIds = Array.isArray(i.businessUserIds) ? i.businessUserIds.join(',') : (i.businessUserIds || null);
       const itPicIds = Array.isArray(i.itPicIds) ? i.itPicIds.join(',') : (i.itPicIds || null);
       const itManagerIds = Array.isArray(i.itManagerIds) ? i.itManagerIds.join(',') : (i.itManagerIds || null);
+      const systemImpactedIds = Array.isArray(i.systemImpactedIds) ? i.systemImpactedIds.join(',') : (i.systemImpactedIds || null);
       
       await client.query(insertInit, [
         i.id,
@@ -467,8 +786,10 @@ async function write(data) {
         itPicIds,
         i.itPmId || null,
         itManagerIds,
+        systemImpactedIds,
         i.status || null,
         i.milestone || null,
+        i.crMilestonePhase || null,
         i.startDate || null,
         i.endDate || null,
         i.planStartDate || null,
@@ -630,6 +951,136 @@ async function write(data) {
         n.commentId || null,
         !!n.read,
         n.createdAt,
+      ]);
+    }
+
+    const insertApiClient =
+      'INSERT INTO "apiClients"("id","name","clientId","clientSecretHash","scopes","active","createdAt") VALUES ($1,$2,$3,$4,$5,$6,$7)';
+    for (const c of data.apiClients || []) {
+      await client.query(insertApiClient, [
+        c.id,
+        c.name,
+        c.clientId,
+        c.clientSecretHash,
+        c.scopes || null,
+        c.active !== undefined ? !!c.active : true,
+        c.createdAt,
+      ]);
+    }
+
+    const insertDwsApp =
+      'INSERT INTO "dwsApplications"("id","systemName","productionUrl","stagingUrl","githubUrl","createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7)';
+    for (const a of data.dwsApplications || []) {
+      await client.query(insertDwsApp, [
+        a.id,
+        a.systemName,
+        a.productionUrl || null,
+        a.stagingUrl || null,
+        a.githubUrl || null,
+        a.createdAt,
+        a.updatedAt,
+      ]);
+    }
+
+    const insertMgmtDashboard =
+      'INSERT INTO "managementDashboard"("id","portfolioStatus","highlights","criticalAlerts","updatedBy","updatedAt") VALUES ($1,$2,$3,$4,$5,$6)';
+    for (const d of data.managementDashboard || []) {
+      await client.query(insertMgmtDashboard, [
+        d.id,
+        d.portfolioStatus || null,
+        d.highlights || null,
+        d.criticalAlerts || null,
+        d.updatedBy || null,
+        d.updatedAt,
+      ]);
+    }
+
+    const insertMeetingNote =
+      'INSERT INTO "meetingNotes"("id", "initiativeId", "title", "meetingType", "meetingDate", "location", "meetingLink", "facilitatorId", "noteTakerId", "agenda", "discussion", "decisions", "risks", "nextMeetingAt", "status", "version", "createdBy", "createdAt", "updatedAt", "deletedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)';
+    for (const note of data.meetingNotes || []) {
+      await client.query(insertMeetingNote, [
+        note.id,
+        note.initiativeId,
+        note.title,
+        note.meetingType,
+        note.meetingDate,
+        note.location || null,
+        note.meetingLink || null,
+        note.facilitatorId,
+        note.noteTakerId,
+        note.agenda || null,
+        note.discussion || null,
+        note.decisions || null,
+        note.risks || null,
+        note.nextMeetingAt || null,
+        note.status || 'Draft',
+        note.version || 1,
+        note.createdBy,
+        note.createdAt,
+        note.updatedAt || note.createdAt,
+        note.deletedAt || null,
+      ]);
+    }
+
+    const insertMeetingParticipant =
+      'INSERT INTO "meetingNoteParticipants"("id", "meetingNoteId", "userId", "email", "name", "role") VALUES ($1,$2,$3,$4,$5,$6)';
+    for (const participant of data.meetingNoteParticipants || []) {
+      await client.query(insertMeetingParticipant, [
+        participant.id,
+        participant.meetingNoteId,
+        participant.userId || null,
+        participant.email || null,
+        participant.name || null,
+        participant.role || 'Attendee',
+      ]);
+    }
+
+    const insertMeetingActionItem =
+      'INSERT INTO "meetingNoteActionItems"("id", "meetingNoteId", "description", "ownerId", "ownerName", "dueDate", "priority", "status", "orderIndex") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)';
+    for (const item of data.meetingNoteActionItems || []) {
+      await client.query(insertMeetingActionItem, [
+        item.id,
+        item.meetingNoteId,
+        item.description,
+        item.ownerId || null,
+        item.ownerName || null,
+        item.dueDate || null,
+        item.priority || null,
+        item.status || 'Not Started',
+        item.orderIndex || 0,
+      ]);
+    }
+
+    const insertMeetingEmailLog =
+      'INSERT INTO "meetingNoteEmailLog"("id", "meetingNoteId", "subject", "toEmails", "ccEmails", "bodySnapshot", "sentBy", "sentAt", "deliveryStatus", "providerMessageId", "errorMessage") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)';
+    for (const log of data.meetingNoteEmailLog || []) {
+      await client.query(insertMeetingEmailLog, [
+        log.id,
+        log.meetingNoteId,
+        log.subject,
+        log.toEmails || '',
+        log.ccEmails || null,
+        log.bodySnapshot || '',
+        log.sentBy,
+        log.sentAt,
+        log.deliveryStatus || 'Sent',
+        log.providerMessageId || null,
+        log.errorMessage || null,
+      ]);
+    }
+
+    const insertMeetingHistory =
+      'INSERT INTO "meetingNoteHistory"("id", "meetingNoteId", "version", "field", "oldValue", "newValue", "changedBy", "changedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8)';
+    for (const history of data.meetingNoteHistory || []) {
+      await client.query(insertMeetingHistory, [
+        history.id,
+        history.meetingNoteId,
+        history.version || 1,
+        history.field,
+        history.oldValue || null,
+        history.newValue || null,
+        history.changedBy || 'Unknown',
+        history.changedAt,
       ]);
     }
 

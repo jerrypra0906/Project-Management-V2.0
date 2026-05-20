@@ -14,8 +14,23 @@ router.get('/', async (_req, res) => {
     role: u.role || null,
     type: u.type || null
   }));
-  const departments = data.departments.map(d => ({ id: d.id, name: d.name }));
-  res.json({ users, departments });
+  // Department display normalization (UI naming)
+  const normalizeDepartmentName = (name) => {
+    const n = String(name || '').trim();
+    if (!n) return n;
+    if (n.toLowerCase() === 'operation') return 'Industrial';
+    if (n.toLowerCase() === 'trader') return 'Commercial';
+    return n;
+  };
+  const departments = data.departments.map(d => ({ id: d.id, name: normalizeDepartmentName(d.name) }));
+  const dwsApplications = (data.dwsApplications || []).map((a) => ({
+    id: a.id,
+    systemName: a.systemName,
+    productionUrl: a.productionUrl || null,
+    stagingUrl: a.stagingUrl || null,
+    githubUrl: a.githubUrl || null,
+  }));
+  res.json({ users, departments, dwsApplications });
 });
 
 export default router;

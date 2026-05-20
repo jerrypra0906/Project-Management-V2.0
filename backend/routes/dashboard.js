@@ -4,6 +4,289 @@ import { getAllMilestoneDurations } from '../daily-snapshots.js';
 
 const router = express.Router();
 
+/**
+ * Calculate Go Live Rate (2M Moving Average) by priority (Projects)
+ * Based on Projects with Actual End Date (endDate field), excluding CANCELLED.
+ * @param {Array} projectInitiatives - Filtered Project initiatives
+ * @returns {Array} Array of monthly data with 2M moving averages
+ */
+function calculateGoLiveRate(projectInitiatives) {
+  try {
+    const projectsWithEndDate = (projectInitiatives || []).filter(p => {
+      if (!p || !p.endDate || p.endDate === '' || p.endDate === null) return false;
+      const statusU = String(p.status || '').toUpperCase().trim();
+      if (statusU === 'CANCELLED') return false;
+      return true;
+    });
+
+    if (projectsWithEndDate.length === 0) return [];
+
+    const endDates = projectsWithEndDate
+      .map(p => {
+        try {
+          return p.endDate ? p.endDate.slice(0, 10) : null;
+        } catch {
+          return null;
+        }
+      })
+      .filter(date => date && date.length === 10)
+      .sort();
+
+    if (endDates.length === 0) return [];
+
+    const oldestDate = new Date(endDates[0]);
+    if (isNaN(oldestDate.getTime())) return [];
+
+    const today = new Date();
+
+    // Generate monthly buckets (YYYY-MM)
+    const monthlyData = {};
+    const currentDate = new Date(oldestDate);
+    currentDate.setDate(1);
+
+    while (currentDate <= today) {
+      const monthKey = currentDate.toISOString().slice(0, 7);
+      monthlyData[monthKey] = {
+        month: monthKey,
+        date: new Date(currentDate),
+        P0: 0,
+        P1: 0,
+        P2: 0,
+        Total: 0,
+      };
+      currentDate.setMonth(currentDate.getMonth() + 1);
+    }
+
+    // Count projects by month and priority
+    projectsWithEndDate.forEach(p => {
+      try {
+        const endDateStr = p.endDate.slice(0, 10);
+        if (!endDateStr || endDateStr.length !== 10) return;
+        const monthKey = endDateStr.slice(0, 7);
+        if (!monthlyData[monthKey]) return;
+
+        const priority = String(p.priority || 'P2').toUpperCase().trim();
+        if (priority === 'P0') {
+          monthlyData[monthKey].P0 += 1;
+          monthlyData[monthKey].Total += 1;
+        } else if (priority === 'P1') {
+          monthlyData[monthKey].P1 += 1;
+          monthlyData[monthKey].Total += 1;
+        } else {
+          monthlyData[monthKey].P2 += 1;
+          monthlyData[monthKey].Total += 1;
+        }
+      } catch (e) {
+        console.warn('Error processing Project for Go Live Rate:', e.message);
+      }
+    });
+
+    const monthlyArray = Object.values(monthlyData).sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    // Calculate 2-month moving average (prev + current)
+    const result = monthlyArray.map((month, index) => {
+      const movingAvg = { P0: 0, P1: 0, P2: 0, Total: 0 };
+      const startIdx = Math.max(0, index - 1);
+      const monthsForAvg = monthlyArray.slice(startIdx, index + 1);
+      const monthCount = monthsForAvg.length;
+
+      monthsForAvg.forEach(m => {
+        movingAvg.P0 += m.P0;
+        movingAvg.P1 += m.P1;
+        movingAvg.P2 += m.P2;
+        movingAvg.Total += m.Total;
+      });
+
+      movingAvg.P0 = monthCount > 0 ? Math.round((movingAvg.P0 / monthCount) * 10) / 10 : 0;
+      movingAvg.P1 = monthCount > 0 ? Math.round((movingAvg.P1 / monthCount) * 10) / 10 : 0;
+      movingAvg.P2 = monthCount > 0 ? Math.round((movingAvg.P2 / monthCount) * 10) / 10 : 0;
+      movingAvg.Total = monthCount > 0 ? Math.round((movingAvg.Total / monthCount) * 10) / 10 : 0;
+
+      return {
+        month: month.month,
+        monthKey: month.month,
+        date: month.date.toISOString().slice(0, 10),
+        monthLabel: month.date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        actual: { P0: month.P0, P1: month.P1, P2: month.P2, Total: month.Total },
+        movingAvg2M: movingAvg,
+      };
+    });
+
+    const START_MONTH = '2025-09';
+    return result.filter(r => r && typeof r.month === 'string' && r.month >= START_MONTH);
+  } catch (error) {
+    console.error('Error calculating Project Go Live Rate:', error);
+    return [];
+  }
+}
+
+/**
+ * Get week key (Monday date) for a given date
+ * @param {string} date - Date in YYYY-MM-DD format
+ * @returns {string} Monday date of the week
+ */
+function getWeekKey(date) {
+  const d = new Date(date);
+  const dayOfWeek = d.getDay(); // 0 = Sunday, 1 = Monday, etc.
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // If Sunday, go back 6 days, otherwise go back to Monday
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diffToMonday);
+  return monday.toISOString().slice(0, 10);
+}
+
+/**
+ * Get week end date (Friday) for a given week key
+ * @param {string} weekKey - Monday date in YYYY-MM-DD format
+ * @returns {string} Friday date of the week
+ */
+function getWeekEnd(weekKey) {
+  const monday = new Date(weekKey);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  return friday.toISOString().slice(0, 10);
+}
+
+/**
+ * Calculate weekly open Project burndown by priority
+ * Open = status not LIVE and not CANCELLED at week end
+ * @param {Array} projectInitiatives - Filtered Project initiatives
+ * @returns {Array} Array of weekly burndown data
+ */
+function calculateOpenBurndown(projectInitiatives) {
+  if (!projectInitiatives || projectInitiatives.length === 0) {
+    return [];
+  }
+
+  // 12-week window (same approach as CR dashboard)
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const currentWeekKey = getWeekKey(todayStr);
+
+  const weekKeys = [];
+  for (let i = 0; i < 12; i++) {
+    const weekDate = new Date(currentWeekKey);
+    weekDate.setDate(weekDate.getDate() - i * 7);
+    weekKeys.push(getWeekKey(weekDate.toISOString().slice(0, 10)));
+  }
+  weekKeys.reverse();
+
+  const weeklyData = weekKeys.map((weekKey) => {
+    const weekEndStr = getWeekEnd(weekKey);
+
+    const openProjects = projectInitiatives.filter((p) => {
+      try {
+        const status = (p.status || '').toUpperCase().trim();
+        if (status === 'LIVE' || status === 'CANCELLED') return false;
+
+        const createdAt = p.createdAt || p.startDate;
+        if (!createdAt) return false;
+        const createdDateStr = String(createdAt).slice(0, 10);
+        if (createdDateStr > weekEndStr) return false;
+
+        if (p.endDate && p.endDate !== '' && p.endDate !== null) {
+          const endDateStr = String(p.endDate).slice(0, 10);
+          if (endDateStr <= weekEndStr) return false;
+        }
+
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    const counts = openProjects.reduce(
+      (acc, p) => {
+        const priority = (p.priority || 'P2').toUpperCase().trim();
+        if (priority === 'P0') acc.P0 += 1;
+        else if (priority === 'P1') acc.P1 += 1;
+        else acc.P2 += 1;
+        acc.Total = acc.P0 + acc.P1 + acc.P2;
+        return acc;
+      },
+      { P0: 0, P1: 0, P2: 0, Total: 0 }
+    );
+
+    const mondayDate = new Date(weekKey);
+    const fridayDate = new Date(weekEndStr);
+    const weekLabel = `${mondayDate.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })} - ${fridayDate.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })}`;
+
+    return {
+      weekStart: weekKey,
+      weekEnd: weekEndStr,
+      weekLabel,
+      ...counts,
+    };
+  });
+
+  return weeklyData;
+}
+
+/**
+ * Calculate monthly open Projects (status != Live and != Cancelled) at end of each month
+ * @param {Array} projectInitiatives - Filtered Project initiatives
+ * @returns {Array} Array of monthly open Project data
+ */
+function calculateMonthlyOpenProjects(projectInitiatives) {
+  if (!projectInitiatives || projectInitiatives.length === 0) {
+    return [];
+  }
+
+  // Generate months from Dec 2025 to current month
+  const startDate = new Date('2025-12-01');
+  const currentDate = new Date();
+  const months = [];
+
+  for (let d = new Date(startDate); d <= currentDate; d.setMonth(d.getMonth() + 1)) {
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    const monthEnd = new Date(year, month + 1, 0); // Last day of month
+    const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const monthLabel = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    const monthEndStr = monthEnd.toISOString().slice(0, 10);
+
+    const openProjects = projectInitiatives.filter((p) => {
+      try {
+        const status = (p.status || '').toUpperCase().trim();
+        if (status === 'LIVE' || status === 'CANCELLED') return false;
+
+        const createdAt = p.createdAt || p.startDate;
+        if (!createdAt) return false;
+        const createdDateStr = String(createdAt).slice(0, 10);
+        if (createdDateStr > monthEndStr) return false;
+
+        if (p.endDate && p.endDate !== '' && p.endDate !== null) {
+          const endDateStr = String(p.endDate).slice(0, 10);
+          if (endDateStr <= monthEndStr) return false;
+        }
+
+        return true;
+      } catch (err) {
+        console.error('Error calculating open Projects for month:', monthEndStr, err);
+        return false;
+      }
+    }).length;
+
+    months.push({
+      year,
+      month: month + 1,
+      monthKey,
+      monthLabel,
+      monthEnd: monthEndStr,
+      openProjects,
+    });
+  }
+
+  return months;
+}
+
 router.get('/', async (req, res) => {
   const { departmentId, itPmId, teamMemberId } = req.query;
   const data = await store.read();
@@ -12,6 +295,10 @@ router.get('/', async (req, res) => {
   
   // Only count Project-type initiatives for distributions
   let projectInitiatives = data.initiatives.filter(i => i.type === 'Project');
+
+  const normStatus = (s) => String(s || '').toUpperCase().trim();
+  const normPriority = (p) => String(p || '').toUpperCase().trim();
+  const normMilestone = (m) => String(m || '').trim();
   
   // Apply filters
   if (departmentId) {
@@ -46,19 +333,65 @@ router.get('/', async (req, res) => {
   
   // Count projects after filtering
   const projects = projectInitiatives.length;
-  const countBy = (key) => Object.entries(projectInitiatives.reduce((acc, i) => { acc[i[key]] = (acc[i[key]]||0)+1; return acc; }, {})).map(([k,v]) => ({ [key]: k, c: v }));
-  const byStatus = countBy('status');
-  const byPriority = countBy('priority');
+  const countBy = (key, normFn = (v) => v) => {
+    const acc = projectInitiatives.reduce((m, i) => {
+      const raw = i[key];
+      const k = normFn(raw);
+      if (!k) return m;
+      m[k] = (m[k] || 0) + 1;
+      return m;
+    }, {});
+    return Object.entries(acc).map(([k, v]) => ({ [key]: k, c: v }));
+  };
+  const byStatus = countBy('status', normStatus);
+  const byPriority = countBy('priority', normPriority);
   const byDepartment = countBy('departmentId');
   
   // Milestone distribution - only count projects with non-blank milestones
-  const projectsWithMilestone = projectInitiatives.filter(i => i.milestone && i.milestone.trim() !== '');
-  const byMilestone = Object.entries(projectsWithMilestone.reduce((acc, i) => { acc[i.milestone] = (acc[i.milestone]||0)+1; return acc; }, {})).map(([k,v]) => ({ milestone: k, c: v }));
+  const projectsWithMilestone = projectInitiatives.filter(i => normMilestone(i.milestone) !== '');
+  const byMilestone = Object.entries(projectsWithMilestone.reduce((acc, i) => {
+    const k = normMilestone(i.milestone);
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {})).map(([k, v]) => ({ milestone: k, c: v }));
+
+  // Breakdowns (for dashboard charts)
+  const byStatusBreakdown = {};
+  const byPriorityBreakdown = {};
+  const byMilestoneBreakdown = {};
+
+  projectInitiatives.forEach(i => {
+    const status = normStatus(i.status);
+    const priority = normPriority(i.priority) || 'P2';
+    const milestone = normMilestone(i.milestone);
+
+    if (status) {
+      if (!byStatusBreakdown[status]) byStatusBreakdown[status] = { P0: 0, P1: 0, P2: 0 };
+      if (byStatusBreakdown[status][priority] !== undefined) byStatusBreakdown[status][priority] += 1;
+    }
+
+    if (priority) {
+      if (!byPriorityBreakdown[priority]) byPriorityBreakdown[priority] = {};
+      if (status) byPriorityBreakdown[priority][status] = (byPriorityBreakdown[priority][status] || 0) + 1;
+    }
+
+    if (milestone) {
+      if (!byMilestoneBreakdown[milestone]) byMilestoneBreakdown[milestone] = { P0: 0, P1: 0, P2: 0 };
+      if (byMilestoneBreakdown[milestone][priority] !== undefined) byMilestoneBreakdown[milestone][priority] += 1;
+    }
+  });
   
   const year = new Date().getFullYear();
   const liveYTD = projectInitiatives.filter(i => (i.status && i.status.toUpperCase() === 'LIVE') && (i.updatedAt||'').startsWith(String(year))).length;
   // Count all Live projects (not just YTD) - case insensitive
   const liveCount = projectInitiatives.filter(i => i.status && i.status.toUpperCase() === 'LIVE').length;
+
+  // Calculate Go Live Rate (2M Moving Average) by priority (Projects)
+  const goLiveRateData = calculateGoLiveRate(projectInitiatives);
+  // Calculate weekly open Project burndown by priority
+  const openBurndownData = calculateOpenBurndown(projectInitiatives);
+  // Calculate monthly open Projects for forecasting
+  const monthlyOpenProjects = calculateMonthlyOpenProjects(projectInitiatives);
   
   // Calculate aging metrics (Projects only) - use filtered list
   const now = new Date();
@@ -124,7 +457,13 @@ router.get('/', async (req, res) => {
     avgAgeSinceCreated,
     projectAging,
     milestoneDurations,
-    insights
+    insights,
+    byStatusBreakdown,
+    byPriorityBreakdown,
+    byMilestoneBreakdown,
+    goLiveRateData,
+    openBurndownData,
+    monthlyOpenProjects
   });
 });
 

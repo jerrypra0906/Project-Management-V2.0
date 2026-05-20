@@ -1,0 +1,45 @@
+### (Admin) Login to create API client
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "replace_me"
+}
+
+### (Admin) Create API client (requires admin token)
+POST http://localhost:3000/api/admin/api-clients
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "name": "My Integration",
+  "clientId": "my-integration-app",
+  "clientSecret": "REPLACE_WITH_STRONG_SECRET",
+  "scopes": "cr:read cr:write",
+  "active": true
+}
+
+### (Consumer) Get client token
+POST http://localhost:3000/api/auth/client-token
+Content-Type: application/json
+X-Request-Id: smoke-001
+
+{
+  "clientId": "my-integration-app",
+  "clientSecret": "REPLACE_WITH_STRONG_SECRET"
+}
+
+### (Consumer) List CRs
+POST http://localhost:3000/api/v1/crs/list
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+X-Request-Id: smoke-002
+
+{
+  "filters": { "active": true },
+  "page": 1,
+  "pageSize": 20,
+  "sort": { "field": "updatedAt", "direction": "desc" }
+}
+
