@@ -3566,6 +3566,37 @@ button.btn-fixed.primary:hover {
   opacity: 0.95;
 }
 
+.mgmt-dept-group-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 8px;
+  padding: 4px 10px 4px 12px;
+}
+
+.mgmt-dept-group-filter-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.95;
+  white-space: nowrap;
+}
+
+.mgmt-dept-group-filter select {
+  min-width: 200px;
+  max-width: 280px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: #fff;
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 13px;
+}
+
 .mgmt-top-row {
   display: grid;
   grid-template-columns: 260px 1fr;
