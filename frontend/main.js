@@ -1202,7 +1202,8 @@ const CR_MILESTONE_UI_OPTIONS = [
   'Development - Extended',
   'SIT',
   'UAT',
-  'Live',
+  'Live (Warranty Period)',
+  'Fully Live',
 ];
 
 const PROJECT_MILESTONES = [
@@ -1227,6 +1228,8 @@ function normalizeCrMilestoneForDisplay(initiative) {
   // - CR: milestone stores the CR phase directly (User Initiate -> Live)
   const m = initiative?.milestone || '';
   if (initiative?.type === 'Project') return normalizeProjectMilestoneForDisplay(m);
+  // Backward compatibility: older CRs stored "Live"
+  if (m === 'Live') return 'Live (Warranty Period)';
   return m;
 }
 
@@ -3075,6 +3078,16 @@ async function renderNew(defaultType = 'Project') {
     e.preventDefault();
     const fd = new FormData(f);
     const obj = Object.fromEntries(fd.entries());
+
+    // Validation: Actual End Date is required when Status=Live and Milestone=Fully Live
+    if (
+      String(obj.status || '').trim().toLowerCase() === 'live' &&
+      obj.milestone === 'Fully Live' &&
+      !obj.endDate
+    ) {
+      alert('Actual End Date is required when Status is "Live" and Milestone is "Fully Live".');
+      return;
+    }
     
     // Parse comma-separated arrays
     const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
@@ -5394,6 +5407,16 @@ async function renderEdit(id) {
     e.preventDefault();
     const fd = new FormData(f);
     const obj = Object.fromEntries(fd.entries());
+
+    // Validation: Actual End Date is required when Status=Live and Milestone=Fully Live
+    if (
+      String(obj.status || '').trim().toLowerCase() === 'live' &&
+      obj.milestone === 'Fully Live' &&
+      !obj.endDate
+    ) {
+      alert('Actual End Date is required when Status is "Live" and Milestone is "Fully Live".');
+      return;
+    }
     
     // Parse comma-separated arrays
     const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
@@ -6197,11 +6220,16 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
   try {
     let initiatives = await fetchJSON('/api/initiatives?' + apiQs.toString());
     
-    // Filter out LIVE CRs for "open" filter
+    // Open CRs = Not Started + In Progress (On Track, At Risk, Delayed)
     if (filterType === 'open' && initiativeType === 'CR') {
-      initiatives = initiatives.filter(i => {
-        const status = (i.status || '').toUpperCase();
-        return status !== 'LIVE';
+      initiatives = initiatives.filter((i) => {
+        const status = (i.status || '').toUpperCase().trim();
+        return (
+          status === 'NOT STARTED' ||
+          status === 'ON TRACK' ||
+          status === 'AT RISK' ||
+          status === 'DELAYED'
+        );
       });
     }
 
@@ -9910,51 +9938,43 @@ async function renderCRDashboard() {
         ` : ''}
       </div>
     </div>
-    <div class="kpis">
+    <div class="kpis cr-dashboard-kpis">
       <div class="card clickable-card" data-filter-type="all" data-filter-value="" data-title="All CRs" data-initiative-type="CR" style="cursor: pointer;">
         <div class="muted">Total CRs</div>
-        <div style="font-size:32px;font-weight:700;color: var(--brand)">${d.crs || 0}</div>
+        <div class="cr-kpi-value" style="color: var(--brand)">${d.crs || 0}</div>
       </div>
-      <div class="card clickable-card" data-filter-type="status" data-filter-value="LIVE" data-title="Live CRs" data-initiative-type="CR" style="cursor: pointer;">
+      <div class="card clickable-card" data-filter-type="status" data-filter-value="LIVE" data-title="Live CRs" data-initiative-type="CR" style="cursor: pointer; border-left: 3px solid #3b82f6;">
         <div class="muted">Live CRs</div>
-        <div style="font-size:32px;font-weight:700;color: #3b82f6">${d.liveCount || 0}</div>
-      </div>
-      <div class="card clickable-card" data-filter-type="status" data-filter-value="NOT STARTED" data-title="Not Started CRs" data-initiative-type="CR" style="cursor: pointer;">
-        <div class="muted">Not Started CRs</div>
-        <div style="font-size:32px;font-weight:700;color: var(--muted)">${(() => {
-          const notStartedStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'NOT STARTED');
-          return notStartedStatus ? (notStartedStatus.c || 0) : 0;
-        })()}</div>
-      </div>
-      <div class="card" style="border-left: 4px solid var(--success);">
-        <div class="muted">In Progress CRs</div>
-        <div style="font-size:32px;font-weight:700;color: var(--success)">${(() => {
-          const onTrackStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'ON TRACK');
-          const onTrackCRs = onTrackStatus ? (onTrackStatus.c || 0) : 0;
-          const atRiskStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'AT RISK');
-          const atRiskCRs = atRiskStatus ? (atRiskStatus.c || 0) : 0;
-          const delayedStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'DELAYED');
-          const delayedCRs = delayedStatus ? (delayedStatus.c || 0) : 0;
-          return onTrackCRs + atRiskCRs + delayedCRs;
-        })()}</div>
-        <div class="muted" style="margin-top: 6px; font-size: 12px;">
-          On Track + At Risk + Delayed
+        <div class="cr-kpi-value" style="color: #3b82f6">${d.liveCount || 0}</div>
+        <div class="muted cr-kpi-sub" style="margin-top: 6px; line-height: 1.4;">
+          <span title="Status Live, milestone Live (Warranty Period)">Warranty: ${d.liveWarrantyCount ?? 0}</span>
+          <span style="margin: 0 6px;">·</span>
+          <span title="Status Live, milestone Fully Live">Fully Live: ${d.liveFullyLiveCount ?? 0}</span>
         </div>
       </div>
-      <div class="card" style="border-left: 4px solid var(--warning);">
+      <div class="card clickable-card" data-filter-type="open" data-filter-value="" data-title="Open CRs" data-initiative-type="CR" style="cursor: pointer; border-left: 3px solid var(--success);">
+        <div class="muted">Open</div>
+        <div class="cr-kpi-value" style="color: var(--success)">${(() => {
+          if (typeof d.openCount === 'number') return d.openCount;
+          const statusCount = (name) => {
+            const row = (d.byStatus || []).find((s) => String(s.status || '').toUpperCase().trim() === name);
+            return row ? (row.c || 0) : 0;
+          };
+          return statusCount('NOT STARTED') + statusCount('ON TRACK') + statusCount('AT RISK') + statusCount('DELAYED');
+        })()}</div>
+        <div class="muted cr-kpi-sub">Not Started + In Progress</div>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--warning);">
         <div class="muted">Average CR Aging (Days)</div>
-        <div style="display:flex; align-items:baseline; justify-content: space-between; gap: 12px; margin-top: 6px;">
+        <div style="display:flex; align-items:flex-end; justify-content: space-between; gap: 8px; margin-top: 4px;">
           <div>
-            <div style="font-size:12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
-            <div style="font-size:34px;font-weight:800;color: var(--warning); line-height: 1;">${crAgingMetrics.avgTotalAge}</div>
+            <div class="cr-kpi-aging-label">Avg Total Age</div>
+            <div class="cr-kpi-aging-main" style="color: var(--warning)">${crAgingMetrics.avgTotalAge}</div>
           </div>
-          <div style="font-size: 12px; color: var(--muted); text-align: right;">
-            <div><strong>${crAgingMetrics.avgAgeCreatedToStart}</strong> Avg Age Created→Start</div>
-            <div><strong>${crAgingMetrics.avgCycleTime}</strong> Avg Cycle Time (Start→End)</div>
+          <div class="cr-kpi-aging-side">
+            <div><strong>${crAgingMetrics.avgAgeCreatedToStart}</strong> Created→Start</div>
+            <div><strong>${crAgingMetrics.avgCycleTime}</strong> Start→End</div>
           </div>
-        </div>
-        <div class="muted" style="margin-top: 10px; font-size: 12px;">
-          Total Age = (Create→Start) + (Start→End/Now). For ongoing CRs, End uses today.
         </div>
       </div>
     </div>
@@ -10243,7 +10263,7 @@ async function renderCRDashboard() {
                 </div>
                 <div style="padding: 12px; background: white; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
                   <div style="font-size: 12px; color: #475569; line-height: 1.6;">
-                    <span style="font-weight: 700; color: #1e293b;">📈 2-Month Moving Average:</span> <span style="color: #64748b;">Smoothed trend showing the average count of CRs that went live over the current and previous month</span><br/>
+                    <span style="font-weight: 700; color: #1e293b;">📈 2-Month Moving Average:</span> <span style="color: #64748b;">Average count of CRs that went live (Status = LIVE and Actual End Date in month) over the current and previous month — same rules as CR Weekly Trend</span><br/>
                     <span style="font-weight: 700; color: #f97316;">📏 Benchmark (7):</span> <span style="color: #64748b;">Target threshold for monthly go-lives</span>
                   </div>
                 </div>

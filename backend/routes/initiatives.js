@@ -8,7 +8,11 @@ import {
   CR_TASK_DEFINITIONS,
   getCrAssigneeIdFromBody,
 } from '../crTaskTemplates.js';
-import { CR_MILESTONE_PHASES } from '../crTaskTemplates.js';
+import {
+  normalizeCrMilestonePhase,
+  isValidCrMilestonePhase,
+  requiresCrFullyLiveEndDate as crRequiresFullyLiveEndDate,
+} from '../crTaskTemplates.js';
 import {
   PROJECT_MILESTONES,
   normalizeProjectMilestone,
@@ -20,6 +24,10 @@ const router = express.Router();
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
+
+function requiresCrFullyLiveEndDate(type, status, milestone) {
+  return type === 'CR' && crRequiresFullyLiveEndDate(status, milestone);
+}
 
 // Generate ticket number for CR in format: CRDDMMYYYYRunningNumber
 // Example: CR01012025001 (CR + 01/01/2025 + 001)
@@ -102,7 +110,15 @@ function validateCommon(body) {
   if (body.type === 'Project') {
     if (!isValidProjectMilestone(body.milestone)) return 'Invalid milestone';
   } else if (body.type === 'CR') {
-    if (!CR_MILESTONE_PHASES.includes(body.milestone)) return 'Invalid CR milestone phase';
+    if (!isValidCrMilestonePhase(body.milestone)) return 'Invalid CR milestone phase';
+  }
+
+  // Business rule: when CR is Live + Fully Live milestone, Actual End Date is required
+  if (
+    requiresCrFullyLiveEndDate(body.type, body.status, body.milestone) &&
+    (!body.endDate || (typeof body.endDate === 'string' && body.endDate.trim() === ''))
+  ) {
+    return 'Missing required field: endDate';
   }
   return null;
 }
@@ -300,7 +316,8 @@ router.post('/', async (req, res) => {
     finalTicket = await generateCRTicketNumber(data);
   }
 
-  const finalMilestone = type === 'Project' ? normalizeProjectMilestone(milestone) : milestone;
+  const finalMilestone =
+    type === 'Project' ? normalizeProjectMilestone(milestone) : normalizeCrMilestonePhase(milestone);
   
   data.initiatives.push({ 
     id,type,name,ticket: finalTicket,description,businessImpact,priority,
@@ -440,6 +457,7 @@ router.post('/', async (req, res) => {
 });
 
 router.put('/:id', async (req, res) => {
+  try {
   const data = await store.read();
   const idx = data.initiatives.findIndex(x => x.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
@@ -455,8 +473,11 @@ router.put('/:id', async (req, res) => {
     if (k in req.body) {
       let newValue = req.body[k];
 
-      if (k === 'milestone' && initiative.type === 'Project') {
-        newValue = normalizeProjectMilestone(newValue);
+      if (k === 'milestone') {
+        newValue =
+          initiative.type === 'Project'
+            ? normalizeProjectMilestone(newValue)
+            : normalizeCrMilestonePhase(newValue);
       }
       
       // Convert arrays to comma-separated strings for storage
@@ -527,6 +548,21 @@ router.put('/:id', async (req, res) => {
   }
   
   initiative.updatedAt = updatedAt;
+
+  // Enforce business rule on update as well:
+  // Actual End Date required when CR Status=Live and Milestone=Fully Live
+  if (
+    requiresCrFullyLiveEndDate(initiative.type, initiative.status, initiative.milestone) &&
+    (!initiative.endDate || String(initiative.endDate).trim() === '')
+  ) {
+    return res.status(400).json({
+      error: 'Missing required field: endDate (required when Status is Live and Milestone is Fully Live)',
+    });
+  }
+
+  if (initiative.type === 'CR' && initiative.milestone && !isValidCrMilestonePhase(initiative.milestone)) {
+    return res.status(400).json({ error: 'Invalid CR milestone phase' });
+  }
   
   // Track CR changes
   if (initiative.type === 'CR' && req.body.cr) {
@@ -567,6 +603,10 @@ router.put('/:id', async (req, res) => {
   
   await store.write(data);
   res.json({ ok: true, changesCount: changes.length });
+  } catch (e) {
+    console.error('[initiatives PUT] Failed to save:', e);
+    res.status(500).json({ error: e.message || 'Failed to save initiative' });
+  }
 });
 
 router.delete('/:id', async (req, res) => {

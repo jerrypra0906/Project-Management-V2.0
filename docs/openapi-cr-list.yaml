@@ -1,10 +1,14 @@
 openapi: 3.0.3
 info:
   title: Project Management Tools API - CR List
-  version: 1.0.0
+  version: 1.1.0
   description: |
     OpenAPI for integrating external applications (API Consumers) with the Project Management Tools app (API Provider),
     focused on the CR List page data (read/list + update).
+
+    **CR milestone phases (v1.1):** `Live` was split into `Live (Warranty Period)` and `Fully Live`.
+    Legacy `Live` is accepted on PATCH and normalized to `Live (Warranty Period)`.
+    When `status` is `Live` and `milestone` is `Fully Live`, `endDate` (Actual End Date) is required.
 servers:
   - url: http://localhost:3000
     description: Backend API (local)
@@ -108,6 +112,12 @@ paths:
       description: |
         Update CR fields needed to keep CR List data in sync from external systems.
         Only supports `type=CR` initiatives.
+
+        **Milestone validation:** `milestone` must be a valid CR phase (see `CrMilestonePhase` schema).
+        Legacy value `Live` is accepted and stored as `Live (Warranty Period)`.
+
+        **Business rule:** When resulting `status` is `Live` and `milestone` is `Fully Live`,
+        `endDate` (Actual End Date) must be non-empty or the request returns **400**.
       parameters:
         - $ref: "#/components/parameters/CrId"
         - $ref: "#/components/parameters/XRequestId"
@@ -231,7 +241,11 @@ components:
               example: [P0, P1]
             milestone:
               type: array
-              items: { type: string }
+              description: |
+                Filter by CR milestone phase (exact match after normalization).
+                Filter value `Live` matches stored `Live (Warranty Period)` and legacy `Live`.
+              items:
+                $ref: "#/components/schemas/CrMilestonePhase"
             departmentId:
               type: array
               items: { type: string }
@@ -299,7 +313,11 @@ components:
           type: array
           items: { type: string }
         status: { type: string, nullable: true }
-        milestone: { type: string, nullable: true }
+        milestone:
+          allOf:
+            - $ref: "#/components/schemas/CrMilestonePhase"
+          nullable: true
+          description: Canonical label returned in list responses (legacy `Live` normalized).
         startDate: { type: string, nullable: true }
         endDate: { type: string, nullable: true }
         planStartDate: { type: string, nullable: true }
@@ -361,7 +379,8 @@ components:
           type: array
           items: { type: string }
         status: { type: string }
-        milestone: { type: string }
+        milestone:
+          $ref: "#/components/schemas/CrMilestonePhase"
         startDate: { type: string, nullable: true }
         endDate: { type: string, nullable: true }
         planStartDate: { type: string, nullable: true }
@@ -381,3 +400,25 @@ components:
             uatEnd: { type: string, nullable: true }
             liveDate: { type: string, nullable: true }
       additionalProperties: false
+
+    CrMilestonePhase:
+      type: string
+      description: |
+        CR initiative milestone phase (stored in `milestone` for type=CR).
+        Use exact labels. Legacy `Live` is accepted on PATCH only.
+      enum:
+        - User Initiate
+        - CR Created
+        - CR Signed sec 2
+        - CR Signed Sec 3
+        - FSD
+        - Development
+        - Changes
+        - Signed Changes
+        - Development - Extended
+        - SIT
+        - UAT
+        - Live (Warranty Period)
+        - Fully Live
+        - Live
+      example: SIT

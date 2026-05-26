@@ -7,6 +7,7 @@ COPY . /usr/share/nginx/html
 # Copy all nginx config files
 COPY nginx.conf.local /etc/nginx/conf.d/nginx.conf.local
 COPY nginx.conf.testing /etc/nginx/conf.d/nginx.conf.testing
+COPY nginx.conf.staging /etc/nginx/conf.d/nginx.conf.staging
 COPY nginx.conf.production /etc/nginx/conf.d/nginx.conf.production
 
 # Copy default config (defaults to local)

@@ -9,7 +9,8 @@ export const INITIATIVE_MILESTONES = [
   'Planning',
   'Development',
   'Testing',
-  'Live',
+  'Live (Warranty Period)',
+  'Fully Live',
 ];
 
 /** Old / alternate initiative milestone labels → canonical initiative milestone (7 standard values). */
@@ -27,7 +28,10 @@ export const CR_INITIATIVE_MILESTONE_MAP = {
   'development-extended': 'Development',
   sit: 'Testing',
   uat: 'Testing',
-  live: 'Live',
+  live: 'Live (Warranty Period)',
+  'live (warranty period)': 'Live (Warranty Period)',
+  'live (waranty period)': 'Live (Warranty Period)',
+  'fully live': 'Fully Live',
 };
 
 /**
@@ -53,7 +57,8 @@ export const CR_TASK_DEFINITIONS = [
   { name: 'Development', milestone: 'Development' },
   { name: 'SIT', milestone: 'SIT' },
   { name: 'UAT', milestone: 'UAT' },
-  { name: 'Live', milestone: 'Live' },
+  { name: 'Live (Warranty Period)', milestone: 'Live (Warranty Period)' },
+  { name: 'Fully Live', milestone: 'Fully Live' },
 ];
 
 // CR milestone phase labels (new values shown in UI and distribution)
@@ -69,8 +74,47 @@ export const CR_MILESTONE_PHASES = [
   'Development - Extended',
   'SIT',
   'UAT',
-  'Live',
+  'Live (Warranty Period)',
+  'Fully Live',
 ];
+
+/** Legacy CR phase label (pre–warranty split). Accepted on write; normalized on persist. */
+export const CR_MILESTONE_LEGACY_LIVE = 'Live';
+export const CR_MILESTONE_LIVE_WARRANTY = 'Live (Warranty Period)';
+export const CR_MILESTONE_FULLY_LIVE = 'Fully Live';
+
+/** @param {string|null|undefined} value */
+export function normalizeCrMilestonePhase(value) {
+  if (!value) return value;
+  if (value === CR_MILESTONE_LEGACY_LIVE) return CR_MILESTONE_LIVE_WARRANTY;
+  if (value === 'Live (Waranty Period)') return CR_MILESTONE_LIVE_WARRANTY;
+  return value;
+}
+
+/** @param {string|null|undefined} value */
+export function isValidCrMilestonePhase(value) {
+  if (!value || typeof value !== 'string') return false;
+  return CR_MILESTONE_PHASES.includes(value) || value === CR_MILESTONE_LEGACY_LIVE;
+}
+
+/**
+ * @param {string|null|undefined} rowMilestone
+ * @param {string[]} filterValues
+ */
+export function crMilestoneMatchesFilter(rowMilestone, filterValues) {
+  if (!filterValues?.length) return true;
+  const row = normalizeCrMilestonePhase(String(rowMilestone || ''));
+  return filterValues.some((f) => row === normalizeCrMilestonePhase(String(f || '').trim()));
+}
+
+export function isLiveStatus(status) {
+  return String(status || '').trim().toLowerCase() === 'live';
+}
+
+/** Actual End Date required when Status=Live and Milestone=Fully Live. */
+export function requiresCrFullyLiveEndDate(status, milestone) {
+  return isLiveStatus(status) && normalizeCrMilestonePhase(milestone) === CR_MILESTONE_FULLY_LIVE;
+}
 
 export const CR_IN_PROGRESS_STATUSES = new Set(['ON TRACK', 'AT RISK', 'DELAYED']);
 
