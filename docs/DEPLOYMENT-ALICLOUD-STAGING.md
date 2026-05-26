@@ -70,10 +70,21 @@ sudo chown $USER:$USER /opt
 cd /opt
 git clone https://github.com/jerrypra0906/Project-Management-V2.0.git
 cd Project-Management-V2.0
-git checkout main   # or your staging branch
+git checkout SIT
+git pull origin SIT
 ```
 
 Use the same path on all servers: `/opt/Project-Management-V2.0`.
+
+**Already cloned?** On each server, update to the latest `SIT` before continuing:
+
+```bash
+cd /opt/Project-Management-V2.0
+git fetch origin
+git checkout SIT
+git pull origin SIT
+ls -la .env.staging.example   # must exist after pull (added in SIT branch)
+```
 
 ---
 
@@ -92,11 +103,46 @@ docker compose version
 
 ### 1.2 Configure environment file
 
-On **backend** and **DB** servers, create staging env from the example:
+On **backend** and **DB** servers, create staging env from the example.
+
+**Prerequisite:** `.env.staging.example` is only on the **`SIT`** branch. Run `git pull origin SIT` first (see Step 0).
 
 ```bash
 cd /opt/Project-Management-V2.0
 cp .env.staging.example .env.staging
+nano .env.staging
+```
+
+If `cp` fails with *No such file*, either pull `SIT` or create the file manually:
+
+```bash
+cd /opt/Project-Management-V2.0
+cat > .env.staging << 'EOF'
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=CHANGE_ME_STRONG_DB_PASSWORD
+POSTGRES_DB=project_management_v2
+POSTGRES_HOST_PORT=5440
+NODE_ENV=production
+BACKEND_HOST_PORT=3010
+DATABASE_URL=postgres://postgres:CHANGE_ME_STRONG_DB_PASSWORD@172.28.92.60:5440/project_management_v2
+JWT_SECRET=CHANGE_ME_LONG_RANDOM_JWT_SECRET
+SSO_TOKEN_SECRET=CHANGE_ME_SSO_SECRET_IF_USED
+APP_PUBLIC_ORIGIN=http://8.215.6.189:3030
+FRONTEND_URL=http://8.215.6.189:3030
+ADMIN_EMAIL=admin@yourcompany.com
+ADMIN_PASSWORD=ChangeMeAdmin123!
+ADMIN_NAME=Staging Admin
+EMAIL_FROM=noreply@energi-up.com
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=
+SMTP_PASSWORD=
+SHEET_ID=
+GID=
+CR_GID=
+FRONTEND_HOST_PORT=3030
+EOF
 nano .env.staging
 ```
 
