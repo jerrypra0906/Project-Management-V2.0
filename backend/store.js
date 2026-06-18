@@ -695,7 +695,16 @@ async function read() {
   }
 }
 
+/** Serialize full-store writes to avoid concurrent DELETE+INSERT races (502 / duplicate key). */
+let writeQueue = Promise.resolve();
+
 async function write(data) {
+  const run = writeQueue.then(() => writeImpl(data));
+  writeQueue = run.catch(() => {});
+  return run;
+}
+
+async function writeImpl(data) {
   await initializeSchema();
   const client = await pool.connect();
   try {
@@ -725,7 +734,10 @@ async function write(data) {
     await client.query('DELETE FROM "meetingNotes"');
 
     const insertDept = 'INSERT INTO "departments"("id", "name") VALUES ($1, $2)';
+    const seenDeptIds = new Set();
     for (const d of data.departments || []) {
+      if (!d?.id || seenDeptIds.has(d.id)) continue;
+      seenDeptIds.add(d.id);
       await client.query(insertDept, [d.id, d.name]);
     }
 

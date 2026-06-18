@@ -1,3 +1,9 @@
+import {
+  DEPARTMENT_GROUP_OPTIONS,
+  normalizeDepartmentName,
+  departmentGroupFromName,
+} from './departmentGroups.js';
+
 const app = document.getElementById('app');
 console.log('=== Frontend main.js loaded ===');
 console.log('App element:', app);
@@ -1196,7 +1202,8 @@ const CR_MILESTONE_UI_OPTIONS = [
   'Development - Extended',
   'SIT',
   'UAT',
-  'Live',
+  'Live (Warranty Period)',
+  'Fully Live',
 ];
 
 const PROJECT_MILESTONES = [
@@ -1221,6 +1228,8 @@ function normalizeCrMilestoneForDisplay(initiative) {
   // - CR: milestone stores the CR phase directly (User Initiate -> Live)
   const m = initiative?.milestone || '';
   if (initiative?.type === 'Project') return normalizeProjectMilestoneForDisplay(m);
+  // Backward compatibility: older CRs stored "Live"
+  if (m === 'Live') return 'Live (Warranty Period)';
   return m;
 }
 
@@ -3069,6 +3078,16 @@ async function renderNew(defaultType = 'Project') {
     e.preventDefault();
     const fd = new FormData(f);
     const obj = Object.fromEntries(fd.entries());
+
+    // Validation: Actual End Date is required when Status=Live and Milestone=Fully Live
+    if (
+      String(obj.status || '').trim().toLowerCase() === 'live' &&
+      obj.milestone === 'Fully Live' &&
+      !obj.endDate
+    ) {
+      alert('Actual End Date is required when Status is "Live" and Milestone is "Fully Live".');
+      return;
+    }
     
     // Parse comma-separated arrays
     const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
@@ -5388,6 +5407,16 @@ async function renderEdit(id) {
     e.preventDefault();
     const fd = new FormData(f);
     const obj = Object.fromEntries(fd.entries());
+
+    // Validation: Actual End Date is required when Status=Live and Milestone=Fully Live
+    if (
+      String(obj.status || '').trim().toLowerCase() === 'live' &&
+      obj.milestone === 'Fully Live' &&
+      !obj.endDate
+    ) {
+      alert('Actual End Date is required when Status is "Live" and Milestone is "Fully Live".');
+      return;
+    }
     
     // Parse comma-separated arrays
     const businessUserIds = obj.businessUserIds ? obj.businessUserIds.split(',').filter(Boolean) : [];
@@ -6191,11 +6220,16 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
   try {
     let initiatives = await fetchJSON('/api/initiatives?' + apiQs.toString());
     
-    // Filter out LIVE CRs for "open" filter
+    // Open CRs = Not Started + In Progress (On Track, At Risk, Delayed)
     if (filterType === 'open' && initiativeType === 'CR') {
-      initiatives = initiatives.filter(i => {
-        const status = (i.status || '').toUpperCase();
-        return status !== 'LIVE';
+      initiatives = initiatives.filter((i) => {
+        const status = (i.status || '').toUpperCase().trim();
+        return (
+          status === 'NOT STARTED' ||
+          status === 'ON TRACK' ||
+          status === 'AT RISK' ||
+          status === 'DELAYED'
+        );
       });
     }
 
@@ -6221,31 +6255,11 @@ window.showInitiativesModal = async function(filterType, filterValue, title, ini
       const groupKey = (groupKeyRaw || '').trim() || 'Support';
       const bucket = (bucketRaw || 'TOTAL').toUpperCase().trim();
 
-      const normalizeDeptName = (name) => {
-        const n = String(name || '').trim();
-        if (!n) return n;
-        const low = n.toLowerCase();
-        if (low === 'operation') return 'Industrial';
-        if (low === 'trader') return 'Commercial';
-        return n;
-      };
-      const departmentGroup = (deptName) => {
-        const n = normalizeDeptName(deptName);
-        const low = String(n || '').trim().toLowerCase();
-        if (!low) return 'Support';
-        if (low === 'industrial') return 'Industrial';
-        if (low === 'commercial') return 'Commercial';
-        if (low === 'logistic') return 'Logistic';
-        if (low === 'exim') return 'EXIM';
-        if (low === 'fabtic') return 'FABTIC';
-        if (low === 'procurement' || low === 'hc' || low === 'sustainability') return 'Support';
-        return 'Support';
-      };
-      const deptNameById = (id) => normalizeDeptName(nameById(LOOKUPS.departments || [], id));
+      const deptNameById = (id) => normalizeDepartmentName(nameById(LOOKUPS.departments || [], id));
       const statusU = (s) => String(s || '').toUpperCase().trim();
 
       initiatives = initiatives.filter(p => {
-        const grp = departmentGroup(deptNameById(p.departmentId));
+        const grp = departmentGroupFromName(deptNameById(p.departmentId));
         if (grp !== groupKey) return false;
         const s = statusU(p.status);
         if (bucket === 'TOTAL') return s !== 'CANCELLED';
@@ -6701,27 +6715,7 @@ async function renderDashboard() {
   const totalProjectsExCancelled = (d.projects || 0) - cancelledProjects;
 
   // Department Group breakdowns for the Project Summary KPIs (computed from filtered initiatives)
-  const normalizeDeptName = (name) => {
-    const n = String(name || '').trim();
-    if (!n) return n;
-    const low = n.toLowerCase();
-    if (low === 'operation') return 'Industrial';
-    if (low === 'trader') return 'Commercial';
-    return n;
-  };
-  const departmentGroup = (deptName) => {
-    const n = normalizeDeptName(deptName);
-    const low = String(n || '').trim().toLowerCase();
-    if (!low) return 'Support';
-    if (low === 'industrial') return 'Industrial';
-    if (low === 'commercial') return 'Commercial';
-    if (low === 'logistic') return 'Logistic';
-    if (low === 'exim') return 'EXIM';
-    if (low === 'fabtic') return 'FABTIC';
-    if (low === 'procurement' || low === 'hc' || low === 'sustainability') return 'Support';
-    return 'Support';
-  };
-  const deptNameById = (id) => normalizeDeptName(nameById(LOOKUPS.departments || [], id));
+  const deptNameById = (id) => normalizeDepartmentName(nameById(LOOKUPS.departments || [], id));
   const initGroupCounts = () => ({
     Industrial: 0,
     Commercial: 0,
@@ -6734,7 +6728,7 @@ async function renderDashboard() {
     const counts = initGroupCounts();
     (projects || []).forEach(p => {
       if (!predicate(p)) return;
-      const grp = departmentGroup(deptNameById(p.departmentId));
+      const grp = departmentGroupFromName(deptNameById(p.departmentId));
       counts[grp] = (counts[grp] || 0) + 1;
     });
     return counts;
@@ -6915,15 +6909,6 @@ async function renderDashboard() {
             </thead>
             <tbody>
               ${(() => {
-                const groups = [
-                  { key: 'Industrial', label: 'Industrial' },
-                  { key: 'Commercial', label: 'Commercial' },
-                  { key: 'Logistic', label: 'Logistic' },
-                  { key: 'EXIM', label: 'EXIM' },
-                  { key: 'FABTIC', label: 'FABTIC' },
-                  { key: 'Support', label: 'Support (Procurement, HC, Sustainability)' },
-                ];
-
                 const row = (g, i) => {
                   const bg = i % 2 === 0 ? '#ffffff' : '#fbfdff';
                   const makeCell = (value, bucket, color) => `
@@ -6950,7 +6935,7 @@ async function renderDashboard() {
                   `;
                 };
 
-                return groups.map(row).join('');
+                return DEPARTMENT_GROUP_OPTIONS.map(row).join('');
               })()}
             </tbody>
           </table>
@@ -7613,31 +7598,11 @@ async function renderDashboard() {
     };
 
     const today = new Date();
-    const normalizeDeptNameForCal = (name) => {
-      const n = String(name || '').trim();
-      if (!n) return n;
-      const low = n.toLowerCase();
-      if (low === 'operation') return 'Industrial';
-      if (low === 'trader') return 'Commercial';
-      return n;
-    };
-    const departmentGroupForCal = (deptName) => {
-      const n = normalizeDeptNameForCal(deptName);
-      const low = String(n || '').trim().toLowerCase();
-      if (!low) return 'Support';
-      if (low === 'industrial') return 'Industrial';
-      if (low === 'commercial') return 'Commercial';
-      if (low === 'logistic') return 'Logistic';
-      if (low === 'exim') return 'EXIM';
-      if (low === 'fabtic') return 'FABTIC';
-      if (low === 'procurement' || low === 'hc' || low === 'sustainability') return 'Support';
-      return 'Support';
-    };
-    const deptNameByIdCal = (id) => normalizeDeptNameForCal(nameById(LOOKUPS.departments || [], id));
+    const deptNameByIdCal = (id) => normalizeDepartmentName(nameById(LOOKUPS.departments || [], id));
 
     const projects = rows
       .map(p => {
-        const group = departmentGroupForCal(deptNameByIdCal(p.departmentId));
+        const group = departmentGroupFromName(deptNameByIdCal(p.departmentId));
         return {
           id: p.id,
           name: String(p.name || 'Untitled'),
@@ -9079,9 +9044,14 @@ async function renderManagementDashboard() {
   setActive('#management-dashboard');
   await ensureLookups();
 
+  const urlParams = new URLSearchParams(location.search);
+  const selectedDepartmentGroup = urlParams.get('departmentGroup') || '';
+  const mgmtApiQs = new URLSearchParams();
+  if (selectedDepartmentGroup) mgmtApiQs.set('departmentGroup', selectedDepartmentGroup);
+
   let data;
   try {
-    data = await fetchJSON('/api/management-dashboard');
+    data = await fetchJSON('/api/management-dashboard' + (mgmtApiQs.toString() ? `?${mgmtApiQs}` : ''));
   } catch (e) {
     app.innerHTML = `<div class="error">Failed to load Management Dashboard: ${escapeHtml(e.message || String(e))}</div>`;
     return;
@@ -9168,6 +9138,15 @@ async function renderManagementDashboard() {
         <div>DOWNSTREAM IT PROJECT & CR WEEKLY DASHBOARD</div>
         <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end;">
           <div class="asof">As of ${new Date().toLocaleDateString()}</div>
+          <label class="mgmt-dept-group-filter" data-export-hide="1">
+            <span class="mgmt-dept-group-filter-label">Department Group</span>
+            <select id="mgmt-department-group-filter" title="Filter by Department Group">
+              <option value="">All Department Groups</option>
+              ${DEPARTMENT_GROUP_OPTIONS.map((g) => `
+                <option value="${escapeHtml(g.key)}" ${selectedDepartmentGroup === g.key ? 'selected' : ''}>${escapeHtml(g.label)}</option>
+              `).join('')}
+            </select>
+          </label>
           <button id="btn-mgmt-download" data-export-hide="1" style="background:#ffffff; border:1px solid rgba(255,255,255,.6); font-weight:900;">Download (HD)</button>
         </div>
       </div>
@@ -9411,7 +9390,22 @@ async function renderManagementDashboard() {
 
   const btnSave = document.getElementById('btn-save-mgmt');
   const btnDownload = document.getElementById('btn-mgmt-download');
+  const deptGroupFilter = document.getElementById('mgmt-department-group-filter');
   const statusSelect = document.getElementById('mgmt-portfolio-status');
+
+  if (deptGroupFilter) {
+    deptGroupFilter.onchange = () => {
+      const params = new URLSearchParams(location.search);
+      const val = String(deptGroupFilter.value || '').trim();
+      if (val) params.set('departmentGroup', val);
+      else params.delete('departmentGroup');
+      const qs = params.toString();
+      const hash = (location.hash || '#management-dashboard').split('?')[0];
+      const nextUrl = `${location.pathname}${qs ? `?${qs}` : ''}${hash}`;
+      history.replaceState(null, '', nextUrl);
+      renderManagementDashboard();
+    };
+  }
   const applyStatusSelectStyle = () => {
     const v = String(statusSelect?.value || 'GREEN').toUpperCase();
     const color = v === 'RED' ? '#ef4444' : v === 'AMBER' ? '#f59e0b' : '#22c55e';
@@ -9944,51 +9938,43 @@ async function renderCRDashboard() {
         ` : ''}
       </div>
     </div>
-    <div class="kpis">
+    <div class="kpis cr-dashboard-kpis">
       <div class="card clickable-card" data-filter-type="all" data-filter-value="" data-title="All CRs" data-initiative-type="CR" style="cursor: pointer;">
         <div class="muted">Total CRs</div>
-        <div style="font-size:32px;font-weight:700;color: var(--brand)">${d.crs || 0}</div>
+        <div class="cr-kpi-value" style="color: var(--brand)">${d.crs || 0}</div>
       </div>
-      <div class="card clickable-card" data-filter-type="status" data-filter-value="LIVE" data-title="Live CRs" data-initiative-type="CR" style="cursor: pointer;">
+      <div class="card clickable-card" data-filter-type="status" data-filter-value="LIVE" data-title="Live CRs" data-initiative-type="CR" style="cursor: pointer; border-left: 3px solid #3b82f6;">
         <div class="muted">Live CRs</div>
-        <div style="font-size:32px;font-weight:700;color: #3b82f6">${d.liveCount || 0}</div>
-      </div>
-      <div class="card clickable-card" data-filter-type="status" data-filter-value="NOT STARTED" data-title="Not Started CRs" data-initiative-type="CR" style="cursor: pointer;">
-        <div class="muted">Not Started CRs</div>
-        <div style="font-size:32px;font-weight:700;color: var(--muted)">${(() => {
-          const notStartedStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'NOT STARTED');
-          return notStartedStatus ? (notStartedStatus.c || 0) : 0;
-        })()}</div>
-      </div>
-      <div class="card" style="border-left: 4px solid var(--success);">
-        <div class="muted">In Progress CRs</div>
-        <div style="font-size:32px;font-weight:700;color: var(--success)">${(() => {
-          const onTrackStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'ON TRACK');
-          const onTrackCRs = onTrackStatus ? (onTrackStatus.c || 0) : 0;
-          const atRiskStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'AT RISK');
-          const atRiskCRs = atRiskStatus ? (atRiskStatus.c || 0) : 0;
-          const delayedStatus = (d.byStatus || []).find(s => String(s.status || '').toUpperCase().trim() === 'DELAYED');
-          const delayedCRs = delayedStatus ? (delayedStatus.c || 0) : 0;
-          return onTrackCRs + atRiskCRs + delayedCRs;
-        })()}</div>
-        <div class="muted" style="margin-top: 6px; font-size: 12px;">
-          On Track + At Risk + Delayed
+        <div class="cr-kpi-value" style="color: #3b82f6">${d.liveCount || 0}</div>
+        <div class="muted cr-kpi-sub" style="margin-top: 6px; line-height: 1.4;">
+          <span title="Status Live, milestone Live (Warranty Period)">Warranty: ${d.liveWarrantyCount ?? 0}</span>
+          <span style="margin: 0 6px;">·</span>
+          <span title="Status Live, milestone Fully Live">Fully Live: ${d.liveFullyLiveCount ?? 0}</span>
         </div>
       </div>
-      <div class="card" style="border-left: 4px solid var(--warning);">
+      <div class="card clickable-card" data-filter-type="open" data-filter-value="" data-title="Open CRs" data-initiative-type="CR" style="cursor: pointer; border-left: 3px solid var(--success);">
+        <div class="muted">Open</div>
+        <div class="cr-kpi-value" style="color: var(--success)">${(() => {
+          if (typeof d.openCount === 'number') return d.openCount;
+          const statusCount = (name) => {
+            const row = (d.byStatus || []).find((s) => String(s.status || '').toUpperCase().trim() === name);
+            return row ? (row.c || 0) : 0;
+          };
+          return statusCount('NOT STARTED') + statusCount('ON TRACK') + statusCount('AT RISK') + statusCount('DELAYED');
+        })()}</div>
+        <div class="muted cr-kpi-sub">Not Started + In Progress</div>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--warning);">
         <div class="muted">Average CR Aging (Days)</div>
-        <div style="display:flex; align-items:baseline; justify-content: space-between; gap: 12px; margin-top: 6px;">
+        <div style="display:flex; align-items:flex-end; justify-content: space-between; gap: 8px; margin-top: 4px;">
           <div>
-            <div style="font-size:12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px;">Avg Total Age</div>
-            <div style="font-size:34px;font-weight:800;color: var(--warning); line-height: 1;">${crAgingMetrics.avgTotalAge}</div>
+            <div class="cr-kpi-aging-label">Avg Total Age</div>
+            <div class="cr-kpi-aging-main" style="color: var(--warning)">${crAgingMetrics.avgTotalAge}</div>
           </div>
-          <div style="font-size: 12px; color: var(--muted); text-align: right;">
-            <div><strong>${crAgingMetrics.avgAgeCreatedToStart}</strong> Avg Age Created→Start</div>
-            <div><strong>${crAgingMetrics.avgCycleTime}</strong> Avg Cycle Time (Start→End)</div>
+          <div class="cr-kpi-aging-side">
+            <div><strong>${crAgingMetrics.avgAgeCreatedToStart}</strong> Created→Start</div>
+            <div><strong>${crAgingMetrics.avgCycleTime}</strong> Start→End</div>
           </div>
-        </div>
-        <div class="muted" style="margin-top: 10px; font-size: 12px;">
-          Total Age = (Create→Start) + (Start→End/Now). For ongoing CRs, End uses today.
         </div>
       </div>
     </div>
@@ -10277,7 +10263,7 @@ async function renderCRDashboard() {
                 </div>
                 <div style="padding: 12px; background: white; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center;">
                   <div style="font-size: 12px; color: #475569; line-height: 1.6;">
-                    <span style="font-weight: 700; color: #1e293b;">📈 2-Month Moving Average:</span> <span style="color: #64748b;">Smoothed trend showing the average count of CRs that went live over the current and previous month</span><br/>
+                    <span style="font-weight: 700; color: #1e293b;">📈 2-Month Moving Average:</span> <span style="color: #64748b;">Average count of CRs that went live (Status = LIVE and Actual End Date in month) over the current and previous month — same rules as CR Weekly Trend</span><br/>
                     <span style="font-weight: 700; color: #f97316;">📏 Benchmark (7):</span> <span style="color: #64748b;">Target threshold for monthly go-lives</span>
                   </div>
                 </div>

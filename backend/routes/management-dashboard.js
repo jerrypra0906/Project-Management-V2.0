@@ -8,6 +8,10 @@ import {
   PROJECT_MILESTONE_LEGACY_LIVE,
   normalizeProjectMilestone,
 } from '../projectMilestones.js';
+import {
+  matchesDepartmentGroup,
+  isValidDepartmentGroupKey,
+} from '../departmentGroups.js';
 
 const router = express.Router();
 
@@ -42,13 +46,27 @@ function departmentNameById(departments, id) {
 
 router.use(requireAdmin);
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  const departmentGroupFilter = String(req.query.departmentGroup || '').trim();
+  if (departmentGroupFilter && !isValidDepartmentGroupKey(departmentGroupFilter)) {
+    return res.status(400).json({ error: 'Invalid departmentGroup' });
+  }
+
   const data = await store.read();
   const initiatives = data.initiatives || [];
   const tasks = data.tasks || [];
   const departments = data.departments || [];
-  const projects = initiatives.filter((i) => i.type === 'Project');
-  const crs = initiatives.filter((i) => i.type === 'CR');
+  let projects = initiatives.filter((i) => i.type === 'Project');
+  let crs = initiatives.filter((i) => i.type === 'CR');
+
+  if (departmentGroupFilter) {
+    projects = projects.filter((p) =>
+      matchesDepartmentGroup(departments, p.departmentId, departmentGroupFilter)
+    );
+    crs = crs.filter((c) =>
+      matchesDepartmentGroup(departments, c.departmentId, departmentGroupFilter)
+    );
+  }
 
   const notesRow = (data.managementDashboard || [])[0] || null;
   const storedPortfolioStatus = String(notesRow?.portfolioStatus || '').trim().toUpperCase();
@@ -283,6 +301,7 @@ router.get('/', async (_req, res) => {
 
   res.json({
     portfolioStatus,
+    departmentGroupFilter: departmentGroupFilter || null,
     timelineProgress: timelineProjects,
     itProjectLiveWarranty,
     itProjectLived: itProjectLiveWarranty,

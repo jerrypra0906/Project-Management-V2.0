@@ -2,10 +2,19 @@
  * Task Status and Milestone Enums with case-insensitive normalization
  */
 import { CR_TASK_DEFINITIONS } from '../crTaskTemplates.js';
+import {
+  PROJECT_MILESTONES,
+  PROJECT_MILESTONE_LIVE_WARRANTY,
+  PROJECT_MILESTONE_FULLY_LIVE,
+  PROJECT_MILESTONE_LEGACY_LIVE,
+} from '../projectMilestones.js';
 
 const CR_TASK_MILESTONE_VALUES = [...new Set(CR_TASK_DEFINITIONS.map((t) => t.milestone))];
 const CR_TASK_MILESTONE_BY_LOWER = Object.fromEntries(
   CR_TASK_MILESTONE_VALUES.map((m) => [m.toLowerCase(), m])
+);
+const PROJECT_MILESTONE_BY_LOWER = Object.fromEntries(
+  PROJECT_MILESTONES.map((m) => [m.toLowerCase(), m])
 );
 
 // ========== TASK STATUS ENUM ==========
@@ -120,8 +129,13 @@ export const Milestone = {
   LIVE_PREPARATION: 'Live Preparation'
 };
 
-// Valid milestone values (for validation) — standard workflow + CR phase labels
-export const VALID_MILESTONES = [...Object.values(Milestone), ...CR_TASK_MILESTONE_VALUES];
+// Valid milestone values — task workflow, project initiative phases, CR phase labels
+export const VALID_MILESTONES = [
+  ...Object.values(Milestone),
+  ...PROJECT_MILESTONES,
+  PROJECT_MILESTONE_LEGACY_LIVE,
+  ...CR_TASK_MILESTONE_VALUES,
+];
 
 // Mapping aliases to canonical values (case-insensitive)
 const MILESTONE_ALIASES = {
@@ -178,7 +192,13 @@ const MILESTONE_ALIASES = {
   'deployment': Milestone.LIVE_PREPARATION,
   'release': Milestone.LIVE_PREPARATION,
   'launch': Milestone.LIVE_PREPARATION,
-  'production': Milestone.LIVE_PREPARATION
+  'production': Milestone.LIVE_PREPARATION,
+
+  // Project initiative milestones (canonical labels)
+  preparation: 'Preparation',
+  'live (warranty period)': PROJECT_MILESTONE_LIVE_WARRANTY,
+  'live (waranty period)': PROJECT_MILESTONE_LIVE_WARRANTY,
+  'fully live': PROJECT_MILESTONE_FULLY_LIVE,
 };
 
 /**
@@ -203,11 +223,16 @@ export function normalizeMilestone(input, defaultValue = null) {
   if (CR_TASK_MILESTONE_BY_LOWER[normalized]) {
     return CR_TASK_MILESTONE_BY_LOWER[normalized];
   }
+
+  // Project initiative milestones (Preparation → Fully Live)
+  if (PROJECT_MILESTONE_BY_LOWER[normalized]) {
+    return PROJECT_MILESTONE_BY_LOWER[normalized];
+  }
   
   if (MILESTONE_ALIASES[normalized]) {
     return MILESTONE_ALIASES[normalized];
   }
-  
+
   // If no alias match, check if it matches any valid value (case-insensitive)
   for (const validMilestone of VALID_MILESTONES) {
     if (validMilestone.toLowerCase() === normalized) {
@@ -229,8 +254,12 @@ export function isValidMilestone(milestone) {
   if (!milestone || milestone === 'none') return true; // Milestone is optional
   if (typeof milestone !== 'string') return false;
   const normalized = milestone.toLowerCase().trim();
-  return MILESTONE_ALIASES[normalized] !== undefined || 
-         VALID_MILESTONES.some(m => m.toLowerCase() === normalized);
+  return (
+    MILESTONE_ALIASES[normalized] !== undefined ||
+    PROJECT_MILESTONE_BY_LOWER[normalized] !== undefined ||
+    CR_TASK_MILESTONE_BY_LOWER[normalized] !== undefined ||
+    VALID_MILESTONES.some((m) => m.toLowerCase() === normalized)
+  );
 }
 
 // Display labels for frontend (maps internal value to display label)
@@ -248,7 +277,10 @@ export const MILESTONE_DISPLAY_LABELS = {
   [Milestone.PLANNING]: 'Planning',
   [Milestone.DEVELOPMENT]: 'Development',
   [Milestone.TESTING]: 'Testing',
-  [Milestone.LIVE_PREPARATION]: 'Live Preparation'
+  [Milestone.LIVE_PREPARATION]: 'Live Preparation',
+  Preparation: 'Preparation',
+  [PROJECT_MILESTONE_LIVE_WARRANTY]: PROJECT_MILESTONE_LIVE_WARRANTY,
+  [PROJECT_MILESTONE_FULLY_LIVE]: PROJECT_MILESTONE_FULLY_LIVE,
 };
 
 export default {

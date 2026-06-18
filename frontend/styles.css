@@ -1972,6 +1972,54 @@ tbody tr.status-live {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
 }
 
+/* CR Dashboard — compact KPI row */
+.kpis.cr-dashboard-kpis {
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.kpis.cr-dashboard-kpis .card {
+  padding: 10px 12px;
+}
+
+.kpis.cr-dashboard-kpis .muted {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.kpis.cr-dashboard-kpis .cr-kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  margin-top: 2px;
+}
+
+.kpis.cr-dashboard-kpis .cr-kpi-sub {
+  font-size: 10px;
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
+.kpis.cr-dashboard-kpis .cr-kpi-aging-main {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.kpis.cr-dashboard-kpis .cr-kpi-aging-side {
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.kpis.cr-dashboard-kpis .cr-kpi-aging-label {
+  font-size: 9px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+}
+
 /* Sortable + resizable columns */
 th.sortable { 
   cursor: pointer; 
@@ -3564,6 +3612,37 @@ button.btn-fixed.primary:hover {
 .mgmt-header .asof {
   font-weight: 700;
   opacity: 0.95;
+}
+
+.mgmt-dept-group-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 8px;
+  padding: 4px 10px 4px 12px;
+}
+
+.mgmt-dept-group-filter-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.95;
+  white-space: nowrap;
+}
+
+.mgmt-dept-group-filter select {
+  min-width: 200px;
+  max-width: 280px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: #fff;
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 13px;
 }
 
 .mgmt-top-row {

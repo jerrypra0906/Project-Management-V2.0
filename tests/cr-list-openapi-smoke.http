@@ -43,3 +43,41 @@ X-Request-Id: smoke-002
   "sort": { "field": "updatedAt", "direction": "desc" }
 }
 
+### (Consumer) List CRs in warranty period (milestone filter v1.1)
+POST http://localhost:3000/api/v1/crs/list
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+X-Request-Id: smoke-002b
+
+{
+  "filters": {
+    "milestone": ["Live (Warranty Period)"],
+    "status": ["LIVE"]
+  },
+  "page": 1,
+  "pageSize": 20
+}
+
+### (Consumer) Update CR to Fully Live (requires endDate)
+PATCH http://localhost:3000/api/v1/crs/{{cr_initiative_id}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+X-Request-Id: smoke-003
+
+{
+  "status": "Live",
+  "milestone": "Fully Live",
+  "endDate": "2026-05-13"
+}
+
+### (Consumer) PATCH Fully Live without endDate — expect 400
+PATCH http://localhost:3000/api/v1/crs/{{cr_initiative_id}}
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+X-Request-Id: smoke-003b
+
+{
+  "status": "Live",
+  "milestone": "Fully Live"
+}
+

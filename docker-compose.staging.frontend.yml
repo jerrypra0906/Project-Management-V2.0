@@ -1,0 +1,20 @@
+# AliCloud STAGING — Frontend server only (172.28.92.56 / public 8.215.6.189)
+# API proxied to backend 172.28.92.57:3010 via nginx.conf.staging
+#
+# Usage:
+#   docker compose -f docker-compose.staging.frontend.yml up -d --build
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: project_management_frontend_staging
+    environment:
+      - NGINX_ENV=staging
+    ports:
+      - "${FRONTEND_HOST_PORT:-3030}:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf.staging:/etc/nginx/conf.d/nginx.conf.staging:ro
+    restart: unless-stopped

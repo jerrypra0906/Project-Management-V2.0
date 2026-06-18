@@ -39,7 +39,8 @@ async function main() {
         canon === 'preparation' ? 'User Initiate'
           : canon === 'tech assessment' ? 'FSD'
           : canon === 'testing' ? 'SIT'
-          : canon === 'live' ? 'Live'
+          : canon === 'live (warranty period)' ? 'Live (Warranty Period)'
+          : canon === 'fully live' ? 'Fully Live'
           : canon === 'development' ? 'Development'
           : 'User Initiate';
     }

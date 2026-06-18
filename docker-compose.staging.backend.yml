@@ -1,0 +1,26 @@
+# AliCloud STAGING — Backend API server only (172.28.92.57)
+# Postgres runs on 172.28.92.60 (see docker-compose.staging.db.yml)
+#
+# Usage:
+#   docker compose -f docker-compose.staging.backend.yml --env-file .env.staging up -d --build
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: project_management_backend_staging
+    env_file:
+      - path: .env.staging
+        required: true
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+    ports:
+      - "${BACKEND_HOST_PORT:-3010}:3000"
+    volumes:
+      - ./backend:/app/backend:ro
+      - ./docs:/app/docs:ro
+      - ./uploads:/app/uploads
+    restart: unless-stopped

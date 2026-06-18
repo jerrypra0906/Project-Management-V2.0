@@ -1,6 +1,13 @@
 import express from 'express';
 import store from '../store.js';
 import { getAllMilestoneDurations } from '../daily-snapshots.js';
+import {
+  normalizeCrMilestonePhase,
+  CR_MILESTONE_LIVE_WARRANTY,
+  CR_MILESTONE_FULLY_LIVE,
+} from '../crTaskTemplates.js';
+
+const CR_OPEN_STATUSES = new Set(['NOT STARTED', 'ON TRACK', 'AT RISK', 'DELAYED']);
 
 const router = express.Router();
 
@@ -191,24 +198,32 @@ function calculateOpenBurndown(crInitiatives) {
 }
 
 /**
- * Calculate Go Live Rate (3M Moving Average) by priority
- * Based on CRs with Actual End Date (endDate field)
+ * Same "went live" definition as CR Weekly Trend: status LIVE + Actual End Date.
+ */
+function isCrWentLive(cr) {
+  if (!cr) return false;
+  const status = (cr.status || '').toUpperCase();
+  if (status !== 'LIVE') return false;
+  if (!cr.endDate || cr.endDate === '' || cr.endDate === null) return false;
+  return true;
+}
+
+/**
+ * Calculate Go Live Rate (2M Moving Average) by priority.
+ * Counts CRs that went live (LIVE + endDate), grouped by endDate month.
  * @param {Array} crInitiatives - Filtered CR initiatives
- * @returns {Array} Array of monthly data with 3M moving averages
+ * @returns {Array} Array of monthly data with 2M moving averages
  */
 function calculateGoLiveRate(crInitiatives) {
   try {
-    // Filter CRs with actual end date
-    const crsWithEndDate = crInitiatives.filter(cr => 
-      cr && cr.endDate && cr.endDate !== '' && cr.endDate !== null
-    );
+    const crsWentLive = crInitiatives.filter(isCrWentLive);
 
-    if (crsWithEndDate.length === 0) {
+    if (crsWentLive.length === 0) {
       return [];
     }
 
     // Get date range (from oldest endDate to today)
-    const endDates = crsWithEndDate
+    const endDates = crsWentLive
       .map(cr => {
         try {
           return cr.endDate ? cr.endDate.slice(0, 10) : null;
@@ -250,8 +265,8 @@ function calculateGoLiveRate(crInitiatives) {
       currentDate.setMonth(currentDate.getMonth() + 1);
     }
 
-    // Count CRs by month and priority
-    crsWithEndDate.forEach(cr => {
+    // Count CRs that went live by endDate month and priority
+    crsWentLive.forEach(cr => {
       try {
         if (!cr || !cr.endDate) return;
         const endDateStr = cr.endDate.slice(0, 10);
@@ -346,7 +361,7 @@ router.get('/', async (req, res) => {
   
   const normStatus = (s) => String(s || '').toUpperCase().trim();
   const normPriority = (p) => String(p || '').toUpperCase().trim();
-  const normMilestone = (m) => String(m || '').trim();
+  const normMilestone = (m) => normalizeCrMilestonePhase(String(m || '').trim() || '');
 
   const systemImpactedValues = String(systemImpactedId || '')
     .split(',')
@@ -427,8 +442,15 @@ router.get('/', async (req, res) => {
   
   const year = new Date().getFullYear();
   const liveYTD = crInitiatives.filter(i => (i.status && i.status.toUpperCase() === 'LIVE') && (i.updatedAt||'').startsWith(String(year))).length;
-  // Count all Live CRs (not just YTD) - case insensitive
-  const liveCount = crInitiatives.filter(i => i.status && i.status.toUpperCase() === 'LIVE').length;
+  const liveCRs = crInitiatives.filter((i) => normStatus(i.status) === 'LIVE');
+  const liveCount = liveCRs.length;
+  const liveWarrantyCount = liveCRs.filter(
+    (i) => normMilestone(i.milestone) === CR_MILESTONE_LIVE_WARRANTY
+  ).length;
+  const liveFullyLiveCount = liveCRs.filter(
+    (i) => normMilestone(i.milestone) === CR_MILESTONE_FULLY_LIVE
+  ).length;
+  const openCount = crInitiatives.filter((i) => CR_OPEN_STATUSES.has(normStatus(i.status))).length;
   
   // Calculate aging metrics (CRs only) - use filtered list
   const now = new Date();
@@ -531,6 +553,7 @@ router.get('/', async (req, res) => {
 
   res.json({ 
     crs, byStatus, byPriority, byDepartment, byMilestone, liveYTD, liveCount,
+    liveWarrantyCount, liveFullyLiveCount, openCount,
     byStatusBreakdown,
     byPriorityBreakdown,
     byMilestoneBreakdown,
@@ -607,5 +630,13 @@ function calculateMonthlyOpenCRs(crInitiatives) {
   return months;
 }
 
+export {
+  calculateWeeklyTrend,
+  calculateGoLiveRate,
+  calculateOpenBurndown,
+  calculateMonthlyOpenCRs,
+  getWeekKey,
+  getWeekEnd,
+};
 export default router;
 
