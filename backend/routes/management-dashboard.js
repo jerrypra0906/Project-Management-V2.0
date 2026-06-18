@@ -2,6 +2,16 @@ import express from 'express';
 import store from '../store.js';
 import crypto from 'crypto';
 import { requireAdmin } from '../middleware/auth.js';
+import {
+  PROJECT_MILESTONE_LIVE_WARRANTY,
+  PROJECT_MILESTONE_FULLY_LIVE,
+  PROJECT_MILESTONE_LEGACY_LIVE,
+  normalizeProjectMilestone,
+} from '../projectMilestones.js';
+import {
+  matchesDepartmentGroup,
+  isValidDepartmentGroupKey,
+} from '../departmentGroups.js';
 
 const router = express.Router();
 
@@ -24,18 +34,39 @@ function computePortfolioStatus(projects, crs) {
 }
 
 function getMilestoneLabel(m) {
-  const v = String(m || '').trim();
+  const v = normalizeProjectMilestone(String(m || '').trim());
   return v || '—';
+}
+
+function departmentNameById(departments, id) {
+  if (!id) return '—';
+  const dept = (departments || []).find((d) => d.id === id);
+  return dept?.name || '—';
 }
 
 router.use(requireAdmin);
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  const departmentGroupFilter = String(req.query.departmentGroup || '').trim();
+  if (departmentGroupFilter && !isValidDepartmentGroupKey(departmentGroupFilter)) {
+    return res.status(400).json({ error: 'Invalid departmentGroup' });
+  }
+
   const data = await store.read();
   const initiatives = data.initiatives || [];
   const tasks = data.tasks || [];
-  const projects = initiatives.filter((i) => i.type === 'Project');
-  const crs = initiatives.filter((i) => i.type === 'CR');
+  const departments = data.departments || [];
+  let projects = initiatives.filter((i) => i.type === 'Project');
+  let crs = initiatives.filter((i) => i.type === 'CR');
+
+  if (departmentGroupFilter) {
+    projects = projects.filter((p) =>
+      matchesDepartmentGroup(departments, p.departmentId, departmentGroupFilter)
+    );
+    crs = crs.filter((c) =>
+      matchesDepartmentGroup(departments, c.departmentId, departmentGroupFilter)
+    );
+  }
 
   const notesRow = (data.managementDashboard || [])[0] || null;
   const storedPortfolioStatus = String(notesRow?.portfolioStatus || '').trim().toUpperCase();
@@ -122,9 +153,14 @@ router.get('/', async (_req, res) => {
       updatedAt: p.updatedAt || null,
     }));
 
-  // IT Project Lived: all projects in Live status (aging = today − actual end date)
-  const itProjectLived = projects
-    .filter((p) => normalizeStatus(p.status) === 'LIVE')
+  const isLiveWarrantyMilestone = (p) => {
+    const m = normalizeProjectMilestone(p.milestone);
+    return m === PROJECT_MILESTONE_LIVE_WARRANTY || p.milestone === PROJECT_MILESTONE_LEGACY_LIVE;
+  };
+
+  // IT Project Live (Warranty Period): projects at Live (Warranty Period) milestone
+  const itProjectLiveWarranty = projects
+    .filter((p) => isLiveWarrantyMilestone(p))
     .slice()
     .sort((a, b) => {
       const ae = parseDate(a.endDate);
@@ -150,6 +186,38 @@ router.get('/', async (_req, res) => {
         remark: p.remark || null,
       };
     });
+
+  const itProjectFullyLive = projects
+    .filter((p) => p.milestone === PROJECT_MILESTONE_FULLY_LIVE)
+    .slice()
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      department: departmentNameById(departments, p.departmentId),
+      startDate: p.startDate || null,
+      endDate: p.endDate || null,
+      businessImpact: p.businessImpact || null,
+    }));
+
+  const itProjectNotStarted = projects
+    .filter((p) => normalizeStatus(p.status) === 'NOT STARTED')
+    .slice()
+    .sort((a, b) => {
+      const ap = parseDate(a.planStartDate);
+      const bp = parseDate(b.planStartDate);
+      if (ap && bp) return ap.getTime() - bp.getTime();
+      if (ap) return -1;
+      if (bp) return 1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    })
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      planStartDate: p.planStartDate || null,
+      department: departmentNameById(departments, p.departmentId),
+      businessImpact: p.businessImpact || null,
+    }));
 
   // CR funnel: group by CR milestone (phase) instead of fixed buckets.
   const milestoneCounts = new Map();
@@ -233,8 +301,12 @@ router.get('/', async (_req, res) => {
 
   res.json({
     portfolioStatus,
+    departmentGroupFilter: departmentGroupFilter || null,
     timelineProgress: timelineProjects,
-    itProjectLived,
+    itProjectLiveWarranty,
+    itProjectLived: itProjectLiveWarranty,
+    itProjectFullyLive,
+    itProjectNotStarted,
     crFunnel,
     highPriorityCrs,
     risksBlockers,

@@ -1,6 +1,12 @@
 import express from 'express';
 import store from '../store.js';
 import { requireScopes } from '../middleware/auth.js';
+import {
+  normalizeCrMilestonePhase,
+  isValidCrMilestonePhase,
+  crMilestoneMatchesFilter,
+  requiresCrFullyLiveEndDate,
+} from '../crTaskTemplates.js';
 
 const router = express.Router();
 
@@ -18,6 +24,14 @@ function parseArray(v) {
 
 function normalizeUpper(v) {
   return String(v || '').toUpperCase().trim();
+}
+
+function formatCrListItem(initiative, crData) {
+  return {
+    ...initiative,
+    milestone: normalizeCrMilestonePhase(initiative.milestone),
+    cr: crData,
+  };
 }
 
 function applyFilters(rows, reqBody) {
@@ -56,7 +70,7 @@ function applyFilters(rows, reqBody) {
     rows = rows.filter((r) => priorityValues.includes(normalizeUpper(r.priority)));
   }
   if (milestoneValues?.length) {
-    rows = rows.filter((r) => milestoneValues.includes(r.milestone));
+    rows = rows.filter((r) => crMilestoneMatchesFilter(r.milestone, milestoneValues));
   }
   if (deptValues?.length) {
     rows = rows.filter((r) => deptValues.includes(r.departmentId));
@@ -98,94 +112,125 @@ function applySort(rows, sort) {
 }
 
 router.post('/list', requireScopes('cr:read'), async (req, res) => {
-  const page = Math.max(1, Number(req.body?.page || 1));
-  const pageSize = Math.min(500, Math.max(1, Number(req.body?.pageSize || 100)));
+  try {
+    const page = Math.max(1, Number(req.body?.page || 1));
+    const pageSize = Math.min(500, Math.max(1, Number(req.body?.pageSize || 100)));
 
-  const data = await store.read();
-  let rows = (data.initiatives || []).filter((i) => i.type === 'CR');
-  rows = applyFilters(rows, req.body);
-  rows = applySort(rows, req.body?.sort);
+    const data = await store.read();
+    let rows = (data.initiatives || []).filter((i) => i.type === 'CR');
+    rows = applyFilters(rows, req.body);
+    rows = applySort(rows, req.body?.sort);
 
-  const total = rows.length;
-  const start = (page - 1) * pageSize;
-  const end = start + pageSize;
-  const pageItems = rows.slice(start, end).map((initiative) => {
-    const crData = (data.changeRequests || []).find((cr) => cr.initiativeId === initiative.id) || null;
-    return { ...initiative, cr: crData };
-  });
+    const total = rows.length;
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    const pageItems = rows.slice(start, end).map((initiative) => {
+      const crData = (data.changeRequests || []).find((cr) => cr.initiativeId === initiative.id) || null;
+      return formatCrListItem(initiative, crData);
+    });
 
-  res.json({ items: pageItems, page, pageSize, total });
+    res.json({ items: pageItems, page, pageSize, total });
+  } catch (e) {
+    console.error('[api-v1-crs POST /list]', e);
+    res.status(500).json({ error: e.message || 'Failed to list CRs' });
+  }
 });
 
 router.patch('/:id', requireScopes('cr:write'), async (req, res) => {
-  const { id } = req.params;
-  const body = req.body || {};
-  const data = await store.read();
-  const idx = (data.initiatives || []).findIndex((i) => i.id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Not found' });
-  if (data.initiatives[idx].type !== 'CR') return res.status(400).json({ error: 'Not a CR initiative' });
-
-  const allowed = [
-    'ticket',
-    'name',
-    'description',
-    'businessImpact',
-    'priority',
-    'businessOwnerId',
-    'businessUserIds',
-    'departmentId',
-    'itPicId',
-    'itPicIds',
-    'itPmId',
-    'itManagerIds',
-    'systemImpactedIds',
-    'status',
-    'milestone',
-    'startDate',
-    'endDate',
-    'planStartDate',
-    'planEndDate',
-    'remark',
-    'documentationLink',
-  ];
-
-  for (const k of allowed) {
-    if (!(k in body)) continue;
-    const v = body[k];
-    if (k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds') {
-      data.initiatives[idx][k] = Array.isArray(v) ? v : v == null ? [] : [String(v)];
-    } else {
-      data.initiatives[idx][k] = v;
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+    const data = await store.read();
+    const idx = (data.initiatives || []).findIndex((i) => i.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Not found' });
+    if (data.initiatives[idx].type !== 'CR') {
+      return res.status(400).json({ error: 'Not a CR initiative' });
     }
-  }
-  data.initiatives[idx].updatedAt = new Date().toISOString();
 
-  if (body.cr && typeof body.cr === 'object') {
-    if (!data.changeRequests) data.changeRequests = [];
-    let cr = data.changeRequests.find((x) => x.initiativeId === id);
-    if (!cr) {
-      cr = { initiativeId: id };
-      data.changeRequests.push(cr);
+    if ('milestone' in body && body.milestone != null && body.milestone !== '') {
+      if (!isValidCrMilestonePhase(body.milestone)) {
+        return res.status(400).json({ error: 'Invalid CR milestone phase' });
+      }
     }
-    const crAllowed = [
-      'crSubmissionStart',
-      'crSubmissionEnd',
-      'developmentStart',
-      'developmentEnd',
-      'sitStart',
-      'sitEnd',
-      'uatStart',
-      'uatEnd',
-      'liveDate',
+
+    const allowed = [
+      'ticket',
+      'name',
+      'description',
+      'businessImpact',
+      'priority',
+      'businessOwnerId',
+      'businessUserIds',
+      'departmentId',
+      'itPicId',
+      'itPicIds',
+      'itPmId',
+      'itManagerIds',
+      'systemImpactedIds',
+      'status',
+      'milestone',
+      'startDate',
+      'endDate',
+      'planStartDate',
+      'planEndDate',
+      'remark',
+      'documentationLink',
     ];
-    for (const k of crAllowed) {
-      if (k in body.cr) cr[k] = body.cr[k];
-    }
-  }
 
-  await store.write(data);
-  res.json({ ok: true });
+    for (const k of allowed) {
+      if (!(k in body)) continue;
+      let v = body[k];
+      if (k === 'milestone' && v != null && v !== '') {
+        v = normalizeCrMilestonePhase(v);
+      }
+      if (k === 'businessUserIds' || k === 'itPicIds' || k === 'itManagerIds') {
+        data.initiatives[idx][k] = Array.isArray(v) ? v : v == null ? [] : [String(v)];
+      } else {
+        data.initiatives[idx][k] = v;
+      }
+    }
+    data.initiatives[idx].updatedAt = new Date().toISOString();
+
+    const initiative = data.initiatives[idx];
+    if (
+      requiresCrFullyLiveEndDate(initiative.status, initiative.milestone) &&
+      (!initiative.endDate || String(initiative.endDate).trim() === '')
+    ) {
+      return res.status(400).json({
+        error:
+          'Missing required field: endDate (required when Status is Live and Milestone is Fully Live)',
+      });
+    }
+
+    if (body.cr && typeof body.cr === 'object') {
+      if (!data.changeRequests) data.changeRequests = [];
+      let cr = data.changeRequests.find((x) => x.initiativeId === id);
+      if (!cr) {
+        cr = { initiativeId: id };
+        data.changeRequests.push(cr);
+      }
+      const crAllowed = [
+        'crSubmissionStart',
+        'crSubmissionEnd',
+        'developmentStart',
+        'developmentEnd',
+        'sitStart',
+        'sitEnd',
+        'uatStart',
+        'uatEnd',
+        'liveDate',
+      ];
+      for (const k of crAllowed) {
+        if (k in body.cr) cr[k] = body.cr[k];
+      }
+    }
+
+    await store.write(data);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[api-v1-crs PATCH /:id]', e);
+    res.status(500).json({ error: e.message || 'Failed to update CR' });
+  }
 });
 
 export default router;
-

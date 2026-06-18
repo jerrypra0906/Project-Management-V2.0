@@ -137,7 +137,12 @@ router.get('/', async (req, res) => {
         });
       }
       // Projects approaching milestone deadlines
-      if (project.milestone && project.milestone !== 'Live') {
+      if (
+        project.milestone &&
+        project.milestone !== 'Live (Warranty Period)' &&
+        project.milestone !== 'Fully Live' &&
+        project.milestone !== 'Live'
+      ) {
         todos.push({
           id: project.id,
           type: 'Project',
