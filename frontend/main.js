@@ -9111,12 +9111,13 @@ async function renderManagementDashboard() {
     cursor.setMonth(cursor.getMonth() + 3, 1);
   }
 
-  const projectMilestones = PROJECT_MILESTONES;
+  // Timeline progress tracks delivery milestones only; warranty period has its own section.
+  const timelineProgressMilestones = PROJECT_MILESTONES.filter((m) => m !== 'Live (Warranty Period)');
   const milestonePct = (m) => {
     const normalized = normalizeProjectMilestoneForDisplay(m);
-    const idx = projectMilestones.findIndex((x) => String(x).toLowerCase() === String(normalized || '').toLowerCase());
+    const idx = timelineProgressMilestones.findIndex((x) => String(x).toLowerCase() === String(normalized || '').toLowerCase());
     if (idx < 0) return 0;
-    return Math.round((idx / (projectMilestones.length - 1)) * 100);
+    return Math.round((idx / (timelineProgressMilestones.length - 1)) * 100);
   };
 
   const fmtDate = (s) => (s ? String(s).slice(0, 10) : '');
