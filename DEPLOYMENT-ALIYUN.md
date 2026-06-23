@@ -112,7 +112,16 @@ Notes:
 ### 2.2. Start Postgres + backend services
 
 The main `docker-compose.yml` contains three services: `postgres`, `backend`, `frontend`.
-On the backend server we only run **postgres** and **backend**:
+On the backend server we only run **postgres** and **backend**.
+
+**Document uploads must persist on the host.** Before the first start (and after a fresh clone), create the uploads directory:
+
+```bash
+cd /opt/Project-Management-V2.0
+mkdir -p uploads
+```
+
+`docker-compose.yml` binds `./uploads` to `/app/uploads` in the backend container. PostgreSQL stores document metadata only; the actual PDF files live in this folder. **Do not remove this volume mount** — without it, uploaded files are lost when the backend container is recreated (UI will still list them, but download will fail with "File not found on server").
 
 ```bash
 cd /opt/Project-Management-V2.0
@@ -232,8 +241,18 @@ When deploying new backend code:
 cd /opt/Project-Management-V2.0
 git pull origin main
 
+# Ensure uploads directory exists (safe to re-run)
+mkdir -p uploads
+
 docker compose build backend
 docker compose up -d backend
+```
+
+After `docker compose up -d backend`, confirm the uploads bind mount is active:
+
+```bash
+docker inspect project_management_backend --format '{{json .Mounts}}' | python3 -m json.tool
+# Expect: "Source": "/opt/Project-Management-V2.0/uploads", "Destination": "/app/uploads"
 ```
 
 If migrations changed, re‑run the new migration file via `docker exec` as shown above.

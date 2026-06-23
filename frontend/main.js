@@ -5,6 +5,12 @@ import {
 } from './departmentGroups.js';
 
 const app = document.getElementById('app');
+
+// Max upload size per file — aligned with backend multer limit. Frontend never hard-rejects.
+const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_SIZE_KB = MAX_UPLOAD_SIZE_BYTES / 1024;
+const MAX_UPLOAD_SIZE_LABEL = '10MB';
+
 console.log('=== Frontend main.js loaded ===');
 console.log('App element:', app);
 console.log('Current hash:', location.hash);
@@ -146,33 +152,41 @@ let currentUser = null;
 async function getCurrentUser() {
   if (currentUser) return currentUser;
   const token = getToken();
-  if (!token) return null;
-  try {
-    // Decode JWT to get user info (simple decode, not verification - backend verifies)
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    currentUser = { id: payload.sub, email: payload.email, name: payload.name, isAdmin: payload.isAdmin };
-
-    // Enrich with profile fields (role/type/department) so menus don't depend on visiting Profile first.
-    // If this call fails, we still return the decoded token identity.
+  if (token) {
     try {
-      const profile = await fetchJSON('/api/profile');
-      if (profile && typeof profile === 'object') {
-        currentUser = {
-          ...currentUser,
-          role: profile.role ?? currentUser.role,
-          type: profile.type ?? currentUser.type,
-          departmentId: profile.departmentId ?? currentUser.departmentId,
-          active: profile.active ?? currentUser.active,
-          emailActivated: profile.emailActivated ?? currentUser.emailActivated,
-        };
-      }
-    } catch (e) {
-      console.warn('Failed to enrich current user from profile:', e?.message || e);
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      currentUser = { id: payload.sub, email: payload.email, name: payload.name, isAdmin: payload.isAdmin };
+    } catch {
+      return null;
     }
-    return currentUser;
-  } catch {
-    return null;
+  } else {
+    try {
+      const res = await fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) return null;
+      const json = await res.json();
+      if (!json.user) return null;
+      currentUser = json.user;
+    } catch {
+      return null;
+    }
   }
+
+  try {
+    const profile = await fetchJSON('/api/profile');
+    if (profile && typeof profile === 'object') {
+      currentUser = {
+        ...currentUser,
+        role: profile.role ?? currentUser.role,
+        type: profile.type ?? currentUser.type,
+        departmentId: profile.departmentId ?? currentUser.departmentId,
+        active: profile.active ?? currentUser.active,
+        emailActivated: profile.emailActivated ?? currentUser.emailActivated,
+      };
+    }
+  } catch (e) {
+    console.warn('Failed to enrich current user from profile:', e?.message || e);
+  }
+  return currentUser;
 }
 
 // Cached access rules for current user (menus + edit rights)
@@ -505,6 +519,7 @@ function clearUser() {
   CURRENT_ACCESS = null;
   LOOKUPS = { users: [], departments: [], dwsApplications: [] };
   setToken(null);
+  fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
 }
 
 function escapeHtml(text) {
@@ -950,6 +965,7 @@ async function fetchJSON(url, options) {
   const fetchOptions = {
     ...(options || {}),
     cache: 'no-store',
+    credentials: 'include',
     headers,
     signal: options?.signal || controller.signal,
   };
@@ -1005,7 +1021,7 @@ async function fetchJSON(url, options) {
 }
 
 // File compression function - handles images, PDF, Word, Excel
-async function compressFile(file, maxSizeKB = 300) {
+async function compressFile(file, maxSizeKB = MAX_UPLOAD_SIZE_KB) {
   const fileSizeKB = file.size / 1024;
   
   // If file is already under the limit, return as-is
@@ -1043,7 +1059,7 @@ async function compressFile(file, maxSizeKB = 300) {
         console.log(`[PDF Compression] Result: ${compressedSizeKB.toFixed(2)} KB (${reductionPercent}% reduction)`);
         
         // Use compressed version if it's actually smaller (even if still above limit)
-        // This helps reduce file size even if we can't get it under 300KB
+        // This helps reduce file size even if we can't get it under the limit
         if (compressedSizeKB < fileSizeKB) {
           console.log(`[PDF Compression] Using compressed version (${compressedSizeKB.toFixed(2)} KB vs original ${fileSizeKB.toFixed(2)} KB)`);
           return new File([compressedBlob], file.name, {
@@ -1088,8 +1104,8 @@ async function compressFile(file, maxSizeKB = 300) {
   return file;
 }
 
-// Image compression function - targets 300KB
-async function compressImage(file, maxSizeKB = 300) {
+// Image compression function - targets MAX_UPLOAD_SIZE when file exceeds limit
+async function compressImage(file, maxSizeKB = MAX_UPLOAD_SIZE_KB) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -1117,7 +1133,7 @@ async function compressImage(file, maxSizeKB = 300) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
         
-        // Try different quality levels to get under target size (300KB)
+        // Try different quality levels to get under target size
         let quality = 0.9;
         const tryCompress = () => {
           canvas.toBlob((blob) => {
@@ -1149,6 +1165,10 @@ async function compressImage(file, maxSizeKB = 300) {
     reader.onerror = () => resolve(file); // Fallback to original on error
     reader.readAsDataURL(file);
   });
+}
+
+async function compressFileIfNeeded(file) {
+  return compressFile(file, MAX_UPLOAD_SIZE_KB);
 }
 
 let LOOKUPS = { users: [], departments: [], dwsApplications: [] };
@@ -2832,7 +2852,7 @@ function commonFields(initiative = null, defaultType = 'Project', nameLabel = 'I
     formRow('Project Doc Link', `<input name="documentationLink" type="url" value="${initiative?.documentationLink || ''}" />`),
     formRow('Documents', `<input type="file" name="documents" id="documents" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.zip,.rar" />
       <div id="filePreview" style="margin-top: 10px;"></div>
-      <small style="color: #666;">You can select multiple files. Files larger than 300KB will be automatically compressed (images) or may require manual compression (PDF, Word, Excel).</small>`)
+      <small style="color: #666;">You can select multiple files. Maximum size per file is ${MAX_UPLOAD_SIZE_LABEL}. Large images may be compressed automatically before upload.</small>`)
   ];
   console.log('commonFields: Plan Start Date and Plan End Date fields included:', fields.some(f => f.includes('Plan Start Date') || f.includes('Plan End Date')));
   return fields.join('');
@@ -2886,74 +2906,6 @@ async function renderNew(defaultType = 'Project') {
   typeEl.onchange = updateLabelsForType;
   updateLabelsForType(); // Apply initial state
   
-  // Compression function for images - targets 300KB
-  async function compressImage(file, maxSizeKB = 300) {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          let quality = 0.9;
-          
-          // Calculate initial dimensions to get close to target size
-          const maxDimension = 2000; // Max width/height
-          if (width > maxDimension || height > maxDimension) {
-            if (width > height) {
-              height = (height / width) * maxDimension;
-              width = maxDimension;
-            } else {
-              width = (width / height) * maxDimension;
-              height = maxDimension;
-            }
-          }
-          
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          
-          // Try to compress to target size
-          const tryCompress = (q) => {
-            canvas.toBlob((blob) => {
-              if (!blob) {
-                resolve(file); // Fallback to original
-                return;
-              }
-              
-              const sizeKB = blob.size / 1024;
-              if (sizeKB <= maxSizeKB || q <= 0.1) {
-                // Create a new File object with the compressed blob
-                const compressedFile = new File([blob], file.name, {
-                  type: file.type,
-                  lastModified: Date.now()
-                });
-                resolve(compressedFile);
-              } else {
-                // Reduce quality and try again
-                tryCompress(Math.max(0.1, q - 0.1));
-              }
-            }, file.type, q);
-          };
-          
-          tryCompress(quality);
-        };
-        img.onerror = () => resolve(file); // Fallback to original on error
-        img.src = e.target.result;
-      };
-      reader.onerror = () => resolve(file); // Fallback to original on error
-      reader.readAsDataURL(file);
-    });
-  }
-  
-  // Compress file if needed - targets 300KB
-  async function compressFileIfNeeded(file) {
-    const maxSizeKB = 300;
-    return await compressFile(file, maxSizeKB);
-  }
-  
   // File upload handling
   const fileInput = document.getElementById('documents');
   const filePreview = document.getElementById('filePreview');
@@ -2986,7 +2938,7 @@ async function renderNew(defaultType = 'Project') {
             reductionPercent: reductionPercent
           });
           console.log(`[File Compression] ${file.name}: ${(originalSize/1024).toFixed(2)} KB → ${(compressed.size/1024).toFixed(2)} KB (${reductionPercent}% reduction)`);
-        } else if (compressed.size === originalSize && originalSize > 300 * 1024) {
+        } else if (compressed.size === originalSize && originalSize > MAX_UPLOAD_SIZE_BYTES) {
           // File couldn't be compressed (e.g., already optimized)
           compressionInfo.push({ 
             original: originalSize, 
@@ -3016,8 +2968,8 @@ async function renderNew(defaultType = 'Project') {
             }
             
             // Warn if file is still too large
-            const warning = file.size > 300 * 1024 
-              ? `<span style="color: #ff6b6b; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds 300KB${compInfo && compInfo.note ? ' - ' + compInfo.note.toLowerCase() : ' - may need manual compression'}</span>`
+            const warning = file.size > MAX_UPLOAD_SIZE_BYTES
+              ? `<span style="color: #ff9800; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds ${MAX_UPLOAD_SIZE_LABEL} — upload may fail on the server</span>`
               : '';
             
             return `
@@ -3055,8 +3007,8 @@ async function renderNew(defaultType = 'Project') {
               : `<span style="color: #666; font-size: 0.9em;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
             
             // Warn if file is still too large
-            const warning = file.size > 300 * 1024 
-              ? `<span style="color: #ff6b6b; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds 300KB - may need manual compression</span>`
+            const warning = file.size > MAX_UPLOAD_SIZE_BYTES
+              ? `<span style="color: #ff9800; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds ${MAX_UPLOAD_SIZE_LABEL} — upload may fail on the server</span>`
               : '';
             
             return `
@@ -3141,6 +3093,7 @@ async function renderNew(defaultType = 'Project') {
           
           const uploadRes = await fetch('/api/documents', {
             method: 'POST',
+            credentials: 'include',
             headers: token ? { 'Authorization': `Bearer ${token}` } : {},
             body: formData
           });
@@ -3740,10 +3693,10 @@ async function renderView(id) {
         const file = files[i];
         progressBar.style.width = `${((i + 1) / files.length) * 100}%`;
         
-        // Compress file if larger than 300KB
+        // Compress file if larger than limit (optional — never blocks upload)
         let fileToUpload = file;
-        if (file.size > 300 * 1024) {
-          fileToUpload = await compressFile(file, 300);
+        if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+          fileToUpload = await compressFile(file, MAX_UPLOAD_SIZE_KB);
         }
         
         const formData = new FormData();
@@ -5316,7 +5269,7 @@ async function renderEdit(id) {
             reductionPercent: reductionPercent
           });
           console.log(`[File Compression] ${file.name}: ${(originalSize/1024).toFixed(2)} KB → ${(compressed.size/1024).toFixed(2)} KB (${reductionPercent}% reduction)`);
-        } else if (compressed.size === originalSize && originalSize > 300 * 1024) {
+        } else if (compressed.size === originalSize && originalSize > MAX_UPLOAD_SIZE_BYTES) {
           // File couldn't be compressed (e.g., already optimized)
           compressionInfo.push({ 
             original: originalSize, 
@@ -5346,8 +5299,8 @@ async function renderEdit(id) {
             }
             
             // Warn if file is still too large
-            const warning = file.size > 300 * 1024 
-              ? `<span style="color: #ff6b6b; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds 300KB${compInfo && compInfo.note ? ' - ' + compInfo.note.toLowerCase() : ' - may need manual compression'}</span>`
+            const warning = file.size > MAX_UPLOAD_SIZE_BYTES
+              ? `<span style="color: #ff9800; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds ${MAX_UPLOAD_SIZE_LABEL} — upload may fail on the server</span>`
               : '';
             
             return `
@@ -5383,8 +5336,8 @@ async function renderEdit(id) {
               ? `<span style="color: #666; font-size: 0.9em;">${(file.size / 1024).toFixed(1)} KB <span style="color: #28a745;">(compressed from ${(compInfo.original / 1024).toFixed(1)} KB)</span></span>`
               : `<span style="color: #666; font-size: 0.9em;">(${(file.size / 1024).toFixed(1)} KB)</span>`;
             
-            const warning = file.size > 300 * 1024 
-              ? `<span style="color: #ff6b6b; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds 300KB - may need manual compression</span>`
+            const warning = file.size > MAX_UPLOAD_SIZE_BYTES
+              ? `<span style="color: #ff9800; font-size: 0.9em; margin-left: 8px;">⚠️ File exceeds ${MAX_UPLOAD_SIZE_LABEL} — upload may fail on the server</span>`
               : '';
             
             return `
@@ -10876,6 +10829,7 @@ function renderAuth() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      credentials: 'include',
     });
     const json = await res.json();
     if (!res.ok) {
@@ -10951,11 +10905,6 @@ const PROTECTED_ROUTES = ['#list', '#crlist', '#dashboard', '#crdashboard', '#ne
 const ADMIN_ROUTES = ['#admin', '#admin-users', '#admin-roles', '#master-dws', '#management-dashboard'];
 
 async function requireAuth() {
-  const token = getToken();
-  if (!token) {
-    location.hash = '#auth';
-    return false;
-  }
   const user = await getCurrentUser();
   if (!user) {
     clearUser();
@@ -11183,12 +11132,9 @@ async function router() {
   
   // Default route: if logged in, go to dashboard; otherwise, go to auth
   let defaultRoute = '#auth';
-  const token = getToken();
-  if (token) {
-    const user = await getCurrentUser();
-    if (user) {
-      defaultRoute = '#user-dashboard';
-    }
+  const user = await getCurrentUser();
+  if (user) {
+    defaultRoute = '#user-dashboard';
   }
   
   const h = location.hash || defaultRoute;

@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import morgan from 'morgan';
 import path from 'path';
@@ -11,7 +12,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+app.use(cors({ credentials: true }));
+app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
 
@@ -30,6 +32,7 @@ import crDashboardRouter from './routes/cr-dashboard.js';
 import dailySnapshotsRouter from './routes/daily-snapshots.js';
 import lookupsRouter from './routes/lookups.js';
 import authRouter from './routes/auth.js';
+import oidcAuthRouter from './routes/oidc-auth.js';
 import adminRouter from './routes/admin.js';
 import userDashboardRouter from './routes/user-dashboard.js';
 import commentsRouter from './routes/comments.js';
@@ -43,6 +46,9 @@ import { requestTimeout } from './middleware/timeout.js';
 import apiV1CrsRouter from './routes/api-v1-crs.js';
 import dwsApplicationsRouter from './routes/dws-applications.js';
 import managementDashboardRouter from './routes/management-dashboard.js';
+
+// Downstream Hub OIDC callback (must be on backend, not SPA)
+app.use('/auth', oidcAuthRouter);
 
 // Public routes
 app.use('/api/auth', authRouter);
@@ -117,6 +123,30 @@ if (process.env.NODE_ENV !== 'production' || process.env.SERVE_FRONTEND === 'tru
   frontendApp.use(express.json());
   frontendApp.use(cors());
   
+  frontendApp.use(cors({ credentials: true }));
+
+  // Proxy Hub OIDC /auth routes to backend
+  frontendApp.use('/auth', (req, res) => {
+    const headers = { ...req.headers };
+    headers.host = `localhost:${PORT}`;
+    const options = {
+      hostname: 'localhost',
+      port: PORT,
+      path: req.originalUrl,
+      method: req.method,
+      headers,
+    };
+    const proxyReq = http.request(options, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res);
+    });
+    proxyReq.on('error', (err) => {
+      console.error('Proxy error (auth):', err);
+      if (!res.headersSent) res.status(500).json({ error: 'Backend server not available' });
+    });
+    req.pipe(proxyReq);
+  });
+
   // Proxy API requests to backend
   frontendApp.use('/api', (req, res) => {
     const options = {
@@ -149,7 +179,7 @@ if (process.env.NODE_ENV !== 'production' || process.env.SERVE_FRONTEND === 'tru
   
   // SPA routing - serve index.html for all non-API routes
   frontendApp.get('*', (req, res) => {
-    if (!req.path.startsWith('/api') && !req.path.startsWith('/docs')) {
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/docs') && !req.path.startsWith('/auth')) {
       res.sendFile(path.join(frontendPath, 'index.html'));
     }
   });

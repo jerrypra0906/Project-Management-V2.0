@@ -1,11 +1,20 @@
 import jwt from 'jsonwebtoken';
 import store from '../store.js';
+import { AUTH_COOKIE_NAME } from '../lib/authConstants.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
-export async function authenticateToken(req, res, next) {
+function getTokenFromRequest(req) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  const bearer = authHeader && authHeader.split(' ')[1];
+  if (bearer) return bearer;
+  const fromCookie = req.cookies && req.cookies[AUTH_COOKIE_NAME];
+  if (typeof fromCookie === 'string' && fromCookie.length > 0) return fromCookie;
+  return null;
+}
+
+export async function authenticateToken(req, res, next) {
+  const token = getTokenFromRequest(req);
 
   if (!token) {
     return res.status(401).json({ error: 'Authentication required' });
@@ -43,8 +52,9 @@ export async function authenticateToken(req, res, next) {
       return res.status(401).json({ error: 'User not found or inactive' });
     }
 
-    // Check email activation for non-admin users
-    if (!user.isAdmin && !user.emailActivated) {
+    // Check email activation for non-admin users (Hub SSO users are activated on link/JIT)
+    const hubSsoUser = user.authSource === 'hub' || user.hubSub;
+    if (!user.isAdmin && !user.emailActivated && !hubSsoUser) {
       return res.status(403).json({ error: 'Email not activated. Please check your email for activation link.' });
     }
 

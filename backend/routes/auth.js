@@ -5,6 +5,9 @@ import store from '../store.js';
 import crypto from 'crypto';
 import { isEmailDomainAllowed, sendActivationEmail } from '../services/email.js';
 import nodemailer from 'nodemailer';
+import { findUserByEmail } from '../lib/userLookup.js';
+import { authenticateToken } from '../middleware/auth.js';
+import { setAuthCookie, signUserToken, clearAuthCookie } from '../lib/session.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
@@ -38,11 +41,24 @@ function createEmailTransporter() {
   return nodemailer.createTransport(transportOptions);
 }
 
-async function findUserByEmail(email) {
-  const data = await store.read();
-  const lower = String(email || '').toLowerCase();
-  return data.users.find(u => String(u.email || '').toLowerCase() === lower) || null;
-}
+router.get('/me', authenticateToken, (req, res) => {
+  if (req.user.type === 'client') {
+    return res.status(403).json({ error: 'User session required' });
+  }
+  res.json({
+    user: {
+      id: req.user.id,
+      email: req.user.email,
+      name: req.user.name,
+      isAdmin: req.user.isAdmin,
+    },
+  });
+});
+
+router.post('/logout', (_req, res) => {
+  clearAuthCookie(res);
+  res.json({ ok: true });
+});
 
 router.post('/register', async (req, res) => {
   try {
@@ -225,15 +241,13 @@ router.post('/login', async (req, res) => {
     console.log('[LOGIN] Creating JWT token');
     let token;
     try {
-      token = jwt.sign(
-        { sub: user.id, email: user.email || '', name: user.name || '', isAdmin: userIsAdmin },
-        JWT_SECRET,
-        { expiresIn: '8h' }
-      );
+      token = signUserToken(user);
     } catch (jwtError) {
       console.error('[LOGIN] JWT signing error:', jwtError);
       return res.status(500).json({ error: 'Token generation error', details: jwtError.message });
     }
+
+    setAuthCookie(res, token);
     
     console.log('[LOGIN] Login successful');
     return res.json({

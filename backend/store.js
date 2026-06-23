@@ -49,6 +49,8 @@ async function initializeSchema() {
       ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "resetTokenExpiry" TEXT;
       ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "type" TEXT;
       ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "teamMemberIds" TEXT;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "hubSub" TEXT;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "authSource" TEXT;
       CREATE TABLE IF NOT EXISTS "initiatives" (
         "id" TEXT PRIMARY KEY,
         "type" TEXT NOT NULL,
@@ -511,6 +513,8 @@ async function read() {
           resetTokenExpiry: row.resetTokenExpiry || row.resettokenexpiry || null,
           type: row.type || null,
           teamMemberIds: row.teamMemberIds || row.teammemberids ? (row.teamMemberIds || row.teammemberids).split(',').filter(Boolean) : [],
+          hubSub: row.hubSub || row.hubsub || null,
+          authSource: row.authSource || row.authsource || null,
           createdAt: row.createdAt || row.createdat || null
         }));
       } else if (table === 'initiatives') {
@@ -742,7 +746,7 @@ async function writeImpl(data) {
     }
 
     const insertUser =
-      'INSERT INTO "users"("id", "name", "email", "role", "type", "departmentId", "active", "passwordHash", "isAdmin", "emailActivated", "activationToken", "activationTokenExpiry", "resetToken", "resetTokenExpiry", "teamMemberIds") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)';
+      'INSERT INTO "users"("id", "name", "email", "role", "type", "departmentId", "active", "passwordHash", "isAdmin", "emailActivated", "activationToken", "activationTokenExpiry", "resetToken", "resetTokenExpiry", "teamMemberIds", "hubSub", "authSource") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)';
     for (const u of data.users || []) {
       // Convert teamMemberIds array to comma-separated string
       const teamMemberIds = Array.isArray(u.teamMemberIds) ? u.teamMemberIds.join(',') : (u.teamMemberIds || null);
@@ -762,6 +766,8 @@ async function writeImpl(data) {
         u.resetToken || null,
         u.resetTokenExpiry || null,
         teamMemberIds,
+        u.hubSub || null,
+        u.authSource || null,
       ]);
     }
 
